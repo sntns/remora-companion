@@ -56,3 +56,19 @@ developing this), and Windows/macOS disk support.
 cargo build --workspace
 cargo test --workspace
 ```
+
+## CI / packaging
+
+- `.github/workflows/ci.yml` — build/test/clippy/fmt on ubuntu/windows/macos
+  for the main workspace (`crates/core` + `crates/cli`, fully portable — no
+  external tool is shelled out to by that code or its tests), plus a
+  Linux-only job that runs `crates/ext4-spike`'s own suite (that one genuinely
+  needs `mke2fs`/`tune2fs`/`fsck.ext4`/`debugfs` — dev/CI validation tooling
+  only, never shipped).
+- `.github/workflows/release.yml` — on a `v*` tag, builds release binaries
+  for `x86_64`/`aarch64` Linux, `x86_64` Windows, and `x86_64`/`aarch64`
+  macOS, packages them (`.tar.gz`/`.zip`, plus a `.deb` for `x86_64` Linux
+  via `cargo-deb`), and attaches them to a draft GitHub release.
+- Linux `.deb` packaging is driven by `[package.metadata.deb]` in
+  `crates/cli/Cargo.toml` (mirrors `remora-disk`'s own metadata) — validated
+  locally with `cargo deb -p remora-etcher`.

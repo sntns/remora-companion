@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            deb: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+            cross_linker_pkg: gcc-aarch64-linux-gnu
+            cross_linker_env: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - if: matrix.cross_linker_pkg
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.cross_linker_pkg }}
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.cross_linker_env }}" ]; then
+            export ${{ matrix.cross_linker_env }}
+          fi
+          cargo build --release -p remora-etcher --target ${{ matrix.target }}
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          bin=target/${{ matrix.target }}/release/remora-etcher
+          out=remora-etcher-${{ matrix.target }}.tar.gz
+          tar -C "$(dirname "$bin")" -czf "$out" "$(basename "$bin")"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          bin=target/${{ matrix.target }}/release/remora-etcher.exe
+          out=remora-etcher-${{ matrix.target }}.zip
+          7z a "$out" "$bin"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Package (.deb)
+        if: matrix.deb
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb -p remora-etcher --target ${{ matrix.target }} --no-build
+          echo "DEB_ASSET=$(ls target/${{ matrix.target }}/debian/*.deb)" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remora-etcher-${{ matrix.target }}
+          path: |
+            ${{ env.ASSET }}
+            ${{ env.DEB_ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true
