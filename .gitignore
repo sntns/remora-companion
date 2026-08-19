@@ -13,6 +13,16 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Real device secrets extracted from a tplstOS ISO's TPLST_CONF partition
+# for analysis (activation token, association hash, auth tokens embedded
+# in auto-config.json). Never commit this.
+/export/
+
+# Real device account/media data (tplst_data.tar) and app installer
+# extracted from the same ISO's TPLST_DATA partition. Large + not ours to
+# redistribute — never commit this either.
+/export_data/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

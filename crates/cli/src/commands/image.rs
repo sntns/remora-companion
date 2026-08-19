@@ -2,7 +2,7 @@ use std::{fmt, path::PathBuf};
 
 use clap::ValueEnum;
 use remora_etcher_core::{
-    application::image::{self as image_app, InjectRequest},
+    application::image::{self as image_app, InjectRequest, MkdirRequest},
     model::partition_table::{
         BootMode, PartitionRole, PartitionSelector, PartitionTable, TableKind,
     },
@@ -64,6 +64,31 @@ pub enum PartitionCommand {
 
         /// File mode (permission bits) for the created file.
         #[arg(long, default_value_t = 0o644)]
+        mode: u16,
+    },
+
+    /// Create a directory inside one partition's ext4 filesystem (the
+    /// parent of `dest_path` must already exist — not recursive).
+    Mkdir {
+        /// Destination path inside the partition's filesystem, e.g.
+        /// `/play/tplst-app-config`.
+        dest_path: String,
+
+        /// Image file or block device to modify.
+        #[arg(long)]
+        image: PathBuf,
+
+        /// Which partition: a raw index (as printed by `partition list`),
+        /// or a Remora role name (shared/efi/slota/slotb/data — requires
+        /// --boot-mode).
+        #[arg(long)]
+        partition: String,
+
+        #[arg(long, value_enum)]
+        boot_mode: Option<BootModeArg>,
+
+        /// Directory mode (permission bits) for the created directory.
+        #[arg(long, default_value_t = 0o755)]
         mode: u16,
     },
 }
@@ -159,6 +184,25 @@ pub fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             };
             image_app::inject(&request)?;
             println!("wrote {dest_path} inside {}", image.display());
+            Ok(())
+        }
+        Command::Partition(PartitionCommand::Mkdir {
+            dest_path,
+            image,
+            partition,
+            boot_mode,
+            mode,
+        }) => {
+            let selector = parse_partition_selector(&partition)?;
+            let request = MkdirRequest {
+                image: image.clone(),
+                dest_path: dest_path.clone(),
+                partition: selector,
+                boot_mode: boot_mode.map(BootMode::from),
+                mode,
+            };
+            image_app::mkdir(&request)?;
+            println!("created {dest_path} inside {}", image.display());
             Ok(())
         }
     }
