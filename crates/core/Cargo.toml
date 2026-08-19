@@ -1,0 +1,11 @@
+[package]
+name = "remora-etcher-core"
+description = "Core library for remora-etcher: squashfs building, disk-image partition manipulation, and bmap-aware flashing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+backhand = "0.25"
+walkdir = "2.5"
+tracing = "0.1"

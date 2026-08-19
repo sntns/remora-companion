@@ -1,0 +1,35 @@
+[package]
+name = "remora-etcher"
+description = "Standalone provisioning and flashing tool for Remora devices"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "remora-etcher"
+path = "src/main.rs"
+
+[dependencies]
+remora-etcher-core = { path = "../core" }
+clap = { version = "4.5", features = ["derive", "cargo"] }
+tracing = "0.1"
+
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+[package.metadata.deb]
+maintainer = "Lionel Molinier <lionel.molinier@sentiens.fr>"
+copyright = "2026, Sentiens SAS <copyright@sentiens.fr>"
+license-file = ["../../LICENSE", "4"]
+extended-description = """\
+Remora Etcher is a standalone provisioning and flashing tool for Remora \
+devices. It builds squashfs images, injects files into disk-image \
+partitions, and flashes images to removable media, bmaptool-style."""
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/remora-etcher", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/cargo-deb/README", "644"],
+]
