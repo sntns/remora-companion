@@ -1,0 +1,27 @@
+# Throwaway Phase 3 validation spike for `am-fs-ext4` (rust-fs-ext4). Deliberately
+# NOT a member of the workspace root Cargo.toml — this crate exists only to
+# answer the go/no-go question in the project plan (adopt / fork-and-narrow /
+# escalate) and is never depended on by remora-etcher-core or the CLI.
+[workspace]
+
+[package]
+name = "ext4-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+am-fs-ext4 = "0.4"
+
+# 0.4.0 (and 0.3.3, 0.3.2 — every published version) fails to build at all on
+# aarch64 (and any other target where `c_char` is unsigned):
+# `capi.rs::dir_entry_to_bridge` hardcodes `[0i8; 256]` against a
+# `[c_char; 256]` struct field. Fixed upstream PR open at
+# https://github.com/christhomas/rust-fs-ext4/pull/36 (one-line fix); in the
+# meantime this points at our fork's `remora-etcher` branch, which carries
+# that same fix plus dropping the `../rust-fs-core` sibling-checkout path dep
+# (upstream rewrites that to a registry dep at `cargo publish` time; a git
+# dependency needs it dropped directly instead — see that branch's own commit
+# message). Once #36 merges and releases, drop this patch entirely.
+[patch.crates-io]
+am-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }
