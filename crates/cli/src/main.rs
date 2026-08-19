@@ -27,14 +27,19 @@ enum Commands {
     /// Build and inspect squashfs images.
     #[command(subcommand)]
     Squashfs(commands::squashfs::Command),
+
+    /// List, inspect, and flash disks.
+    #[command(subcommand)]
+    Disk(commands::disk::Command),
 }
 
 fn main() {
     let options = Options::parse();
     init_tracing(&options);
 
-    let result = match options.command {
-        Commands::Squashfs(cmd) => commands::squashfs::run(cmd),
+    let result: Result<(), Box<dyn std::error::Error>> = match options.command {
+        Commands::Squashfs(cmd) => commands::squashfs::run(cmd).map_err(Into::into),
+        Commands::Disk(cmd) => commands::disk::run(cmd),
     };
 
     if let Err(err) = result {
