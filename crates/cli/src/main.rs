@@ -31,6 +31,10 @@ enum Commands {
     /// List, inspect, and flash disks.
     #[command(subcommand)]
     Disk(commands::disk::Command),
+
+    /// Inspect and list partitions of an image or device.
+    #[command(subcommand)]
+    Image(commands::image::Command),
 }
 
 fn main() {
@@ -40,6 +44,7 @@ fn main() {
     let result: Result<(), Box<dyn std::error::Error>> = match options.command {
         Commands::Squashfs(cmd) => commands::squashfs::run(cmd).map_err(Into::into),
         Commands::Disk(cmd) => commands::disk::run(cmd),
+        Commands::Image(cmd) => commands::image::run(cmd).map_err(Into::into),
     };
 
     if let Err(err) = result {

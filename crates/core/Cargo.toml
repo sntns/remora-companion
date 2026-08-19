@@ -8,5 +8,7 @@ license.workspace = true
 [dependencies]
 backhand = "0.25"
 bmap-parser = "0.2"
+gptman = "3"
+mbrman = "0.5"
 walkdir = "2.5"
 tracing = "0.1"

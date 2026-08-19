@@ -21,10 +21,15 @@ Early scaffold. Implemented so far:
   overwrite what looks like the system disk, and refuses a non-removable
   disk unless `--force`; also prompts for the device path to be typed back
   unless `--yes`.
+- `remora-etcher image inspect` / `image partition list` — read an image's or
+  device's MBR/GPT partition table (auto-detected via `mbrman`/`gptman`,
+  pure Rust) and, with `--boot-mode efi|bios|uboot|rpi`, annotate each
+  partition with its Remora role (shared/efi/slotA/slotB/data) per
+  meta-remora's `REMORA_PART_*_INDEX` tables.
 
-Not yet implemented (see the project plan): MBR/GPT partition-table parsing,
-injecting files into a wic image's `data` partition, and Windows/macOS disk
-support.
+Not yet implemented (see the project plan): injecting files into a wic
+image's ext4 `data` partition (the `rust-fs-ext4` validation spike), and
+Windows/macOS disk support.
 
 ## Workspace layout
 
