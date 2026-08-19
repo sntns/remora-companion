@@ -44,7 +44,7 @@ fn main() {
     let result: Result<(), Box<dyn std::error::Error>> = match options.command {
         Commands::Squashfs(cmd) => commands::squashfs::run(cmd).map_err(Into::into),
         Commands::Disk(cmd) => commands::disk::run(cmd),
-        Commands::Image(cmd) => commands::image::run(cmd).map_err(Into::into),
+        Commands::Image(cmd) => commands::image::run(cmd),
     };
 
     if let Err(err) = result {

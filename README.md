@@ -26,10 +26,22 @@ Early scaffold. Implemented so far:
   pure Rust) and, with `--boot-mode efi|bios|uboot|rpi`, annotate each
   partition with its Remora role (shared/efi/slotA/slotB/data) per
   meta-remora's `REMORA_PART_*_INDEX` tables.
+- `remora-etcher image partition cp <src> <dest-path> --image <path>
+  --partition data|<index> [--boot-mode ...]` — copy a local file into an
+  already-existing directory inside one partition's ext4 filesystem (e.g.
+  the `data` partition), via the pure-Rust `am-fs-ext4` crate. No temporary
+  extraction: it mounts a byte-range window directly inside the larger disk
+  image. Validated against `am-fs-ext4`'s real production feature
+  combination (metadata_csum + 64bit + uninit_bg, matching
+  `remora-mount`'s own `tune2fs` call) with a real `e2fsck -f` pass — see
+  `crates/ext4-spike` for the validation spike and its findings, including
+  an upstream aarch64 build fix
+  ([PR #36](https://github.com/christhomas/rust-fs-ext4/pull/36)) tracked
+  via our fork until it merges and releases.
 
-Not yet implemented (see the project plan): injecting files into a wic
-image's ext4 `data` partition (the `rust-fs-ext4` validation spike), and
-Windows/macOS disk support.
+Not yet implemented (see the project plan): field validation against an
+actual meta-remora-produced wic image (no built image was available while
+developing this), and Windows/macOS disk support.
 
 ## Workspace layout
 

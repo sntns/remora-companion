@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableKind {
     Mbr,
@@ -87,6 +89,67 @@ impl BootMode {
         PartitionRole::ALL
             .into_iter()
             .find(|&role| self.index_of(role) == Some(index))
+    }
+}
+
+/// How the CLI/caller identifies which partition to act on — always
+/// explicit, never auto-detected, for write operations (see the project
+/// plan's safety notes on partition selection).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartitionSelector {
+    /// Raw partition index, as printed by `image partition list`.
+    Index(u32),
+    /// A Remora role (shared/efi/slotA/slotB/data), resolved to an index via
+    /// a required `BootMode`.
+    Role(PartitionRole),
+}
+
+#[derive(Debug)]
+pub enum SelectionError {
+    RoleRequiresBootMode(PartitionRole),
+    RoleNotPresentInBootMode(PartitionRole, BootMode),
+    NoSuchPartition(u32),
+}
+
+impl fmt::Display for SelectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SelectionError::RoleRequiresBootMode(role) => {
+                write!(f, "selecting partition role {role:?} requires --boot-mode")
+            }
+            SelectionError::RoleNotPresentInBootMode(role, mode) => {
+                write!(f, "boot mode {mode:?} has no {role:?} partition")
+            }
+            SelectionError::NoSuchPartition(index) => {
+                write!(f, "no partition with index {index} in this table")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SelectionError {}
+
+impl PartitionTable {
+    /// Resolve `selector` to a concrete partition already present in this
+    /// table. Never guesses: an index that isn't in the table, or a role
+    /// this boot mode doesn't have, is an error rather than a fallback.
+    pub fn select(
+        &self,
+        selector: PartitionSelector,
+        boot_mode: Option<BootMode>,
+    ) -> Result<&PartitionEntry, SelectionError> {
+        let index = match selector {
+            PartitionSelector::Index(index) => index,
+            PartitionSelector::Role(role) => {
+                let mode = boot_mode.ok_or(SelectionError::RoleRequiresBootMode(role))?;
+                mode.index_of(role)
+                    .ok_or(SelectionError::RoleNotPresentInBootMode(role, mode))?
+            }
+        };
+        self.partitions
+            .iter()
+            .find(|p| p.index == index)
+            .ok_or(SelectionError::NoSuchPartition(index))
     }
 }
 

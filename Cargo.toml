@@ -10,3 +10,12 @@ license = "CLOSED"
 # Control binary size, matching remora-disk's profile.
 [profile.release]
 lto = true
+
+# am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
+# aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes
+# an i8 array against a c_char field, which is unsigned there. One-line fix
+# upstream: https://github.com/christhomas/rust-fs-ext4/pull/36. Until that
+# merges and releases, use our fork's branch (also drops a sibling-checkout
+# path dep that only resolves in the upstream repo's own dev environment).
+[patch.crates-io]
+am-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }

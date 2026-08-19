@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+am-fs-ext4 = "0.4"
 backhand = "0.25"
 bmap-parser = "0.2"
 gptman = "3"
