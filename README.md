@@ -33,9 +33,9 @@ Early scaffold. Implemented so far:
   extraction: it mounts a byte-range window directly inside the larger disk
   image. Validated against `am-fs-ext4`'s real production feature
   combination (metadata_csum + 64bit + uninit_bg, matching
-  `remora-mount`'s own `tune2fs` call) with a real `e2fsck -f` pass — see
-  `crates/ext4-spike` for the validation spike and its findings, including
-  an upstream aarch64 build fix
+  `remora-mount`'s own `tune2fs` call) with a real `e2fsck -f` pass — see the
+  "spike: validate am-fs-ext4 for phase 3" commit for the validation spike
+  and its findings, including an upstream aarch64 build fix
   ([PR #36](https://github.com/christhomas/rust-fs-ext4/pull/36)) tracked
   via our fork until it merges and releases.
 
@@ -60,11 +60,8 @@ cargo test --workspace
 ## CI / packaging
 
 - `.github/workflows/ci.yml` — build/test/clippy/fmt on ubuntu/windows/macos
-  for the main workspace (`crates/core` + `crates/cli`, fully portable — no
-  external tool is shelled out to by that code or its tests), plus a
-  Linux-only job that runs `crates/ext4-spike`'s own suite (that one genuinely
-  needs `mke2fs`/`tune2fs`/`fsck.ext4`/`debugfs` — dev/CI validation tooling
-  only, never shipped).
+  for the workspace (`crates/core` + `crates/cli`, fully portable — no
+  external tool is shelled out to by that code or its tests).
 - `.github/workflows/release.yml` — on a `v*` tag, builds release binaries
   for `x86_64`/`aarch64` Linux, `x86_64` Windows, and `x86_64`/`aarch64`
   macOS, packages them (`.tar.gz`/`.zip`, plus a `.deb` for `x86_64` Linux

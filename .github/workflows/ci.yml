@@ -9,9 +9,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # crates/core + crates/cli only (the root workspace) — deliberately
-  # excludes crates/ext4-spike, which has its own [workspace] table and
-  # needs Linux-only tools (mke2fs/debugfs/sfdisk); see the `ext4-spike` job.
   test:
     strategy:
       fail-fast: false
@@ -29,19 +26,3 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
-
-  # Validates the phase-3 ext4 spike's own findings still hold. Linux-only:
-  # this is exactly the dev/CI validation tooling (mke2fs/tune2fs/fsck.ext4/
-  # debugfs/sfdisk) the project's own "no external dependency" rule is
-  # about the *shipped binary* never needing, not about CI.
-  ext4-spike:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/ext4-spike
-      - run: sudo apt-get update && sudo apt-get install -y e2fsprogs util-linux
-      - run: cargo test
-        working-directory: crates/ext4-spike

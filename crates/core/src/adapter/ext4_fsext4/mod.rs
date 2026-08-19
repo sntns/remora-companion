@@ -1,9 +1,9 @@
-//! Thin wrapper around `am-fs-ext4` (the `fs_ext4` crate — see the phase-3
-//! spike at `crates/ext4-spike` for how this was validated), narrowed to
-//! exactly the operation `remora-etcher image partition cp` needs: create
-//! one file inside an already-existing directory of an ext4 filesystem that
-//! lives at a byte-range window inside a larger disk image or device, and
-//! write its content.
+//! Thin wrapper around `am-fs-ext4` (the `fs_ext4` crate — validated in the
+//! phase-3 spike, see the "spike: validate am-fs-ext4 for phase 3" commit),
+//! narrowed to exactly the operation `remora-etcher image partition cp`
+//! needs: create one file inside an already-existing directory of an ext4
+//! filesystem that lives at a byte-range window inside a larger disk image
+//! or device, and write its content.
 //!
 //! Deliberately not journaled beyond what `apply_create`/`apply_pwrite`
 //! themselves do — this is a one-shot CLI operation on a device that isn't
