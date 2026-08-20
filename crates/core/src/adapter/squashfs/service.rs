@@ -1,40 +1,13 @@
-//! Thin wrapper around the `backhand` crate: the only place in this codebase
-//! that knows about backhand's own types. Everything else works in terms of
-//! `crate::model::squashfs` types.
-
-use std::{fmt, fs::File, io, path::PathBuf};
+use std::{fs::File, io, path::PathBuf};
 
 use backhand::{
-    v4::compressor::Compressor as BackhandCompressor, BackhandError, FilesystemCompressor,
-    FilesystemReader, FilesystemWriter, NodeHeader,
+    v4::compressor::Compressor as BackhandCompressor, FilesystemCompressor, FilesystemReader,
+    FilesystemWriter, NodeHeader,
 };
 
 use crate::model::squashfs::{BuildOptions, Compression, Entry, EntryKind};
 
-#[derive(Debug)]
-pub enum Error {
-    Backhand(BackhandError),
-    OpenInput { path: PathBuf, source: io::Error },
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Backhand(e) => write!(f, "backhand error: {e}"),
-            Error::OpenInput { path, source } => {
-                write!(f, "failed to open {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<BackhandError> for Error {
-    fn from(e: BackhandError) -> Self {
-        Error::Backhand(e)
-    }
-}
+use super::error::Error;
 
 fn map_compressor(compression: Compression) -> BackhandCompressor {
     match compression {

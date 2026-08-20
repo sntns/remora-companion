@@ -1,5 +1,6 @@
-pub mod bmap_bmapparser;
-pub mod disk_enum;
-pub mod ext4_fsext4;
+pub mod bmap;
+pub mod disk;
+pub mod ext4;
 pub mod partition_table;
-pub mod squashfs_backhand;
+pub mod squashfs;
+pub mod vfat;

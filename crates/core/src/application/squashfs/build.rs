@@ -7,7 +7,7 @@ use std::{
 use walkdir::WalkDir;
 
 use crate::{
-    adapter::squashfs_backhand,
+    adapter::squashfs,
     model::squashfs::{BuildOptions, Entry, EntryKind, EntryMetadata},
 };
 
@@ -60,8 +60,7 @@ pub fn build(
         source,
     })?;
 
-    let bytes_written =
-        squashfs_backhand::write(&entries, options, image_mtime, root_owner, out_file)?;
+    let bytes_written = squashfs::write(&entries, options, image_mtime, root_owner, out_file)?;
 
     Ok(BuildSummary {
         entry_count: entries.len(),

@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use crate::adapter::squashfs_backhand::{self, InspectedEntry};
+use crate::adapter::squashfs::{self, InspectedEntry};
 
 use super::error::Error;
 
@@ -9,5 +9,5 @@ pub fn inspect(image: &Path) -> Result<Vec<InspectedEntry>, Error> {
         path: image.to_path_buf(),
         source,
     })?;
-    Ok(squashfs_backhand::inspect(file)?)
+    Ok(squashfs::inspect(file)?)
 }

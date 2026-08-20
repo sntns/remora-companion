@@ -1,11 +1,11 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    adapter::{ext4_fsext4, partition_table},
+    adapter::partition_table,
     model::partition_table::{BootMode, PartitionSelector},
 };
 
-use super::error::Error;
+use super::{error::Error, fs_dispatch};
 
 #[derive(Debug, Clone)]
 pub struct InjectRequest {
@@ -34,7 +34,7 @@ pub fn inject(request: &InjectRequest) -> Result<(), Error> {
         source,
     })?;
 
-    ext4_fsext4::write_file(
+    fs_dispatch::write_file(
         &request.image,
         entry.start_bytes,
         entry.size_bytes,

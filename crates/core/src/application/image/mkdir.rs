@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use crate::{
-    adapter::{ext4_fsext4, partition_table},
+    adapter::partition_table,
     model::partition_table::{BootMode, PartitionSelector},
 };
 
-use super::error::Error;
+use super::{error::Error, fs_dispatch};
 
 #[derive(Debug, Clone)]
 pub struct MkdirRequest {
@@ -26,7 +26,7 @@ pub fn mkdir(request: &MkdirRequest) -> Result<(), Error> {
     let table = partition_table::read(&request.image)?;
     let entry = table.select(request.partition, request.boot_mode)?;
 
-    ext4_fsext4::create_dir(
+    fs_dispatch::create_dir(
         &request.image,
         entry.start_bytes,
         entry.size_bytes,

@@ -1,30 +1,8 @@
-//! Thin wrapper around the `bmap-parser` crate (Collabora's Rust rewrite of
-//! `bmaptool`). It already provides a ready sparse-copy-with-checksum
-//! primitive (`bmap_parser::copy`), so this module does not reimplement the
-//! `.bmap` format or the copy loop — it only adapts types/errors.
-
-use std::{fmt, io::Read, io::Write};
+use std::io::{Read, Write};
 
 use bmap_parser::Bmap;
 
-#[derive(Debug)]
-pub enum Error {
-    // bmap-parser's XML error type is not nameable from outside the crate
-    // (it's defined in a private submodule), so it's boxed here instead.
-    ParseBmap(Box<dyn std::error::Error>),
-    Copy(bmap_parser::CopyError),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::ParseBmap(e) => write!(f, "failed to parse .bmap file: {e}"),
-            Error::Copy(e) => write!(f, "failed to copy image: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
+use super::error::Error;
 
 /// Parsed `.bmap` file plus the handful of fields callers need to report
 /// progress (mapped size vs. full image size).

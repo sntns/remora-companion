@@ -1,10 +1,10 @@
 use std::fmt;
 
-use crate::adapter::disk_enum;
+use crate::adapter::disk;
 
 #[derive(Debug)]
 pub enum Error {
-    Enumerate(disk_enum::Error),
+    Enumerate(disk::Error),
 }
 
 impl fmt::Display for Error {
@@ -17,8 +17,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<disk_enum::Error> for Error {
-    fn from(e: disk_enum::Error) -> Self {
+impl From<disk::Error> for Error {
+    fn from(e: disk::Error) -> Self {
         Error::Enumerate(e)
     }
 }

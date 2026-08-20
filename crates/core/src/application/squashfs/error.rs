@@ -1,6 +1,6 @@
 use std::{fmt, io, path::PathBuf};
 
-use crate::{adapter::squashfs_backhand, model};
+use crate::{adapter::squashfs, model};
 
 #[derive(Debug)]
 pub enum Error {
@@ -8,7 +8,7 @@ pub enum Error {
     NoInputs,
     Walk { path: PathBuf, source: io::Error },
     UnsupportedEntry { path: PathBuf },
-    Build(squashfs_backhand::Error),
+    Build(squashfs::Error),
     CreateOutput { path: PathBuf, source: io::Error },
     OpenInput { path: PathBuf, source: io::Error },
 }
@@ -43,8 +43,8 @@ impl From<model::error::Error> for Error {
     }
 }
 
-impl From<squashfs_backhand::Error> for Error {
-    fn from(e: squashfs_backhand::Error) -> Self {
+impl From<squashfs::Error> for Error {
+    fn from(e: squashfs::Error) -> Self {
         Error::Build(e)
     }
 }

@@ -1,13 +1,13 @@
 use std::{fmt, io, path::PathBuf};
 
-use crate::adapter::bmap_bmapparser;
+use crate::adapter::bmap;
 
 #[derive(Debug)]
 pub enum Error {
     OpenImage { path: PathBuf, source: io::Error },
     OpenBmap { path: PathBuf, source: io::Error },
     OpenDevice { path: PathBuf, source: io::Error },
-    Bmap(bmap_bmapparser::Error),
+    Bmap(bmap::Error),
     UnsafeTarget { path: PathBuf, reason: &'static str },
 }
 
@@ -33,8 +33,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<bmap_bmapparser::Error> for Error {
-    fn from(e: bmap_bmapparser::Error) -> Self {
+impl From<bmap::Error> for Error {
+    fn from(e: bmap::Error) -> Self {
         Error::Bmap(e)
     }
 }

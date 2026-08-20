@@ -68,21 +68,13 @@ impl BootMode {
 
     /// Partition index for `role` in this boot mode, or `None` if this mode
     /// has no such partition (only `PartitionRole::Efi`, outside EFI mode).
+    ///
+    /// Delegates to `TableKind::index_of` — BIOS/UBOOT/RPI share one MBR
+    /// table (only their *filesystem type* on shared/slotA/slotB differs,
+    /// see `FsKind`/`detect_fs_kind`), so the four-way `BootMode` distinction
+    /// was never actually load-bearing for role→index resolution.
     pub fn index_of(self, role: PartitionRole) -> Option<u32> {
-        use PartitionRole::*;
-        match (self, role) {
-            (BootMode::Efi, Shared) => Some(1),
-            (BootMode::Efi, Efi) => Some(2),
-            (BootMode::Efi, SlotA) => Some(3),
-            (BootMode::Efi, SlotB) => Some(4),
-            (BootMode::Efi, Data) => Some(5),
-
-            (_, Efi) => None,
-            (_, Shared) => Some(1),
-            (_, SlotA) => Some(2),
-            (_, SlotB) => Some(3),
-            (_, Data) => Some(4),
-        }
+        self.table_kind().index_of(role)
     }
 
     pub fn role_of(self, index: u32) -> Option<PartitionRole> {
@@ -90,6 +82,38 @@ impl BootMode {
             .into_iter()
             .find(|&role| self.index_of(role) == Some(index))
     }
+}
+
+impl TableKind {
+    /// Partition index for `role` under this table kind, or `None` if no
+    /// such partition exists (only `PartitionRole::Efi`, which only GPT/EFI
+    /// mode has). GPT here always means the EFI layout; every MBR-based
+    /// mode (BIOS/UBOOT/RPI) shares this same 4-partition table.
+    pub fn index_of(self, role: PartitionRole) -> Option<u32> {
+        use PartitionRole::*;
+        match (self, role) {
+            (TableKind::Gpt, Shared) => Some(1),
+            (TableKind::Gpt, Efi) => Some(2),
+            (TableKind::Gpt, SlotA) => Some(3),
+            (TableKind::Gpt, SlotB) => Some(4),
+            (TableKind::Gpt, Data) => Some(5),
+
+            (TableKind::Mbr, Efi) => None,
+            (TableKind::Mbr, Shared) => Some(1),
+            (TableKind::Mbr, SlotA) => Some(2),
+            (TableKind::Mbr, SlotB) => Some(3),
+            (TableKind::Mbr, Data) => Some(4),
+        }
+    }
+}
+
+/// Whether a partition is formatted as ext4 or vfat — a structural fact
+/// determined by content (see `adapter::partition_table::detect_fs_kind`),
+/// never asked of the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FsKind {
+    Ext4,
+    Vfat,
 }
 
 /// How the CLI/caller identifies which partition to act on — always
@@ -108,6 +132,7 @@ pub enum PartitionSelector {
 pub enum SelectionError {
     RoleRequiresBootMode(PartitionRole),
     RoleNotPresentInBootMode(PartitionRole, BootMode),
+    RoleNotPresentInTable(PartitionRole, TableKind),
     NoSuchPartition(u32),
 }
 
@@ -119,6 +144,9 @@ impl fmt::Display for SelectionError {
             }
             SelectionError::RoleNotPresentInBootMode(role, mode) => {
                 write!(f, "boot mode {mode:?} has no {role:?} partition")
+            }
+            SelectionError::RoleNotPresentInTable(role, kind) => {
+                write!(f, "a {kind:?} table has no {role:?} partition")
             }
             SelectionError::NoSuchPartition(index) => {
                 write!(f, "no partition with index {index} in this table")
@@ -146,6 +174,22 @@ impl PartitionTable {
                     .ok_or(SelectionError::RoleNotPresentInBootMode(role, mode))?
             }
         };
+        self.partitions
+            .iter()
+            .find(|p| p.index == index)
+            .ok_or(SelectionError::NoSuchPartition(index))
+    }
+
+    /// Resolve `role` using this table's own detected `kind` — no boot mode
+    /// needed, since role→index resolution only ever depends on GPT vs MBR
+    /// (see `TableKind::index_of`), which is already known once the table's
+    /// been read. Used by the Phase 5 identity/config routines, which must
+    /// not require a `--boot-mode` flag.
+    pub fn select_role(&self, role: PartitionRole) -> Result<&PartitionEntry, SelectionError> {
+        let index = self
+            .kind
+            .index_of(role)
+            .ok_or(SelectionError::RoleNotPresentInTable(role, self.kind))?;
         self.partitions
             .iter()
             .find(|p| p.index == index)

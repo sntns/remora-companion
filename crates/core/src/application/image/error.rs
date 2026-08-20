@@ -1,16 +1,15 @@
 use std::{fmt, io, path::PathBuf};
 
-use crate::{
-    adapter::{ext4_fsext4, partition_table},
-    model::partition_table::SelectionError,
-};
+use crate::{adapter::partition_table, model::partition_table::SelectionError};
+
+use super::partition_fs::PartitionFsError;
 
 #[derive(Debug)]
 pub enum Error {
     ReadPartitionTable(partition_table::Error),
     SelectPartition(SelectionError),
     ReadSource { path: PathBuf, source: io::Error },
-    Write(ext4_fsext4::Error),
+    Write(PartitionFsError),
 }
 
 impl fmt::Display for Error {
@@ -40,8 +39,8 @@ impl From<SelectionError> for Error {
     }
 }
 
-impl From<ext4_fsext4::Error> for Error {
-    fn from(e: ext4_fsext4::Error) -> Self {
+impl From<PartitionFsError> for Error {
+    fn from(e: PartitionFsError) -> Self {
         Error::Write(e)
     }
 }

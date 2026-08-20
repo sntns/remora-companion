@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{adapter::bmap_bmapparser::BlockMap, model::disk::DiskInfo};
+use crate::{adapter::bmap::BlockMap, model::disk::DiskInfo};
 
 use super::error::Error;
 
@@ -68,14 +68,14 @@ pub fn flash(request: &FlashRequest, info: &DiskInfo) -> Result<FlashOutcome, Er
         })?;
         let map = BlockMap::parse(&xml)?;
         let bytes_written = map.total_mapped_size();
-        crate::adapter::bmap_bmapparser::copy_with_bmap(&mut image, &mut device, &map)?;
+        crate::adapter::bmap::copy_with_bmap(&mut image, &mut device, &map)?;
         Ok(FlashOutcome {
             bytes_written,
             used_bmap: true,
         })
     } else {
         let bytes_written = image.metadata().map(|m| m.len()).unwrap_or(0);
-        crate::adapter::bmap_bmapparser::copy_without_bmap(&mut image, &mut device)?;
+        crate::adapter::bmap::copy_without_bmap(&mut image, &mut device)?;
         Ok(FlashOutcome {
             bytes_written,
             used_bmap: false,

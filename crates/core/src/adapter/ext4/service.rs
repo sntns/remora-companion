@@ -1,89 +1,13 @@
-//! Thin wrapper around `am-fs-ext4` (the `fs_ext4` crate — validated in the
-//! phase-3 spike, see the "spike: validate am-fs-ext4 for phase 3" commit),
-//! narrowed to exactly the operation `remora-etcher image partition cp`
-//! needs: create one file inside an already-existing directory of an ext4
-//! filesystem that lives at a byte-range window inside a larger disk image
-//! or device, and write its content.
-//!
-//! Deliberately not journaled beyond what `apply_create`/`apply_pwrite`
-//! themselves do — this is a one-shot CLI operation on a device that isn't
-//! concurrently mounted elsewhere, the same class of risk `wic cp`/`debugfs`
-//! already carry.
-
 use std::{
-    fmt,
     fs::{File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::PathBuf,
+    io::{Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
 
 use fs_ext4::block_io::BlockDevice;
 use fs_ext4::Filesystem;
 
-#[derive(Debug)]
-pub enum Error {
-    Open {
-        path: PathBuf,
-        source: io::Error,
-    },
-    OutOfWindow {
-        path: PathBuf,
-        offset: u64,
-        len: u64,
-        window_size: u64,
-    },
-    /// The `needs_recovery` (`INCOMPAT_RECOVER`) superblock flag is set —
-    /// refused before ever calling `Filesystem::mount()`. Found by hand
-    /// against a real device-like image (a qemu-booted, uncleanly-shut-down
-    /// wic image): with `journal_64bit`+`journal_checksum_v3`, `mount()`
-    /// itself fails *and* leaves the superblock zeroed/unreadable behind —
-    /// a real corruption, not just a returned error. Until that's fixed
-    /// upstream, this check is the only thing standing between "journal
-    /// needs replay" and a wrecked partition.
-    NeedsJournalRecovery {
-        path: PathBuf,
-    },
-    Ext4(fs_ext4::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Open { path, source } => {
-                write!(f, "failed to open {}: {source}", path.display())
-            }
-            Error::OutOfWindow {
-                path,
-                offset,
-                len,
-                window_size,
-            } => write!(
-                f,
-                "partition window [{offset}, {}) does not fit inside {} ({window_size} bytes)",
-                offset + len,
-                path.display()
-            ),
-            Error::NeedsJournalRecovery { path } => write!(
-                f,
-                "{}: filesystem needs journal recovery (needs_recovery flag set) — \
-                 refusing to mount rather than risk am-fs-ext4 corrupting the superblock \
-                 on this journal feature combination; run a real `fsck.ext4 -y` on it \
-                 (or let the device boot once and shut down cleanly) first",
-                path.display()
-            ),
-            Error::Ext4(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<fs_ext4::Error> for Error {
-    fn from(e: fs_ext4::Error) -> Self {
-        Error::Ext4(e)
-    }
-}
+use super::error::Error;
 
 /// A `BlockDevice` that's really just `[offset, offset + size)` of a larger
 /// file — a wic image's `data` partition, typically — so `am-fs-ext4` can
@@ -228,7 +152,15 @@ fn mount_window(image: &std::path::Path, offset: u64, size: u64) -> Result<Files
 
 /// Create `dest_path` (parent directory must already exist) inside the
 /// ext4 filesystem occupying `[offset, offset + size)` of `image`, and
-/// write `contents` to it.
+/// write `contents` to it. If `dest_path` already exists, it's unlinked and
+/// recreated fresh (needed by `application::config::upload`'s add-or-update
+/// routine) rather than erroring — deliberately *not*
+/// `apply_replace_file_content`, which frees the old blocks and allocates
+/// the new run inside one journal transaction: for a multi-megabyte file
+/// (e.g. an 8 MiB config.ext4 written into a real, journaled shared
+/// partition) that transaction's descriptor block overflows
+/// ("too many tags"). Unlink-then-create keeps each step within its own,
+/// already-exercised transaction shape.
 pub fn write_file(
     image: &std::path::Path,
     offset: u64,
@@ -238,9 +170,55 @@ pub fn write_file(
     mode: u16,
 ) -> Result<(), Error> {
     let fs = mount_window(image, offset, size)?;
-    fs.apply_create(dest_path, mode)?;
-    fs.apply_pwrite(dest_path, 0, contents)?;
+    match fs.apply_create(dest_path, mode) {
+        Ok(_) => {
+            fs.apply_pwrite(dest_path, 0, contents)?;
+        }
+        Err(fs_ext4::Error::AlreadyExists) => {
+            fs.apply_unlink(dest_path)?;
+            fs.apply_create(dest_path, mode)?;
+            fs.apply_pwrite(dest_path, 0, contents)?;
+        }
+        Err(e) => return Err(Error::Ext4(e)),
+    }
     Ok(())
+}
+
+/// Read the whole content of `dest_path` inside the ext4 filesystem
+/// occupying `[offset, offset + size)` of `image`.
+pub fn read_file(
+    image: &std::path::Path,
+    offset: u64,
+    size: u64,
+    dest_path: &str,
+) -> Result<Vec<u8>, Error> {
+    let fs = mount_window(image, offset, size)?;
+    let mut reader = |ino: u32| fs.read_inode_verified(ino).map(|(inode, _)| inode);
+    let ino = fs_ext4::path::lookup(fs.dev.as_ref(), &fs.sb, &mut reader, dest_path)?;
+    let (inode, raw) = fs.read_inode_verified(ino)?;
+    let bytes = if inode.has_inline_data() {
+        fs_ext4::file_io::read_inline(&fs, &inode, &raw)?
+    } else {
+        fs_ext4::file_io::read_all(&fs, &inode)?
+    };
+    Ok(bytes)
+}
+
+/// Whether `dest_path` exists inside the ext4 filesystem occupying
+/// `[offset, offset + size)` of `image`.
+pub fn exists(
+    image: &std::path::Path,
+    offset: u64,
+    size: u64,
+    dest_path: &str,
+) -> Result<bool, Error> {
+    let fs = mount_window(image, offset, size)?;
+    let mut reader = |ino: u32| fs.read_inode_verified(ino).map(|(inode, _)| inode);
+    match fs_ext4::path::lookup(fs.dev.as_ref(), &fs.sb, &mut reader, dest_path) {
+        Ok(_) => Ok(true),
+        Err(fs_ext4::Error::NotFound) => Ok(false),
+        Err(e) => Err(Error::Ext4(e)),
+    }
 }
 
 /// Create directory `dest_path` (parent directory must already exist)
@@ -255,6 +233,37 @@ pub fn create_dir(
 ) -> Result<(), Error> {
     let fs = mount_window(image, offset, size)?;
     fs.apply_mkdir(dest_path, mode)?;
+    Ok(())
+}
+
+/// Format `image` (created/truncated to exactly `size_bytes`) as a fresh
+/// ext4 filesystem — the "mkfs" half of `mkfs.ext4 -d CONFIG_DIR`, decomposed
+/// since `am-fs-ext4`'s `format_filesystem` has no populate-at-format option
+/// (the populate half is `create_dir`/`write_file` above, called afterwards
+/// by `application::ext4image::build`).
+pub fn format(
+    image: &std::path::Path,
+    size_bytes: u64,
+    block_size: u32,
+    label: Option<&str>,
+) -> Result<(), Error> {
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(image)
+        .map_err(|source| Error::Open {
+            path: image.to_path_buf(),
+            source,
+        })?;
+    file.set_len(size_bytes).map_err(|source| Error::Open {
+        path: image.to_path_buf(),
+        source,
+    })?;
+    drop(file);
+
+    let dev = WindowedFileDevice::open_rw(image, 0, size_bytes)?;
+    fs_ext4::mkfs::format_filesystem(&dev, label, None, size_bytes, block_size)?;
     Ok(())
 }
 
@@ -312,5 +321,72 @@ mod tests {
         bytes[1024 + EXT4_MAGIC_OFFSET + 1] = 0x00;
         let path = write_temp(&bytes);
         assert!(refuse_if_needs_journal_recovery(&path, 0).is_ok());
+    }
+
+    #[test]
+    fn format_then_mkdir_and_write_file_round_trips() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "remora-etcher-ext4-fsext4-format-test-{}",
+            std::process::id()
+        ));
+
+        format(&path, 8 * 1024 * 1024, 1024, Some("config")).unwrap();
+        create_dir(&path, 0, 8 * 1024 * 1024, "/tzdata", 0o755).unwrap();
+        write_file(
+            &path,
+            0,
+            8 * 1024 * 1024,
+            "/hello",
+            b"hello from remora-etcher\n",
+            0o644,
+        )
+        .unwrap();
+
+        let status = std::process::Command::new("fsck.ext4")
+            .args(["-n", "-f"])
+            .arg(&path)
+            .status()
+            .expect("fsck.ext4 not available");
+        assert!(status.success(), "fsck.ext4 reported the image as unclean");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_file_overwrites_and_read_file_and_exists_round_trip() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "remora-etcher-ext4-fsext4-overwrite-test-{}",
+            std::process::id()
+        ));
+
+        format(&path, 8 * 1024 * 1024, 1024, Some("config")).unwrap();
+
+        assert!(!exists(&path, 0, 8 * 1024 * 1024, "/timezone").unwrap());
+
+        write_file(
+            &path,
+            0,
+            8 * 1024 * 1024,
+            "/timezone",
+            b"Europe/Paris\n",
+            0o644,
+        )
+        .unwrap();
+        assert!(exists(&path, 0, 8 * 1024 * 1024, "/timezone").unwrap());
+        assert_eq!(
+            read_file(&path, 0, 8 * 1024 * 1024, "/timezone").unwrap(),
+            b"Europe/Paris\n"
+        );
+
+        // Overwriting with shorter content must replace, not append.
+        write_file(&path, 0, 8 * 1024 * 1024, "/timezone", b"UTC\n", 0o644).unwrap();
+        assert_eq!(
+            read_file(&path, 0, 8 * 1024 * 1024, "/timezone").unwrap(),
+            b"UTC\n"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -35,6 +35,16 @@ enum Commands {
     /// Inspect and list partitions of an image or device.
     #[command(subcommand)]
     Image(commands::image::Command),
+
+    /// Build identity.squashfs and/or inject it into an image's shared
+    /// partition.
+    #[command(subcommand)]
+    Identity(commands::identity::Command),
+
+    /// Build config.ext4 and/or upload files into an image's shared
+    /// partition.
+    #[command(subcommand)]
+    Config(commands::config::Command),
 }
 
 fn main() {
@@ -45,6 +55,8 @@ fn main() {
         Commands::Squashfs(cmd) => commands::squashfs::run(cmd).map_err(Into::into),
         Commands::Disk(cmd) => commands::disk::run(cmd),
         Commands::Image(cmd) => commands::image::run(cmd),
+        Commands::Identity(cmd) => commands::identity::run(cmd).map_err(Into::into),
+        Commands::Config(cmd) => commands::config::run(cmd),
     };
 
     if let Err(err) = result {
