@@ -1,0 +1,16 @@
+[package]
+name = "remora-etcher-flash-application"
+description = "Use-case implementation for the flash vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-disk = { path = "../remora-etcher-disk" }
+remora-etcher-flash = { path = "../remora-etcher-flash" }
+error-stack.workspace = true
+
+[dev-dependencies]
+# Real (not mocked) adapter, for an integration-style test of the use case
+# end to end — same posture as the other application crates' tests.
+remora-etcher-flash-adapter-bmap = { path = "../remora-etcher-flash-adapter-bmap" }

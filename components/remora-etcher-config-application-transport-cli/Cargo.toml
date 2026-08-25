@@ -1,0 +1,12 @@
+[package]
+name = "remora-etcher-config-application-transport-cli"
+description = "clap subcommands exposing the config application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-config = { path = "../remora-etcher-config" }
+remora-etcher-format = { path = "../remora-etcher-format" }
+clap.workspace = true
+error-stack.workspace = true

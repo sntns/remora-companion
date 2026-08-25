@@ -95,6 +95,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +216,18 @@ name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
+
+[[package]]
+name = "busybody"
+version = "1.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db41fd537cda267fec16337f5922f1efc129e2b55c15083bca1cf6a774e35a89"
+dependencies = [
+ "async-trait",
+ "futures",
+ "tokio",
+ "ulid",
+]
 
 [[package]]
 name = "caseless"
@@ -412,7 +430,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
 dependencies = [
  "generic-array",
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
  "zeroize",
 ]
@@ -609,7 +627,7 @@ dependencies = [
  "generic-array",
  "group",
  "pkcs8",
- "rand_core",
+ "rand_core 0.6.4",
  "sec1",
  "subtle",
  "zeroize",
@@ -620,6 +638,16 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "error-stack"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d01a8d4d427153bae0c38ca68d7912cbf9903fdcc97ecac18801738b3656a46d"
+dependencies = [
+ "anyhow",
+ "rustc_version",
+]
 
 [[package]]
 name = "fatfs"
@@ -637,7 +665,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
 ]
 
@@ -788,13 +816,25 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi 5.3.0",
+ "wasip2",
+]
+
+[[package]]
+name = "getrandom"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 6.0.0",
 ]
 
 [[package]]
@@ -816,7 +856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
- "rand_core",
+ "rand_core 0.6.4",
  "subtle",
 ]
 
@@ -1065,7 +1105,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand",
+ "rand 0.8.7",
  "smallvec",
  "zeroize",
 ]
@@ -1155,7 +1195,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
- "rand_core",
+ "rand_core 0.6.4",
  "sha2 0.10.9",
 ]
 
@@ -1258,6 +1298,12 @@ dependencies = [
 
 [[package]]
 name = "r-efi"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
@@ -1275,8 +1321,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
- "rand_chacha",
- "rand_core",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -1286,7 +1342,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -1296,6 +1362,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+dependencies = [
+ "getrandom 0.3.4",
 ]
 
 [[package]]
@@ -1339,26 +1414,318 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "remora-etcher"
 version = "0.1.0"
 dependencies = [
+ "busybody",
  "clap",
- "remora-etcher-core",
+ "remora-etcher-config",
+ "remora-etcher-config-application",
+ "remora-etcher-config-application-transport-cli",
+ "remora-etcher-disk",
+ "remora-etcher-disk-adapter-native",
+ "remora-etcher-disk-application",
+ "remora-etcher-disk-application-transport-cli",
+ "remora-etcher-flash",
+ "remora-etcher-flash-adapter-bmap",
+ "remora-etcher-flash-application",
+ "remora-etcher-flash-application-transport-cli",
+ "remora-etcher-fs-walk",
+ "remora-etcher-identity",
+ "remora-etcher-identity-adapter-keygen",
+ "remora-etcher-identity-application",
+ "remora-etcher-identity-application-transport-cli",
+ "remora-etcher-image",
+ "remora-etcher-image-adapter-ext4",
+ "remora-etcher-image-adapter-partition-table",
+ "remora-etcher-image-adapter-vfat",
+ "remora-etcher-image-application",
+ "remora-etcher-image-application-transport-cli",
+ "remora-etcher-scratch",
+ "remora-etcher-squashfs",
+ "remora-etcher-squashfs-adapter-backhand",
+ "remora-etcher-squashfs-application",
+ "remora-etcher-squashfs-application-transport-cli",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
-name = "remora-etcher-core"
+name = "remora-etcher-config"
+version = "0.1.0"
+dependencies = [
+ "busybody",
+ "error-stack",
+ "remora-etcher-squashfs",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-config-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-config",
+ "remora-etcher-fs-walk",
+ "remora-etcher-image",
+ "remora-etcher-image-adapter-ext4",
+ "remora-etcher-image-adapter-partition-table",
+ "remora-etcher-image-adapter-vfat",
+ "remora-etcher-image-application",
+ "remora-etcher-scratch",
+ "remora-etcher-squashfs",
+]
+
+[[package]]
+name = "remora-etcher-config-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-config",
+ "remora-etcher-format",
+]
+
+[[package]]
+name = "remora-etcher-disk"
+version = "0.1.0"
+dependencies = [
+ "busybody",
+ "error-stack",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-disk-adapter-native"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-disk",
+]
+
+[[package]]
+name = "remora-etcher-disk-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-disk",
+]
+
+[[package]]
+name = "remora-etcher-disk-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-disk",
+ "remora-etcher-format",
+]
+
+[[package]]
+name = "remora-etcher-flash"
+version = "0.1.0"
+dependencies = [
+ "bmap-parser",
+ "busybody",
+ "error-stack",
+ "remora-etcher-disk",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-flash-adapter-bmap"
+version = "0.1.0"
+dependencies = [
+ "bmap-parser",
+ "error-stack",
+ "remora-etcher-flash",
+]
+
+[[package]]
+name = "remora-etcher-flash-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-disk",
+ "remora-etcher-flash",
+ "remora-etcher-flash-adapter-bmap",
+]
+
+[[package]]
+name = "remora-etcher-flash-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-disk",
+ "remora-etcher-flash",
+ "remora-etcher-format",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-format"
+version = "0.1.0"
+
+[[package]]
+name = "remora-etcher-fs-walk"
+version = "0.1.0"
+dependencies = [
+ "busybody",
+ "error-stack",
+ "thiserror 1.0.69",
+ "walkdir",
+]
+
+[[package]]
+name = "remora-etcher-identity"
+version = "0.1.0"
+dependencies = [
+ "busybody",
+ "error-stack",
+ "remora-etcher-squashfs",
+ "ssh-key",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-identity-adapter-keygen"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "rand 0.8.7",
+ "remora-etcher-identity",
+ "ssh-key",
+]
+
+[[package]]
+name = "remora-etcher-identity-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-fs-walk",
+ "remora-etcher-identity",
+ "remora-etcher-identity-adapter-keygen",
+ "remora-etcher-image",
+ "remora-etcher-image-adapter-ext4",
+ "remora-etcher-image-adapter-partition-table",
+ "remora-etcher-image-adapter-vfat",
+ "remora-etcher-image-application",
+ "remora-etcher-scratch",
+ "remora-etcher-squashfs",
+ "remora-etcher-squashfs-adapter-backhand",
+ "remora-etcher-squashfs-application",
+ "ssh-key",
+]
+
+[[package]]
+name = "remora-etcher-identity-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-format",
+ "remora-etcher-identity",
+]
+
+[[package]]
+name = "remora-etcher-image"
 version = "0.1.0"
 dependencies = [
  "am-fs-ext4",
- "backhand",
- "bmap-parser",
+ "busybody",
+ "error-stack",
  "fatfs",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-image-adapter-ext4"
+version = "0.1.0"
+dependencies = [
+ "am-fs-ext4",
+ "error-stack",
+ "remora-etcher-image",
+]
+
+[[package]]
+name = "remora-etcher-image-adapter-partition-table"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
  "gptman",
  "mbrman",
- "rand",
- "ssh-key",
- "tracing",
- "walkdir",
+ "remora-etcher-image",
+]
+
+[[package]]
+name = "remora-etcher-image-adapter-vfat"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "fatfs",
+ "remora-etcher-image",
+]
+
+[[package]]
+name = "remora-etcher-image-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-image",
+]
+
+[[package]]
+name = "remora-etcher-image-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-format",
+ "remora-etcher-image",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-scratch"
+version = "0.1.0"
+
+[[package]]
+name = "remora-etcher-squashfs"
+version = "0.1.0"
+dependencies = [
+ "backhand",
+ "busybody",
+ "error-stack",
+ "remora-etcher-fs-walk",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-squashfs-adapter-backhand"
+version = "0.1.0"
+dependencies = [
+ "backhand",
+ "error-stack",
+ "remora-etcher-squashfs",
+]
+
+[[package]]
+name = "remora-etcher-squashfs-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-fs-walk",
+ "remora-etcher-squashfs",
+ "remora-etcher-squashfs-adapter-backhand",
+]
+
+[[package]]
+name = "remora-etcher-squashfs-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-format",
+ "remora-etcher-squashfs",
 ]
 
 [[package]]
@@ -1384,7 +1751,7 @@ dependencies = [
  "num-traits",
  "pkcs1",
  "pkcs8",
- "rand_core",
+ "rand_core 0.6.4",
  "sha2 0.10.9",
  "signature",
  "spki",
@@ -1519,7 +1886,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
- "rand_core",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -1593,7 +1960,7 @@ dependencies = [
  "p256",
  "p384",
  "p521",
- "rand_core",
+ "rand_core 0.6.4",
  "rsa",
  "sec1",
  "sha2 0.10.9",
@@ -1730,6 +2097,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tokio"
+version = "1.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+dependencies = [
+ "pin-project-lite",
+ "tokio-macros",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1827,6 +2215,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "ulid"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
+dependencies = [
+ "rand 0.9.5",
+ "web-time",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1876,6 +2274,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
+name = "wasip2"
+version = "1.0.4+wasi-0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487"
+dependencies = [
+ "wit-bindgen",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1918,6 +2325,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef64dbcc55df09c7e5a46182d181c2cfa3e925f3da937ea764728b4bbb9dcbf"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2029,6 +2446,12 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "wit-bindgen"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wyz"

@@ -1,0 +1,12 @@
+[package]
+name = "remora-etcher-fs-walk"
+description = "Shared host-filesystem tree walker (port + walkdir-backed implementation), used by any vertical that builds an image from a directory tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+walkdir = "2.5"

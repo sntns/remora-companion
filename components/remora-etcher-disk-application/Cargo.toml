@@ -1,0 +1,10 @@
+[package]
+name = "remora-etcher-disk-application"
+description = "Use-case implementation for the disk vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-disk = { path = "../remora-etcher-disk" }
+error-stack.workspace = true

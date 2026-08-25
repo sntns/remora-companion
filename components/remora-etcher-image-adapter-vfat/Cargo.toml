@@ -1,0 +1,11 @@
+[package]
+name = "remora-etcher-image-adapter-vfat"
+description = "Concrete VfatAdapter (and PartitionFilesystem impl): wraps fatfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-image = { path = "../remora-etcher-image" }
+error-stack.workspace = true
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }

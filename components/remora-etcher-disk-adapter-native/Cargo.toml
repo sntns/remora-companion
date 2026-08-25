@@ -1,0 +1,10 @@
+[package]
+name = "remora-etcher-disk-adapter-native"
+description = "Concrete DiskAdapter: enumerates disks via native OS facilities (/sys/block + /proc/self/mountinfo on Linux)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-disk = { path = "../remora-etcher-disk" }
+error-stack.workspace = true

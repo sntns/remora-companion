@@ -1,0 +1,16 @@
+[package]
+name = "remora-etcher-squashfs"
+description = "Domain crate for the squashfs vertical: BuildOptions model, the SquashfsAdapter port, and the squashfs application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+# Error::Backhand wraps this crate's own error type directly rather than
+# reimplementing it as a pure domain type — same rationale as
+# remora-etcher-flash's BlockMap / remora-etcher-image's ext4/fatfs errors.
+backhand = "0.25"

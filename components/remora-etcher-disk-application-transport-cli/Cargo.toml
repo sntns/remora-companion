@@ -1,0 +1,12 @@
+[package]
+name = "remora-etcher-disk-application-transport-cli"
+description = "clap subcommands exposing the disk application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-disk = { path = "../remora-etcher-disk" }
+remora-etcher-format = { path = "../remora-etcher-format" }
+clap.workspace = true
+error-stack.workspace = true

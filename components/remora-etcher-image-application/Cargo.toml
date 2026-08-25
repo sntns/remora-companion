@@ -1,0 +1,10 @@
+[package]
+name = "remora-etcher-image-application"
+description = "Use-case implementation for the image vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-image = { path = "../remora-etcher-image" }
+error-stack.workspace = true

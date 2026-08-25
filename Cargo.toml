@@ -1,6 +1,36 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/cli"]
+members = [
+    "components/remora-etcher-format",
+    "components/remora-etcher-disk",
+    "components/remora-etcher-disk-application",
+    "components/remora-etcher-disk-adapter-native",
+    "components/remora-etcher-disk-application-transport-cli",
+    "components/remora-etcher-flash",
+    "components/remora-etcher-flash-application",
+    "components/remora-etcher-flash-adapter-bmap",
+    "components/remora-etcher-flash-application-transport-cli",
+    "components/remora-etcher-image",
+    "components/remora-etcher-image-application",
+    "components/remora-etcher-image-adapter-partition-table",
+    "components/remora-etcher-image-adapter-ext4",
+    "components/remora-etcher-image-adapter-vfat",
+    "components/remora-etcher-image-application-transport-cli",
+    "components/remora-etcher-fs-walk",
+    "components/remora-etcher-squashfs",
+    "components/remora-etcher-squashfs-application",
+    "components/remora-etcher-squashfs-adapter-backhand",
+    "components/remora-etcher-squashfs-application-transport-cli",
+    "components/remora-etcher-scratch",
+    "components/remora-etcher-identity",
+    "components/remora-etcher-identity-application",
+    "components/remora-etcher-identity-adapter-keygen",
+    "components/remora-etcher-identity-application-transport-cli",
+    "components/remora-etcher-config",
+    "components/remora-etcher-config-application",
+    "components/remora-etcher-config-application-transport-cli",
+    "containers/remora-etcher",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +40,17 @@ license = "CLOSED"
 # Control binary size, matching remora-disk's profile.
 [profile.release]
 lto = true
+
+# Shared across every components/*-application and containers/* crate, so the
+# DI convention (port + newtype wrapper, manual composition root) and error
+# convention (thiserror leaf + error-stack context at boundaries) stay
+# identical everywhere, matching remora-edge.
+[workspace.dependencies]
+busybody = "1.0.16"
+error-stack = "0.8"
+thiserror = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+clap = { version = "4.5", features = ["derive", "cargo"] }
 
 # am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
 # aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes

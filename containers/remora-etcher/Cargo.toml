@@ -1,0 +1,63 @@
+[package]
+name = "remora-etcher"
+description = "Standalone provisioning and flashing tool for Remora devices"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "remora-etcher"
+path = "src/main.rs"
+
+[dependencies]
+remora-etcher-disk = { path = "../../components/remora-etcher-disk" }
+remora-etcher-disk-application = { path = "../../components/remora-etcher-disk-application" }
+remora-etcher-disk-adapter-native = { path = "../../components/remora-etcher-disk-adapter-native" }
+remora-etcher-disk-application-transport-cli = { path = "../../components/remora-etcher-disk-application-transport-cli" }
+remora-etcher-flash = { path = "../../components/remora-etcher-flash" }
+remora-etcher-flash-application = { path = "../../components/remora-etcher-flash-application" }
+remora-etcher-flash-adapter-bmap = { path = "../../components/remora-etcher-flash-adapter-bmap" }
+remora-etcher-flash-application-transport-cli = { path = "../../components/remora-etcher-flash-application-transport-cli" }
+remora-etcher-image = { path = "../../components/remora-etcher-image" }
+remora-etcher-image-application = { path = "../../components/remora-etcher-image-application" }
+remora-etcher-image-adapter-partition-table = { path = "../../components/remora-etcher-image-adapter-partition-table" }
+remora-etcher-image-adapter-ext4 = { path = "../../components/remora-etcher-image-adapter-ext4" }
+remora-etcher-image-adapter-vfat = { path = "../../components/remora-etcher-image-adapter-vfat" }
+remora-etcher-image-application-transport-cli = { path = "../../components/remora-etcher-image-application-transport-cli" }
+remora-etcher-fs-walk = { path = "../../components/remora-etcher-fs-walk" }
+remora-etcher-squashfs = { path = "../../components/remora-etcher-squashfs" }
+remora-etcher-squashfs-application = { path = "../../components/remora-etcher-squashfs-application" }
+remora-etcher-squashfs-adapter-backhand = { path = "../../components/remora-etcher-squashfs-adapter-backhand" }
+remora-etcher-squashfs-application-transport-cli = { path = "../../components/remora-etcher-squashfs-application-transport-cli" }
+remora-etcher-scratch = { path = "../../components/remora-etcher-scratch" }
+remora-etcher-identity = { path = "../../components/remora-etcher-identity" }
+remora-etcher-identity-application = { path = "../../components/remora-etcher-identity-application" }
+remora-etcher-identity-adapter-keygen = { path = "../../components/remora-etcher-identity-adapter-keygen" }
+remora-etcher-identity-application-transport-cli = { path = "../../components/remora-etcher-identity-application-transport-cli" }
+remora-etcher-config = { path = "../../components/remora-etcher-config" }
+remora-etcher-config-application = { path = "../../components/remora-etcher-config-application" }
+remora-etcher-config-application-transport-cli = { path = "../../components/remora-etcher-config-application-transport-cli" }
+busybody.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing = "0.1"
+
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+[package.metadata.deb]
+maintainer = "Lionel Molinier <lionel.molinier@sentiens.fr>"
+copyright = "2026, Sentiens SAS <copyright@sentiens.fr>"
+license-file = ["../../LICENSE", "4"]
+extended-description = """\
+Remora Etcher is a standalone provisioning and flashing tool for Remora \
+devices. It builds squashfs images, injects files into disk-image \
+partitions, and flashes images to removable media, bmaptool-style."""
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/remora-etcher", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/cargo-deb/README", "644"],
+]

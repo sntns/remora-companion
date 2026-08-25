@@ -1,0 +1,12 @@
+[package]
+name = "remora-etcher-squashfs-application-transport-cli"
+description = "clap subcommands exposing the squashfs application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }
+remora-etcher-format = { path = "../remora-etcher-format" }
+clap.workspace = true
+error-stack.workspace = true
