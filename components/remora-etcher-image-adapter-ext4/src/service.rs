@@ -404,6 +404,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires fsck.ext4, a Linux-only dev tool"
+    )]
     fn format_then_mkdir_and_write_file_round_trips() {
         let mut path = std::env::temp_dir();
         path.push(format!(

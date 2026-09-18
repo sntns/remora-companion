@@ -80,6 +80,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "requires the gzip binary")]
     fn decodes_a_real_gzip_produced_by_the_gzip_binary() {
         // Dev-only real tool, never shelled out to by the shipped binary --
         // same posture as other verticals' tests in this workspace.

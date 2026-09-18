@@ -244,6 +244,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires unsquashfs, a Linux-only dev tool"
+    )]
     fn generates_a_valid_ed25519_ssh_host_keypair() {
         let dir = tempdir();
         let output = dir.join("../identity3.squashfs");

@@ -220,6 +220,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires fsck.ext4, a Linux-only dev tool"
+    )]
     fn builds_and_populates_a_config_image() {
         let source = tempdir();
         fs::create_dir_all(source.join("tzdata")).unwrap();

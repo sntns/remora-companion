@@ -298,6 +298,10 @@ mod tests {
     /// this asymmetry (retry-then-check-`exists()` only kicks in for
     /// backends where the retry can actually fail).
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires mkfs.vfat, a Linux-only dev tool"
+    )]
     fn create_dir_is_idempotent() {
         let path = temp_image(16 * 1024 * 1024);
         Command::new("mkfs.vfat")
@@ -314,6 +318,10 @@ mod tests {
     /// checked back with real `fsck.vfat` afterwards — never shelled out to
     /// by the shipped binary.
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires mkfs.vfat/fsck.vfat, Linux-only dev tools"
+    )]
     fn create_dir_and_write_file_round_trip_on_a_real_mkfs_vfat_fixture() {
         let path = temp_image(16 * 1024 * 1024);
         let status = Command::new("mkfs.vfat")
@@ -377,6 +385,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires mkfs.vfat, a Linux-only dev tool"
+    )]
     fn write_file_overwrites_and_read_file_and_exists_round_trip() {
         let path = temp_image(16 * 1024 * 1024);
         Command::new("mkfs.vfat")

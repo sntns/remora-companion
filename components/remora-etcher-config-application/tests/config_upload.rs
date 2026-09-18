@@ -218,11 +218,19 @@ fn run_config_upload_round_trip(mkfs: &str) {
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mke2fs/fsck.ext4, Linux-only dev tools"
+)]
 fn config_upload_round_trips_on_an_ext4_shared_partition() {
     run_config_upload_round_trip("ext4");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mkfs.vfat/fsck.vfat, Linux-only dev tools"
+)]
 fn config_upload_round_trips_on_a_vfat_shared_partition() {
     run_config_upload_round_trip("vfat");
 }

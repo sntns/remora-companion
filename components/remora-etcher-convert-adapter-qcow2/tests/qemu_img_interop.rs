@@ -53,6 +53,7 @@ fn build_mixed_raw_fixture(path: &PathBuf) {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires the qemu-img binary")]
 fn our_encoded_qcow2_is_accepted_by_real_qemu_img_and_round_trips() {
     let raw = temp_path("raw");
     build_mixed_raw_fixture(&raw);
@@ -93,6 +94,7 @@ fn our_encoded_qcow2_is_accepted_by_real_qemu_img_and_round_trips() {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires the qemu-img binary")]
 fn our_decoder_reads_a_qcow2_produced_by_real_qemu_img() {
     let raw = temp_path("raw2");
     build_mixed_raw_fixture(&raw);

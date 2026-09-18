@@ -139,6 +139,10 @@ mod fs_kind_tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires mke2fs/mkfs.vfat, Linux-only dev tools"
+    )]
     fn detects_ext4_and_vfat_from_real_mkfs_output() {
         // Dev-only validation against the real tools, same posture as the
         // ext4 round-trip matrix: never shelled out to by the shipped

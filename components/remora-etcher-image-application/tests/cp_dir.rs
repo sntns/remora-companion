@@ -147,11 +147,19 @@ fn run_cp_dir_round_trip(mkfs: &str) {
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mke2fs, Linux-only dev tools"
+)]
 fn cp_dir_round_trips_on_an_ext4_partition() {
     run_cp_dir_round_trip("ext4");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mkfs.vfat, Linux-only dev tools"
+)]
 fn cp_dir_round_trips_on_a_vfat_partition() {
     run_cp_dir_round_trip("vfat");
 }
