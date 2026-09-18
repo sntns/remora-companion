@@ -9,6 +9,25 @@ dependency on separately-installed third-party utilities (no `mksquashfs`,
 `mkfs.ext4`, `dd`, `bmaptool`, `parted`, `e2fsprogs`...): everything is
 implemented in Rust.
 
+## Installation
+
+On Linux or macOS, install the latest release binary with:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sntns/remora-etcher/main/install.sh | bash
+```
+
+This detects your OS/arch, downloads the matching archive from the
+[latest GitHub release](https://github.com/sntns/remora-etcher/releases/latest),
+and installs `remora-etcher` into `/usr/local/bin` (or `~/.local/bin` if
+that isn't writable). Install a specific version instead of the latest
+with `REMORA_ETCHER_VERSION=vX.Y.Z`, or change the install location with
+`REMORA_ETCHER_INSTALL_DIR=/path`.
+
+On Windows, or if you'd rather not pipe a script into `bash`, grab the
+matching archive/`.deb` directly from the
+[releases page](https://github.com/sntns/remora-etcher/releases) instead.
+
 ## Status
 
 Implemented:
