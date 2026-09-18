@@ -130,8 +130,8 @@ wic image, and Windows/macOS disk support.
 
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
-bounded context (`disk`, `flash`, `image`, `squashfs`, `identity`, `config`),
-each split further into:
+bounded context (`disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
+`convert`), each split further into:
 
 - `components/<vertical>` — the domain crate: pure model types and the
   `*Adapter`/`*ServiceInterface` port traits (no I/O, no third-party
@@ -139,23 +139,31 @@ each split further into:
 - `components/<vertical>-application` — the use case, implemented against
   injected ports only.
 - `components/<vertical>-adapter-<name>` — a concrete port implementation
-  (e.g. `-adapter-ext4` wraps `am-fs-ext4`).
+  (e.g. `-adapter-ext4` wraps `am-fs-ext4`; `convert` has two, one per
+  container format, both implementing the same `ContainerFormatAdapter`
+  port).
 - `components/<vertical>-application-transport-cli` — the `clap` subcommands
   for that vertical.
 
-Two small shared utility crates with no vertical prefix (`remora-etcher-fs-walk`,
-`remora-etcher-scratch`) mirror remora-edge's own `components/store`/`config`
-convention. `containers/remora-etcher` is the single binary: a composition
-root that wires every adapter and use case together via
+Not every vertical needs all four: `identity` and `config` have no
+filesystem adapter of their own — they inject the already-wired `image`
+vertical's `ImageService` instead (see `containers/remora-etcher/src/bootstrap.rs`),
+since writing into a partition is `image`'s job either way.
+
+Three small shared utility crates with no vertical prefix
+(`remora-etcher-fs-walk`, `remora-etcher-scratch`, `remora-etcher-format`)
+mirror remora-edge's own `components/store`/`config` convention.
+`containers/remora-etcher` is the single binary: a composition root that
+wires every adapter and use case together via
 [`busybody`](https://docs.rs/busybody) (the same DI crate remora-edge uses),
 then dispatches CLI subcommands into them. Errors propagate as
 [`error-stack`](https://docs.rs/error-stack) `Report`s end to end, so a
 failure prints its full cause chain with file:line at every layer.
 
 See each vertical's `components/<vertical>-application` crate for its
-integration tests (real adapters, real `mke2fs`/`mkfs.vfat`/`sgdisk`/`sfdisk`
-fixtures where relevant — dev-only tools, never shelled out to by the
-shipped binary).
+integration tests (real adapters, real `mke2fs`/`mkfs.vfat`/`sfdisk`/
+`fsck.ext4`/`fsck.vfat`/`unsquashfs`/`gzip`/`qemu-img` fixtures where
+relevant — dev-only tools, never shelled out to by the shipped binary).
 
 ## Building
 
