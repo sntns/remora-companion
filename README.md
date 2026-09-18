@@ -28,44 +28,100 @@ On Windows, or if you'd rather not pipe a script into `bash`, grab the
 matching archive/`.deb` directly from the
 [releases page](https://github.com/sntns/remora-etcher/releases) instead.
 
-## Status
+## Features
 
-Implemented:
+### Flash an image to a USB stick or SD card
 
-- `remora-etcher squashfs build` / `squashfs inspect` — build a squashfs image
-  from a list of files/directories, parameter-compatible with the defaults
-  `oe_mksquashfs` uses to build the Remora rootfs (gzip, 128 KiB blocks, real
-  uid/gid/mode preserved).
-- `remora-etcher disk list` / `disk info` — enumerate disks (Linux only for
-  now, via `/sys/block` + `/proc/self/mountinfo`, no shell-out).
-- `remora-etcher flash` — flash an image to a disk bmaptool-style via the
-  `bmap-parser` crate (sparse-aware, checksum-verified when a `.bmap` is
-  used — auto-discovered as `<image>.bmap` next to the image, same
-  convention as `bmaptool` itself, unless `--no-bmap` is given). Refuses to
-  overwrite what looks like the system disk, and refuses a non-removable
-  disk unless `--force`; also prompts for the device path to be typed back
-  unless `--yes`.
-- `remora-etcher image inspect` / `image partition list` — read an image's or
-  device's MBR/GPT partition table (auto-detected via `mbrman`/`gptman`,
-  pure Rust) and, with `--boot-mode efi|bios|uboot|rpi`, annotate each
-  partition with its Remora role (shared/efi/slotA/slotB/data) per
-  meta-remora's `REMORA_PART_*_INDEX` tables.
-- `remora-etcher image partition cp <src> <dest-path> --image <path>
-  --partition data|<index> [--boot-mode ...]` / `image partition mkdir` —
-  copy a local file or directory (recursively, preserving relative paths and
-  host file modes) into (or create a directory inside) one partition's ext4
-  or vfat filesystem, auto-detected from the partition's own on-disk
-  signature. No temporary extraction: it mounts a byte-range window
-  directly inside the larger disk image, via the pure-Rust `am-fs-ext4` and
-  `fatfs` crates.
-- `remora-etcher identity build` / `identity create` — build
-  `identity.squashfs` (hostname/machine-id/an ed25519 SSH host keypair,
-  generated unless already supplied) and inject it into an image's shared
-  partition.
-- `remora-etcher config build` / `config upload` — build a standalone
-  `config.ext4` image, or add/update one file inside an image's
-  `shared:/remora/<slot>/config` (building a fresh `config.ext4` first if it
-  doesn't exist yet).
+```
+remora-etcher flash --image remora.wic --device /dev/sdb
+```
+
+Sparse-aware and checksum-verified whenever a `.bmap` file sits next to the
+image (auto-discovered as `<image>.bmap`, same convention as `bmaptool`;
+skip it with `--no-bmap`). Refuses to overwrite what looks like the system
+disk, refuses a non-removable disk unless you pass `--force`, and makes you
+type the device path back to confirm — unless `--yes`, for scripted use.
+
+### List and inspect disks
+
+```
+remora-etcher disk list          # removable disks only
+remora-etcher disk list --all    # every disk
+remora-etcher disk info /dev/sdb
+```
+
+Linux only for now — Windows/macOS disk enumeration isn't implemented yet.
+
+### Inspect an image's partitions
+
+```
+remora-etcher image inspect remora.wic --boot-mode efi
+remora-etcher image partition list remora.wic --boot-mode efi
+```
+
+Works on a raw image file or directly on a block device. With
+`--boot-mode efi|bios|uboot|rpi`, each partition is labeled with its Remora
+role (shared/efi/slotA/slotB/data).
+
+### Provision an image before you flash it
+
+Copy a file or a whole directory straight into one partition's filesystem —
+no mounting, no loopback devices, no root required:
+
+```
+remora-etcher image partition cp ./my-config.json /play/tplst-app-config/config.json \
+  --image remora.wic --partition data
+
+remora-etcher image partition mkdir /play/tplst-app-config \
+  --image remora.wic --partition shared --boot-mode efi
+```
+
+Works against ext4 or vfat partitions, auto-detected from the partition
+itself — you don't need to know which.
+
+### Give a device its identity
+
+```
+remora-etcher identity create ./ssh-keys --image remora.wic --hostname my-device
+```
+
+Builds `identity.squashfs` — hostname, machine-id, and an ed25519 SSH host
+keypair (generated for you unless you supply one) — and injects it into the
+image's shared partition in one step. Use `identity build` instead if you
+just want the squashfs file, without touching an image.
+
+### Configure a device
+
+```
+remora-etcher config upload ./timezone /timezone --image remora.wic
+```
+
+Adds or updates a single file inside the image's config partition,
+creating a fresh `config.ext4` first if one doesn't exist yet. Use
+`config build` to build a standalone `config.ext4` from a whole directory
+instead.
+
+### Build a rootfs image
+
+```
+remora-etcher squashfs build ./rootfs --output rootfs.squashfs
+remora-etcher squashfs inspect rootfs.squashfs
+```
+
+Parameter-compatible with the defaults `oe_mksquashfs` uses to build the
+Remora rootfs (gzip, 128 KiB blocks, real uid/gid/mode preserved).
+
+### Convert between image formats
+
+```
+remora-etcher convert to-raw remora.wic.qcow2 --output remora.wic
+remora-etcher convert from-raw remora.wic --output remora.wic.gz
+```
+
+Reads and writes qcow2 and gzip directly, with the format picked from each
+path's own extension — no `qemu-img` or `gzip` binary required.
+
+---
 
 Not yet implemented: field validation against an actual meta-remora-produced
 wic image, and Windows/macOS disk support.
