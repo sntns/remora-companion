@@ -2,6 +2,10 @@ use std::sync::Arc;
 
 use remora_etcher_config::application::ConfigService;
 use remora_etcher_config_application::ConfigControllerImpl;
+use remora_etcher_convert::application::ConvertService;
+use remora_etcher_convert_adapter_gzip::GzipAdapterImpl;
+use remora_etcher_convert_adapter_qcow2::Qcow2AdapterImpl;
+use remora_etcher_convert_application::ConvertControllerImpl;
 use remora_etcher_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_etcher_disk_adapter_native::DiskAdapterImpl;
 use remora_etcher_disk_application::DiskControllerImpl;
@@ -34,6 +38,7 @@ pub struct Services {
     pub squashfs: SquashfsService,
     pub identity: IdentityService,
     pub config: ConfigService,
+    pub convert: ConvertService,
 }
 
 /// The composition root: construct each adapter, register it, pull it back
@@ -87,6 +92,16 @@ pub async fn wire() -> Services {
         .await
         .expect("PartitionTableAdapterService was just registered");
 
+    container
+        .set_type(remora_etcher_fs_walk::FsWalkAdapterService::new(
+            remora_etcher_fs_walk::FsWalkAdapterImpl,
+        ))
+        .await;
+    let fs_walk = container
+        .get_type::<remora_etcher_fs_walk::FsWalkAdapterService>()
+        .await
+        .expect("FsWalkAdapterService was just registered");
+
     // ext4_fs/vfat_fs are consumed by exactly one constructor right below,
     // so there's no ambiguity to disambiguate via the container — skip the
     // set_type/get_type round-trip for these two (busybody keys purely on
@@ -102,6 +117,7 @@ pub async fn wire() -> Services {
             partition_table,
             ext4_fs,
             vfat_fs,
+            fs_walk.clone(),
         )))
         .await;
     let image = container
@@ -119,16 +135,6 @@ pub async fn wire() -> Services {
         .get_type::<Ext4AdapterService>()
         .await
         .expect("Ext4AdapterService was just registered");
-
-    container
-        .set_type(remora_etcher_fs_walk::FsWalkAdapterService::new(
-            remora_etcher_fs_walk::FsWalkAdapterImpl,
-        ))
-        .await;
-    let fs_walk = container
-        .get_type::<remora_etcher_fs_walk::FsWalkAdapterService>()
-        .await
-        .expect("FsWalkAdapterService was just registered");
 
     container
         .set_type(SquashfsAdapterService::new(SquashfsAdapterImpl))
@@ -186,6 +192,27 @@ pub async fn wire() -> Services {
         .await
         .expect("ConfigService was just registered");
 
+    // The convert vertical injects both format adapters directly (like the
+    // image vertical's ext4_fs/vfat_fs above), not through the busybody
+    // container: ContainerFormatAdapter is implemented by two distinct
+    // concrete types at once, which would collide under the same wrapper
+    // TypeId if registered there.
+    let qcow2_adapter: Arc<dyn remora_etcher_convert::adapter::ContainerFormatAdapter> =
+        Arc::new(Qcow2AdapterImpl);
+    let gzip_adapter: Arc<dyn remora_etcher_convert::adapter::ContainerFormatAdapter> =
+        Arc::new(GzipAdapterImpl);
+
+    container
+        .set_type(ConvertService::new(ConvertControllerImpl::new(
+            qcow2_adapter,
+            gzip_adapter,
+        )))
+        .await;
+    let convert = container
+        .get_type::<ConvertService>()
+        .await
+        .expect("ConvertService was just registered");
+
     Services {
         disk,
         flash,
@@ -193,5 +220,6 @@ pub async fn wire() -> Services {
         squashfs,
         identity,
         config,
+        convert,
     }
 }

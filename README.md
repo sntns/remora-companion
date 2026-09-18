@@ -21,9 +21,11 @@ Implemented:
   now, via `/sys/block` + `/proc/self/mountinfo`, no shell-out).
 - `remora-etcher flash` — flash an image to a disk bmaptool-style via the
   `bmap-parser` crate (sparse-aware, checksum-verified when a `.bmap` is
-  given). Refuses to overwrite what looks like the system disk, and refuses
-  a non-removable disk unless `--force`; also prompts for the device path to
-  be typed back unless `--yes`.
+  used — auto-discovered as `<image>.bmap` next to the image, same
+  convention as `bmaptool` itself, unless `--no-bmap` is given). Refuses to
+  overwrite what looks like the system disk, and refuses a non-removable
+  disk unless `--force`; also prompts for the device path to be typed back
+  unless `--yes`.
 - `remora-etcher image inspect` / `image partition list` — read an image's or
   device's MBR/GPT partition table (auto-detected via `mbrman`/`gptman`,
   pure Rust) and, with `--boot-mode efi|bios|uboot|rpi`, annotate each
@@ -31,8 +33,9 @@ Implemented:
   meta-remora's `REMORA_PART_*_INDEX` tables.
 - `remora-etcher image partition cp <src> <dest-path> --image <path>
   --partition data|<index> [--boot-mode ...]` / `image partition mkdir` —
-  copy a local file into (or create a directory inside) one partition's
-  ext4 or vfat filesystem, auto-detected from the partition's own on-disk
+  copy a local file or directory (recursively, preserving relative paths and
+  host file modes) into (or create a directory inside) one partition's ext4
+  or vfat filesystem, auto-detected from the partition's own on-disk
   signature. No temporary extraction: it mounts a byte-range window
   directly inside the larger disk image, via the pure-Rust `am-fs-ext4` and
   `fatfs` crates.

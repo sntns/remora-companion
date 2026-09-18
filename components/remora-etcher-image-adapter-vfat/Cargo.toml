@@ -4,6 +4,7 @@ description = "Concrete VfatAdapter (and PartitionFilesystem impl): wraps fatfs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-image = { path = "../remora-etcher-image" }

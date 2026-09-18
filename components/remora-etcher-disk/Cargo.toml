@@ -4,6 +4,7 @@ description = "Domain crate for the disk vertical: DiskInfo model, disk enumerat
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 busybody.workspace = true

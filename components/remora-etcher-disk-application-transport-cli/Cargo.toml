@@ -4,6 +4,7 @@ description = "clap subcommands exposing the disk application service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-disk = { path = "../remora-etcher-disk" }

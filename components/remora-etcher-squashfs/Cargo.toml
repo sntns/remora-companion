@@ -4,6 +4,7 @@ description = "Domain crate for the squashfs vertical: BuildOptions model, the S
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }

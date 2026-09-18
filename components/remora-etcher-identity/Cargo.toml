@@ -4,6 +4,7 @@ description = "Domain crate for the identity vertical: the KeygenAdapter port an
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }

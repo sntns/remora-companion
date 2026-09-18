@@ -48,6 +48,12 @@ enum Commands {
     /// partition.
     #[command(subcommand)]
     Config(remora_etcher_config_application_transport_cli::Command),
+
+    /// Convert a whole-disk image to/from a plain raw image, unwrapping or
+    /// producing whatever container format its path names (`.qcow2`,
+    /// `.gz`) -- no external tool (`qemu-img`, `gzip`) involved.
+    #[command(subcommand)]
+    Convert(remora_etcher_convert_application_transport_cli::Command),
 }
 
 fn main() {
@@ -105,6 +111,13 @@ fn main() {
         Commands::Config(cmd) => {
             if let Err(report) =
                 remora_etcher_config_application_transport_cli::run(cmd, &services.config)
+            {
+                fail(report);
+            }
+        }
+        Commands::Convert(cmd) => {
+            if let Err(report) =
+                remora_etcher_convert_application_transport_cli::run(cmd, &services.convert)
             {
                 fail(report);
             }

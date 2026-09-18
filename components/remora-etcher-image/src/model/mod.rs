@@ -5,4 +5,4 @@ pub use partition_table::{
     BootMode, FsKind, PartitionEntry, PartitionRole, PartitionSelector, PartitionTable,
     SelectionError, TableKind,
 };
-pub use request::{InjectRequest, MkdirRequest};
+pub use request::{CpDirRequest, InjectRequest, MkdirRequest};

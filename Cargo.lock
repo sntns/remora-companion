@@ -151,11 +151,22 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bincode"
-version = "1.3.3"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
 dependencies = [
+ "bincode_derive",
  "serde",
+ "unty",
+]
+
+[[package]]
+name = "bincode_derive"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
+dependencies = [
+ "virtue",
 ]
 
 [[package]]
@@ -196,9 +207,9 @@ dependencies = [
 
 [[package]]
 name = "bmap-parser"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a960e7f5fba26b1c5c25d1893a30ad8056ff43d15dc4a5369a2c18c02ed2add"
+checksum = "1ee205c1695889968d943fd740be7a444a23dad0b21d8c2913e64e86fd4e36e5"
 dependencies = [
  "async-trait",
  "digest 0.11.3",
@@ -1037,15 +1048,15 @@ dependencies = [
 
 [[package]]
 name = "mbrman"
-version = "0.5.4"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1fc3bff63c208d4a14301c6cb807af2d1a0760052584ce3f9a737b55fb85498"
+checksum = "76fbcfee7fbe4307a3317ba5d939fd076cad5e8f64a5d9cbc0f6900d513d6f76"
 dependencies = [
  "bincode",
  "bitvec",
  "serde",
  "serde-big-array",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1279,9 +1290,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.39.4"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
  "serde",
@@ -1419,6 +1430,11 @@ dependencies = [
  "remora-etcher-config",
  "remora-etcher-config-application",
  "remora-etcher-config-application-transport-cli",
+ "remora-etcher-convert",
+ "remora-etcher-convert-adapter-gzip",
+ "remora-etcher-convert-adapter-qcow2",
+ "remora-etcher-convert-application",
+ "remora-etcher-convert-application-transport-cli",
  "remora-etcher-disk",
  "remora-etcher-disk-adapter-native",
  "remora-etcher-disk-application",
@@ -1482,6 +1498,51 @@ dependencies = [
  "error-stack",
  "remora-etcher-config",
  "remora-etcher-format",
+]
+
+[[package]]
+name = "remora-etcher-convert"
+version = "0.1.0"
+dependencies = [
+ "busybody",
+ "error-stack",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-etcher-convert-adapter-gzip"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "flate2",
+ "remora-etcher-convert",
+]
+
+[[package]]
+name = "remora-etcher-convert-adapter-qcow2"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-convert",
+]
+
+[[package]]
+name = "remora-etcher-convert-application"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "remora-etcher-convert",
+ "remora-etcher-convert-adapter-gzip",
+ "remora-etcher-convert-adapter-qcow2",
+]
+
+[[package]]
+name = "remora-etcher-convert-application-transport-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-etcher-convert",
 ]
 
 [[package]]
@@ -1670,7 +1731,11 @@ name = "remora-etcher-image-application"
 version = "0.1.0"
 dependencies = [
  "error-stack",
+ "remora-etcher-fs-walk",
  "remora-etcher-image",
+ "remora-etcher-image-adapter-ext4",
+ "remora-etcher-image-adapter-partition-table",
+ "remora-etcher-image-adapter-vfat",
 ]
 
 [[package]]
@@ -2240,6 +2305,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unty"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
 name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2256,6 +2327,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "virtue"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "walkdir"

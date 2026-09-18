@@ -4,6 +4,7 @@ description = "clap subcommands exposing the identity application service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-identity = { path = "../remora-etcher-identity" }

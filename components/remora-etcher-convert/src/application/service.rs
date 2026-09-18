@@ -1,0 +1,39 @@
+use std::path::Path;
+
+use super::error::Result;
+
+/// The convert vertical's application-facing port: unwrap a whole-disk
+/// image out of (or back into) whatever container format its own path
+/// extension names -- `.qcow2`, `.gz`, or a plain raw copy for anything
+/// else -- entirely inside remora-etcher, with no external tool
+/// (`qemu-img`, `gzip`) shelled out to.
+pub trait ConvertServiceInterface: Send + Sync {
+    /// Decode `image` into a plain raw disk image at `output_raw`. The
+    /// source format is detected from `image`'s extension.
+    fn to_raw(&self, image: &Path, output_raw: &Path) -> Result<()>;
+
+    /// Encode `raw_image` (a plain raw disk image) into `output`. The
+    /// destination format is detected from `output`'s extension.
+    #[allow(clippy::wrong_self_convention)] // `from_raw`/`to_raw` name the raw-image direction of the conversion, not a `From` constructor
+    fn from_raw(&self, raw_image: &Path, output: &Path) -> Result<()>;
+}
+
+/// Injectable handle to whatever `ConvertServiceInterface` implementation
+/// was wired at startup (normally `remora-etcher-convert-application`'s
+/// `ConvertControllerImpl`).
+#[derive(Clone)]
+pub struct ConvertService(busybody::Service<Box<dyn ConvertServiceInterface>>);
+
+impl ConvertService {
+    pub fn new<T: ConvertServiceInterface + 'static>(service: T) -> Self {
+        Self(busybody::Service::new(Box::new(service)))
+    }
+}
+
+impl std::ops::Deref for ConvertService {
+    type Target = busybody::Service<Box<dyn ConvertServiceInterface>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}

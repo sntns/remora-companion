@@ -1,10 +1,14 @@
 use std::{fs, path::Path, sync::Arc};
 
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
+use remora_etcher_fs_walk::{FsWalkAdapterService, WalkEntryKind};
 use remora_etcher_image::{
     adapter::{partition_fs::PartitionFilesystem, partition_table::PartitionTableAdapterService},
     application::{Error, ImageServiceInterface, Result},
-    model::{FsKind, InjectRequest, MkdirRequest, PartitionEntry, PartitionRole, PartitionTable},
+    model::{
+        CpDirRequest, FsKind, InjectRequest, MkdirRequest, PartitionEntry, PartitionRole,
+        PartitionTable,
+    },
 };
 
 /// The image vertical's use case: partition-table reading/selection, and
@@ -15,6 +19,7 @@ pub struct ImageControllerImpl {
     partition_table: PartitionTableAdapterService,
     ext4_fs: Arc<dyn PartitionFilesystem>,
     vfat_fs: Arc<dyn PartitionFilesystem>,
+    fs_walk: FsWalkAdapterService,
 }
 
 impl ImageControllerImpl {
@@ -22,11 +27,13 @@ impl ImageControllerImpl {
         partition_table: PartitionTableAdapterService,
         ext4_fs: Arc<dyn PartitionFilesystem>,
         vfat_fs: Arc<dyn PartitionFilesystem>,
+        fs_walk: FsWalkAdapterService,
     ) -> Self {
         Self {
             partition_table,
             ext4_fs,
             vfat_fs,
+            fs_walk,
         }
     }
 
@@ -119,6 +126,58 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
+    fn cp_dir(&self, request: &CpDirRequest) -> Result<()> {
+        let (entry, backend) = self.resolve(&request.image, |table| {
+            table
+                .select(request.partition, request.boot_mode)
+                .cloned()
+                .change_context(Error::SelectPartition)
+        })?;
+
+        let walked = self
+            .fs_walk
+            .walk_dir(&request.source_dir)
+            .change_context_lazy(|| Error::Walk(request.source_dir.clone()))?;
+
+        for walked_entry in walked {
+            let dest_path = to_partition_path(&request.dest_path, &walked_entry.path);
+            let mode = walked_entry.metadata.permissions;
+
+            match &walked_entry.kind {
+                WalkEntryKind::Directory => {
+                    backend
+                        .ensure_dir(
+                            &request.image,
+                            entry.start_bytes,
+                            entry.size_bytes,
+                            &dest_path,
+                            mode,
+                        )
+                        .change_context(Error::Write)?;
+                }
+                WalkEntryKind::File { source } => {
+                    let contents = fs::read(source)
+                        .map_err(|_| Report::new(Error::ReadSource(source.clone())))?;
+                    backend
+                        .write_file(
+                            &request.image,
+                            entry.start_bytes,
+                            entry.size_bytes,
+                            &dest_path,
+                            &contents,
+                            mode,
+                        )
+                        .change_context(Error::Write)?;
+                }
+                WalkEntryKind::Symlink { .. } => {
+                    return Err(Report::new(Error::UnsupportedEntry(walked_entry.path)));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn inject_by_role(
         &self,
         image: &Path,
@@ -175,4 +234,16 @@ impl ImageServiceInterface for ImageControllerImpl {
             .read_file(image, entry.start_bytes, entry.size_bytes, dest_path)
             .change_context(Error::Write)
     }
+}
+
+/// `rel_path` joined with `/` under `base` regardless of host
+/// path-separator conventions — partition filesystem paths are always
+/// `/`-separated, even when built on Windows.
+fn to_partition_path(base: &str, rel_path: &Path) -> String {
+    let joined = rel_path
+        .iter()
+        .map(|c| c.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{}/{joined}", base.trim_end_matches('/'))
 }

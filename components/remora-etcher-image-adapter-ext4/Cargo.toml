@@ -4,6 +4,7 @@ description = "Concrete Ext4Adapter (and PartitionFilesystem impl): wraps am-fs-
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-image = { path = "../remora-etcher-image" }

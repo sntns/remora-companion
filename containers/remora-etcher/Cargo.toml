@@ -4,6 +4,7 @@ description = "Standalone provisioning and flashing tool for Remora devices"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "remora-etcher"
@@ -37,6 +38,11 @@ remora-etcher-identity-application-transport-cli = { path = "../../components/re
 remora-etcher-config = { path = "../../components/remora-etcher-config" }
 remora-etcher-config-application = { path = "../../components/remora-etcher-config-application" }
 remora-etcher-config-application-transport-cli = { path = "../../components/remora-etcher-config-application-transport-cli" }
+remora-etcher-convert = { path = "../../components/remora-etcher-convert" }
+remora-etcher-convert-application = { path = "../../components/remora-etcher-convert-application" }
+remora-etcher-convert-adapter-gzip = { path = "../../components/remora-etcher-convert-adapter-gzip" }
+remora-etcher-convert-adapter-qcow2 = { path = "../../components/remora-etcher-convert-adapter-qcow2" }
+remora-etcher-convert-application-transport-cli = { path = "../../components/remora-etcher-convert-application-transport-cli" }
 busybody.workspace = true
 tokio.workspace = true
 clap.workspace = true

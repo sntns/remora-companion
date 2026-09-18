@@ -1,0 +1,67 @@
+# Config for `cargo deny check`, run in CI.
+# https://embarkstudios.github.io/cargo-deny/
+
+# Match the CI build matrix (ci.yml: ubuntu/windows/macos-latest) so
+# target-gated dependencies for platforms we never build for (e.g. r-efi,
+# pulled in only on `*-unknown-uefi`) don't show up as noise.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # Bincode: the maintainers ceased development permanently (doxxing/harassment
+    # incident), calling 1.3.3 "complete" — there is no safe upgrade, and no newer
+    # release fixes this notice; it's pulled in transitively via mbrman -> gptman's
+    # sibling crate for MBR parsing. Not a vulnerability, just unmaintained.
+    "RUSTSEC-2025-0141",
+]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "0BSD",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# This project is Apache-2.0 (see Cargo.toml `license = "Apache-2.0"`), so
+# copyleft dependencies (GPL, AGPL, LGPL, ...) are not on the allow list
+# above and will fail this check if pulled in.
+confidence-threshold = 0.8
+# Workspace crates are marked `publish = false` (see Cargo.toml) and never
+# published to crates.io; skip license checking for those rather than for
+# every third-party dependency (they're all covered by the root LICENSE).
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies between our own workspace crates have no version
+# requirement by design (they're versioned together); only flag a real `*`
+# requirement on a third-party crate.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    # See the `[patch.crates-io]` comment in Cargo.toml: am-fs-ext4 fails to
+    # build on aarch64 upstream; pinned to our fork's branch until the fix
+    # (https://github.com/christhomas/rust-fs-ext4/pull/36) merges and releases.
+    "https://github.com/sntns/rust-fs-ext4",
+    # fatfs has no crates.io release with the features/fixes this project
+    # needs; pinned to a specific upstream commit.
+    "https://github.com/rafalh/rust-fatfs",
+]

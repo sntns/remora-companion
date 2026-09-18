@@ -197,6 +197,7 @@ mod tests {
             ),
             Arc::new(remora_etcher_image_adapter_ext4::Ext4AdapterImpl),
             Arc::new(remora_etcher_image_adapter_vfat::VfatAdapterImpl),
+            FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
         ));
         ConfigControllerImpl::new(
             Ext4AdapterService::new(remora_etcher_image_adapter_ext4::Ext4AdapterImpl),

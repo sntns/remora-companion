@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::model::{InjectRequest, MkdirRequest, PartitionRole, PartitionTable};
+use crate::model::{CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionTable};
 
 use super::error::Result;
 
@@ -23,6 +23,15 @@ pub trait ImageServiceInterface: Send + Sync {
     /// Create `request.dest_path` inside whichever partition
     /// `request.partition` resolves to.
     fn mkdir(&self, request: &MkdirRequest) -> Result<()>;
+
+    /// Recursively copy `request.source_dir`'s content into
+    /// `request.dest_path` inside whichever partition `request.partition`
+    /// resolves to, preserving each entry's relative path and host file
+    /// mode. `request.dest_path` itself must already exist — this does not
+    /// create it (same narrow-surface rule as `inject`/`mkdir`; use `mkdir`
+    /// first if needed). Symlinks inside `source_dir` are rejected — neither
+    /// backend can represent them.
+    fn cp_dir(&self, request: &CpDirRequest) -> Result<()>;
 
     /// Write `contents` to `dest_path` inside whichever partition has role
     /// `role` — resolved from the table's own detected kind (GPT/MBR), no

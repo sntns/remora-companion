@@ -10,6 +10,10 @@ pub enum Error {
     ReadSource(PathBuf),
     #[error("failed to write into partition")]
     Write,
+    #[error("failed to walk {0}")]
+    Walk(PathBuf),
+    #[error("unsupported filesystem entry: {0}")]
+    UnsupportedEntry(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

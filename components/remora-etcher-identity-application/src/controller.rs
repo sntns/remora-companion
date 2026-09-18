@@ -185,6 +185,9 @@ mod tests {
             ),
             Arc::new(remora_etcher_image_adapter_ext4::Ext4AdapterImpl),
             Arc::new(remora_etcher_image_adapter_vfat::VfatAdapterImpl),
+            remora_etcher_fs_walk::FsWalkAdapterService::new(
+                remora_etcher_fs_walk::FsWalkAdapterImpl,
+            ),
         ));
         IdentityControllerImpl::new(
             KeygenAdapterService::new(remora_etcher_identity_adapter_keygen::KeygenAdapterImpl),

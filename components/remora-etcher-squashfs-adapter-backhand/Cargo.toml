@@ -4,6 +4,7 @@ description = "Concrete SquashfsAdapter: wraps backhand"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }

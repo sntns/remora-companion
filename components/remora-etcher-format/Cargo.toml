@@ -4,5 +4,6 @@ description = "Shared human-readable formatting helpers for remora-etcher's CLI 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]

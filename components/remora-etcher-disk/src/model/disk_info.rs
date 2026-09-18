@@ -11,7 +11,9 @@ pub struct DiskInfo {
     pub model: Option<String>,
     pub is_removable: bool,
     /// Best-effort: true if this disk (or one of its partitions) backs the
-    /// current root filesystem. A false negative is possible in exotic setups
-    /// (e.g. network root); a false positive should not happen.
+    /// current root filesystem, or another mount point critical to the
+    /// running system (e.g. `/boot`, `/boot/efi`, `/usr`, `/var` on a
+    /// separate disk). A false negative is possible in exotic setups (e.g.
+    /// network root); a false positive should not happen.
     pub is_system_disk: bool,
 }

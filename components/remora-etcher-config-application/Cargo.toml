@@ -4,6 +4,7 @@ description = "Use-case implementation for the config vertical"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-config = { path = "../remora-etcher-config" }

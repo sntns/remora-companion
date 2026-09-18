@@ -4,6 +4,7 @@ description = "Use-case implementation for the squashfs vertical"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }

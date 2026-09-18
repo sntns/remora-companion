@@ -4,6 +4,7 @@ description = "clap command exposing the flash application service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-disk = { path = "../remora-etcher-disk" }

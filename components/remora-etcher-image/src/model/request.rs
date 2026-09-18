@@ -28,3 +28,16 @@ pub struct MkdirRequest {
     /// Directory mode (permission bits only), e.g. `0o755`.
     pub mode: u16,
 }
+
+#[derive(Debug, Clone)]
+pub struct CpDirRequest {
+    pub image: PathBuf,
+    /// Host directory to copy in, recursively.
+    pub source_dir: PathBuf,
+    /// Directory inside the partition's filesystem that `source_dir`'s
+    /// content is copied under, e.g. `/` or `/dump`. Must already exist —
+    /// not created by this request (see `mkdir`).
+    pub dest_path: String,
+    pub partition: PartitionSelector,
+    pub boot_mode: Option<BootMode>,
+}

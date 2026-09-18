@@ -4,6 +4,7 @@ description = "Concrete BmapAdapter: wraps bmap-parser's checksum-verified spars
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-flash = { path = "../remora-etcher-flash" }

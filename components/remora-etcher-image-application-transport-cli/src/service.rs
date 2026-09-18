@@ -6,8 +6,8 @@ use remora_etcher_format::human_size;
 use remora_etcher_image::{
     application::ImageService,
     model::{
-        BootMode, InjectRequest, MkdirRequest, PartitionRole, PartitionSelector, PartitionTable,
-        TableKind,
+        BootMode, CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionSelector,
+        PartitionTable, TableKind,
     },
 };
 
@@ -41,15 +41,20 @@ pub enum PartitionCommand {
         boot_mode: Option<BootModeArg>,
     },
 
-    /// Copy a local file into an existing directory inside one partition's
-    /// filesystem (the partition's parent directory for `dest_path` must
-    /// already exist — this does not create intermediate directories).
+    /// Copy a local file or directory into one partition's filesystem. For
+    /// a file, `dest_path` is its destination path and its parent directory
+    /// must already exist (this does not create intermediate directories).
+    /// For a directory, everything inside is copied recursively, preserving
+    /// relative paths and each entry's host file mode (`--mode` is ignored
+    /// in that case); `dest_path` itself must already exist. Symlinks
+    /// inside a source directory are rejected.
     Cp {
-        /// Local file to copy in.
+        /// Local file or directory to copy in.
         src: PathBuf,
 
-        /// Destination path inside the partition's filesystem, e.g.
-        /// `/play/tplst-app-config/config.json`.
+        /// Destination path (file) or destination directory (directory)
+        /// inside the partition's filesystem, e.g.
+        /// `/play/tplst-app-config/config.json` or `/play/tplst-app-config`.
         dest_path: String,
 
         /// Image file or block device to modify.
@@ -65,7 +70,8 @@ pub enum PartitionCommand {
         #[arg(long, value_enum)]
         boot_mode: Option<BootModeArg>,
 
-        /// File mode (permission bits) for the created file.
+        /// File mode (permission bits) for the created file. Ignored when
+        /// `src` is a directory (each entry keeps its own host mode).
         #[arg(long, default_value_t = 0o644)]
         mode: u16,
     },
@@ -165,16 +171,28 @@ pub fn run(command: Command, service: &ImageService) -> Result<()> {
             mode,
         }) => {
             let selector = parse_partition_selector(&partition)?;
-            let request = InjectRequest {
-                image: image.clone(),
-                source: src,
-                dest_path: dest_path.clone(),
-                partition: selector,
-                boot_mode: boot_mode.map(BootMode::from),
-                mode,
-            };
-            service.inject(&request).change_context(Error::Image)?;
-            println!("wrote {dest_path} inside {}", image.display());
+            if src.is_dir() {
+                let request = CpDirRequest {
+                    image: image.clone(),
+                    source_dir: src,
+                    dest_path: dest_path.clone(),
+                    partition: selector,
+                    boot_mode: boot_mode.map(BootMode::from),
+                };
+                service.cp_dir(&request).change_context(Error::Image)?;
+                println!("copied into {dest_path} inside {}", image.display());
+            } else {
+                let request = InjectRequest {
+                    image: image.clone(),
+                    source: src,
+                    dest_path: dest_path.clone(),
+                    partition: selector,
+                    boot_mode: boot_mode.map(BootMode::from),
+                    mode,
+                };
+                service.inject(&request).change_context(Error::Image)?;
+                println!("wrote {dest_path} inside {}", image.display());
+            }
             Ok(())
         }
         Command::Partition(PartitionCommand::Mkdir {

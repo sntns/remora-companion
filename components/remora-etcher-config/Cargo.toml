@@ -4,6 +4,7 @@ description = "Domain crate for the config vertical: the config application port
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }

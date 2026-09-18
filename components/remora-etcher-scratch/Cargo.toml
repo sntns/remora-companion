@@ -4,5 +4,6 @@ description = "Shared unique-scratch-path generator, used by any vertical that n
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]

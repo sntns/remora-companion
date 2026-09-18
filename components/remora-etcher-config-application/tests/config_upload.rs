@@ -49,6 +49,7 @@ fn controller() -> ConfigControllerImpl {
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
+        FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
     ));
     ConfigControllerImpl::new(
         Ext4AdapterService::new(Ext4AdapterImpl),

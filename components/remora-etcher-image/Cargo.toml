@@ -4,6 +4,7 @@ description = "Domain crate for the image vertical: partition table model, the p
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 busybody.workspace = true

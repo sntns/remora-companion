@@ -1,0 +1,15 @@
+[package]
+name = "remora-etcher-convert-application"
+description = "Use-case implementation for the convert vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-etcher-convert = { path = "../remora-etcher-convert" }
+error-stack.workspace = true
+
+[dev-dependencies]
+remora-etcher-convert-adapter-gzip = { path = "../remora-etcher-convert-adapter-gzip" }
+remora-etcher-convert-adapter-qcow2 = { path = "../remora-etcher-convert-adapter-qcow2" }

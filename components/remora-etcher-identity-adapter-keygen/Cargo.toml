@@ -4,6 +4,7 @@ description = "Concrete KeygenAdapter: wraps rand + ssh-key"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 remora-etcher-identity = { path = "../remora-etcher-identity" }

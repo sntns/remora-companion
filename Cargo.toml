@@ -29,6 +29,11 @@ members = [
     "components/remora-etcher-config",
     "components/remora-etcher-config-application",
     "components/remora-etcher-config-application-transport-cli",
+    "components/remora-etcher-convert",
+    "components/remora-etcher-convert-application",
+    "components/remora-etcher-convert-adapter-gzip",
+    "components/remora-etcher-convert-adapter-qcow2",
+    "components/remora-etcher-convert-application-transport-cli",
     "containers/remora-etcher",
 ]
 
@@ -36,6 +41,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+publish = false
 
 # Control binary size, matching remora-disk's profile.
 [profile.release]
