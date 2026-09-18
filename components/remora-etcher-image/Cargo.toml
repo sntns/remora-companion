@@ -12,6 +12,7 @@ async-trait.workspace = true
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+serde.workspace = true
 # Error::Ext4/Error::Fat wrap these crates' own error types directly rather
 # than reimplementing them as pure domain types — same rationale as
 # remora-etcher-flash's BlockMap: these are inert data, not infrastructure

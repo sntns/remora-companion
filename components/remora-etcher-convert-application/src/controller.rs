@@ -64,11 +64,17 @@ impl ConvertServiceInterface for ConvertControllerImpl {
             Some(adapter) => {
                 ctx.sink.phase("decoding");
                 let adapter = adapter.clone();
-                let input_size = fs::metadata(image).map(|m| m.len()).unwrap_or(0);
+                // Unlike the encode direction (below), the *compressed*
+                // input's size is not a usable "total" here -- the decoded
+                // output is normally larger than it, sometimes by a lot, so
+                // `done` would blow past `total` almost immediately. Not
+                // worth teaching every adapter to expose its decoded size
+                // up front just for this: report unknown-total progress
+                // instead (see `OperationEvent::Progress`'s doc comment).
                 let image_for_work = image.to_path_buf();
                 let output_for_work = output_raw.to_path_buf();
                 let image = image.to_path_buf();
-                match track_output_file_size(ctx, output_raw.to_path_buf(), input_size, move || {
+                match track_output_file_size(ctx, output_raw.to_path_buf(), 0, move || {
                     adapter.decode_to_raw(&image_for_work, &output_for_work)
                 })
                 .await

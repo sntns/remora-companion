@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::partition_table::{BootMode, PartitionSelector};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InjectRequest {
     pub image: PathBuf,
     pub source: PathBuf,
@@ -16,7 +16,7 @@ pub struct InjectRequest {
     pub mode: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MkdirRequest {
     pub image: PathBuf,
     /// Absolute path inside the partition's filesystem, e.g.
@@ -29,7 +29,7 @@ pub struct MkdirRequest {
     pub mode: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CpDirRequest {
     pub image: PathBuf,
     /// Host directory to copy in, recursively.

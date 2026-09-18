@@ -1,0 +1,17 @@
+[package]
+name = "remora-etcher-batch-application-transport-cli"
+description = "clap subcommand exposing the batch application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-etcher-batch = { path = "../remora-etcher-batch" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

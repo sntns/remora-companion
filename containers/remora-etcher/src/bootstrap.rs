@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use remora_etcher_batch::application::BatchService;
+use remora_etcher_batch_application::BatchControllerImpl;
 use remora_etcher_config::application::ConfigService;
 use remora_etcher_config_application::ConfigControllerImpl;
 use remora_etcher_convert::application::ConvertService;
@@ -39,6 +41,7 @@ pub struct Services {
     pub identity: IdentityService,
     pub config: ConfigService,
     pub convert: ConvertService,
+    pub batch: BatchService,
 }
 
 /// The composition root: construct each adapter, register it, pull it back
@@ -213,6 +216,17 @@ pub async fn wire() -> Services {
         .await
         .expect("ConvertService was just registered");
 
+    // Pure orchestration over the other verticals' already-wired services —
+    // no adapter of its own, so no set_type/get_type round-trip needed;
+    // just construct it directly like the ext4_fs/vfat_fs handles above.
+    let batch = BatchService::new(BatchControllerImpl::new(
+        convert.clone(),
+        identity.clone(),
+        config.clone(),
+        image.clone(),
+        squashfs.clone(),
+    ));
+
     Services {
         disk,
         flash,
@@ -221,5 +235,6 @@ pub async fn wire() -> Services {
         identity,
         config,
         convert,
+        batch,
     }
 }

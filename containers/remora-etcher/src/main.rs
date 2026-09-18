@@ -54,6 +54,12 @@ enum Commands {
     /// `.gz`) -- no external tool (`qemu-img`, `gzip`) involved.
     #[command(subcommand)]
     Convert(remora_etcher_convert_application_transport_cli::Command),
+
+    /// Run a batch recipe: several of the above operations as one call,
+    /// with one unified progress stream and no cleanup/rollback if a step
+    /// fails partway through.
+    #[command(subcommand)]
+    Batch(remora_etcher_batch_application_transport_cli::Command),
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -117,6 +123,13 @@ async fn main() {
         Commands::Convert(cmd) => {
             if let Err(report) =
                 remora_etcher_convert_application_transport_cli::run(cmd, &services.convert).await
+            {
+                fail(report);
+            }
+        }
+        Commands::Batch(cmd) => {
+            if let Err(report) =
+                remora_etcher_batch_application_transport_cli::run(cmd, &services.batch).await
             {
                 fail(report);
             }

@@ -11,7 +11,10 @@ pub enum OperationEvent {
     /// A coarse step change, e.g. "formatting", "copying".
     Phase(String),
     /// Fine-grained advancement, when it's known (bytes, clusters, files —
-    /// whatever unit the operation counts in).
+    /// whatever unit the operation counts in). `total == 0` means unknown
+    /// (e.g. decoding a container format that doesn't cheaply expose its
+    /// decoded size up front) — `done` is still a real, monotonically
+    /// growing count, just not a percentage of anything.
     Progress { done: u64, total: u64 },
     /// A free-text detail line, for a log panel rather than a progress bar.
     Log(String),
@@ -103,6 +106,9 @@ pub fn print_to_stderr(
         while let Some(event) = stream.next().await {
             match event {
                 OperationEvent::Phase(phase) => eprintln!("==> {phase}"),
+                OperationEvent::Progress { done, total: 0 } => {
+                    eprintln!("    {done} (total unknown)")
+                }
                 OperationEvent::Progress { done, total } => eprintln!("    {done}/{total}"),
                 OperationEvent::Log(message) => eprintln!("    {message}"),
             }

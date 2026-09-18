@@ -35,6 +35,9 @@ members = [
     "components/remora-etcher-convert-adapter-qcow2",
     "components/remora-etcher-convert-application-transport-cli",
     "components/remora-etcher-progress",
+    "components/remora-etcher-batch",
+    "components/remora-etcher-batch-application",
+    "components/remora-etcher-batch-application-transport-cli",
     "containers/remora-etcher",
 ]
 

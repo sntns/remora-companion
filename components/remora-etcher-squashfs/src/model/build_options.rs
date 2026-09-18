@@ -7,7 +7,8 @@ pub const MAX_BLOCK_SIZE: u32 = 1_048_576;
 pub const DEFAULT_BLOCK_SIZE: u32 = 131_072;
 
 /// Compression algorithm for a squashfs image.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Compression {
     /// Matches `mksquashfs`'s own default when no `-comp` flag is given.
     #[default]
@@ -19,7 +20,7 @@ pub enum Compression {
     Zstd,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuildOptions {
     pub compression: Compression,
     pub block_size: u32,

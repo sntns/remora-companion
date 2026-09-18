@@ -29,7 +29,8 @@ pub struct PartitionTable {
 /// `conf/machine/include/remora-{efi,bios,uboot,rpiboot}.inc`
 /// (`REMORA_PART_*_INDEX`), so a partition can be identified by role instead
 /// of a bare index that means something different in every mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum BootMode {
     Efi,
     Bios,
@@ -37,7 +38,8 @@ pub enum BootMode {
     Rpi,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PartitionRole {
     /// The shared `/boot` (or, in BIOS mode, the GRUB boot) partition.
     Shared,
@@ -119,7 +121,8 @@ pub enum FsKind {
 /// How the CLI/caller identifies which partition to act on — always
 /// explicit, never auto-detected, for write operations (see the project
 /// plan's safety notes on partition selection).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PartitionSelector {
     /// Raw partition index, as printed by `image partition list`.
     Index(u32),
