@@ -17,6 +17,7 @@ use remora_etcher_flash::{
 };
 use remora_etcher_flash_adapter_bmap::BmapAdapterImpl;
 use remora_etcher_flash_application::FlashControllerImpl;
+use remora_etcher_progress::OperationContext;
 
 const IMAGE_SIZE: u64 = 8 * 1024 * 1024;
 const RANGE_A_OFFSET: usize = 64 * 1024;
@@ -74,8 +75,8 @@ fn removable_non_system_disk(path: PathBuf) -> DiskInfo {
     }
 }
 
-#[test]
-fn bmap_copy_only_touches_mapped_ranges() {
+#[tokio::test]
+async fn bmap_copy_only_touches_mapped_ranges() {
     let dir = tempdir("ok");
     let image_path = dir.join("src.img");
     let bmap_path = dir.join("src.img.bmap");
@@ -94,7 +95,8 @@ fn bmap_copy_only_touches_mapped_ranges() {
     let info = removable_non_system_disk(device_path.clone());
 
     let outcome = controller()
-        .flash(&request, &info)
+        .flash(&request, &info, &OperationContext::noop())
+        .await
         .expect("flash should succeed");
     assert!(outcome.used_bmap);
     assert_eq!(outcome.bytes_written, (RANGE_A_LEN + RANGE_B_LEN) as u64);
@@ -128,8 +130,8 @@ fn bmap_copy_only_touches_mapped_ranges() {
     assert_eq!(expected_untouched, actually_untouched);
 }
 
-#[test]
-fn bmap_copy_rejects_a_corrupted_image() {
+#[tokio::test]
+async fn bmap_copy_rejects_a_corrupted_image() {
     let dir = tempdir("corrupt");
     let image_path = dir.join("src.img");
     let bmap_path = dir.join("src.img.bmap");
@@ -153,15 +155,17 @@ fn bmap_copy_rejects_a_corrupted_image() {
     };
     let info = removable_non_system_disk(device_path);
 
-    let result = controller().flash(&request, &info);
+    let result = controller()
+        .flash(&request, &info, &OperationContext::noop())
+        .await;
     assert!(
         result.is_err(),
         "a corrupted image must fail bmap checksum verification, not be silently written"
     );
 }
 
-#[test]
-fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
+#[tokio::test]
+async fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
     let dir = tempdir("system-disk-guard");
     let device_path = dir.join("dest.img");
     fs::write(&device_path, vec![MARKER; 1024]).unwrap();
@@ -174,11 +178,14 @@ fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
         is_system_disk: true,
     };
 
-    assert!(controller().preflight(&info, /* force */ true).is_err());
+    assert!(controller()
+        .preflight(&info, /* force */ true)
+        .await
+        .is_err());
 }
 
-#[test]
-fn preflight_refuses_a_non_removable_disk_without_force() {
+#[tokio::test]
+async fn preflight_refuses_a_non_removable_disk_without_force() {
     let dir = tempdir("non-removable-guard");
     let device_path = dir.join("dest.img");
     fs::write(&device_path, vec![MARKER; 1024]).unwrap();
@@ -191,6 +198,6 @@ fn preflight_refuses_a_non_removable_disk_without_force() {
         is_system_disk: false,
     };
 
-    assert!(controller().preflight(&info, false).is_err());
-    assert!(controller().preflight(&info, true).is_ok());
+    assert!(controller().preflight(&info, false).await.is_err());
+    assert!(controller().preflight(&info, true).await.is_ok());
 }

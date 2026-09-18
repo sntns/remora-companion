@@ -19,12 +19,13 @@ impl DiskControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl DiskServiceInterface for DiskControllerImpl {
-    fn list(&self) -> Result<Vec<DiskInfo>> {
+    async fn list(&self) -> Result<Vec<DiskInfo>> {
         self.adapter.enumerate().change_context(Error::Enumerate)
     }
 
-    fn info(&self, path: &Path) -> Result<DiskInfo> {
+    async fn info(&self, path: &Path) -> Result<DiskInfo> {
         self.adapter.info(path).change_context(Error::Info)
     }
 }

@@ -14,6 +14,8 @@ pub enum Error {
     CreateOutput(PathBuf),
     #[error("failed to open {0}")]
     OpenInput(PathBuf),
+    #[error("build was cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

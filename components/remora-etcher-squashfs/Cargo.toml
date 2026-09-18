@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
+async-trait.workspace = true
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

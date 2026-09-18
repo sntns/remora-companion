@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use remora_etcher_progress::OperationContext;
+
 use super::error::Result;
 
 #[derive(Debug)]
@@ -10,21 +12,28 @@ pub struct BuildSummary {
 
 /// The squashfs vertical's application-facing port: what every transport
 /// (CLI today, anything else later) calls into.
+#[async_trait::async_trait]
 pub trait SquashfsServiceInterface: Send + Sync {
     /// Build a squashfs image from `inputs` (files and/or directories) into
     /// `output`. A directory input has its *contents* merged into the
     /// squashfs root (like `mksquashfs <dir> out.squashfs`); a file input is
     /// placed at the root under its own basename. Real uid/gid/mode from the
     /// host filesystem are preserved (no `-all-root` equivalent).
-    fn build(
+    ///
+    /// Reports progress via `ctx` by polling `output`'s size against the
+    /// summed size of every file input, not a per-entry hook — `backhand`
+    /// buffers pushed entries and does the real compression/writing in one
+    /// opaque call, so a per-entry loop wouldn't actually track real work.
+    async fn build(
         &self,
         inputs: &[PathBuf],
         output: &Path,
         options: &crate::model::BuildOptions,
+        ctx: &OperationContext,
     ) -> Result<BuildSummary>;
 
     /// List the entries of an existing squashfs image.
-    fn inspect(&self, image: &Path) -> Result<Vec<crate::adapter::InspectedEntry>>;
+    async fn inspect(&self, image: &Path) -> Result<Vec<crate::adapter::InspectedEntry>>;
 }
 
 /// Injectable handle to whatever `SquashfsServiceInterface` implementation

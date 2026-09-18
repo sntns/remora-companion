@@ -43,7 +43,7 @@ pub struct Command {
     yes: bool,
 }
 
-pub fn run(command: Command, disk: &DiskService, flash: &FlashService) -> Result<()> {
+pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> Result<()> {
     let Command {
         image,
         bmap,
@@ -59,13 +59,16 @@ pub fn run(command: Command, disk: &DiskService, flash: &FlashService) -> Result
         bmap.or_else(|| default_bmap_path(&image))
     };
 
-    let info = disk.info(&device).change_context(Error::Disk)?;
+    let info = disk.info(&device).await.change_context(Error::Disk)?;
     println!("target: {}", disk_line(&info));
 
     // The real guard (removable / not-the-system-disk) lives in
     // FlashServiceInterface::preflight and cannot be bypassed from here;
     // this confirmation is an extra CLI-only usability layer on top of it.
-    flash.preflight(&info, force).change_context(Error::Flash)?;
+    flash
+        .preflight(&info, force)
+        .await
+        .change_context(Error::Flash)?;
     if !yes && !confirm(&device).change_context(Error::Confirm)? {
         println!("aborted: device path did not match");
         return Ok(());
@@ -77,7 +80,16 @@ pub fn run(command: Command, disk: &DiskService, flash: &FlashService) -> Result
         device,
         force,
     };
-    let outcome = flash.flash(&request, &info).change_context(Error::Flash)?;
+    let (sink, stream) = remora_etcher_progress::channel();
+    let printer = remora_etcher_progress::print_to_stderr(stream);
+    let ctx = remora_etcher_progress::OperationContext::new(
+        sink,
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let outcome = flash.flash(&request, &info, &ctx).await;
+    drop(ctx);
+    let _ = printer.await;
+    let outcome = outcome.change_context(Error::Flash)?;
     println!(
         "wrote {} to {} ({})",
         human_size(outcome.bytes_written),

@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use remora_etcher_progress::OperationContext;
+
 use crate::model::{CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionTable};
 
 use super::error::Result;
@@ -9,20 +11,21 @@ use super::error::Result;
 /// (identity, config) call into to write generated files into a partition
 /// without needing to know its byte offset/size, or (via the `_by_role`
 /// methods) the image's boot mode.
+#[async_trait::async_trait]
 pub trait ImageServiceInterface: Send + Sync {
     /// Read the partition table of an image file or block device. Table
     /// kind (MBR vs. GPT) is auto-detected.
-    fn inspect(&self, path: &Path) -> Result<PartitionTable>;
+    async fn inspect(&self, path: &Path) -> Result<PartitionTable>;
 
     /// Inject `request.source`'s content into `request.dest_path` inside
     /// whichever partition `request.partition` resolves to. The parent
     /// directory of `dest_path` must already exist — this does not create
     /// intermediate directories (narrow surface, matches `mkdir`).
-    fn inject(&self, request: &InjectRequest) -> Result<()>;
+    async fn inject(&self, request: &InjectRequest) -> Result<()>;
 
     /// Create `request.dest_path` inside whichever partition
     /// `request.partition` resolves to.
-    fn mkdir(&self, request: &MkdirRequest) -> Result<()>;
+    async fn mkdir(&self, request: &MkdirRequest) -> Result<()>;
 
     /// Recursively copy `request.source_dir`'s content into
     /// `request.dest_path` inside whichever partition `request.partition`
@@ -31,7 +34,11 @@ pub trait ImageServiceInterface: Send + Sync {
     /// create it (same narrow-surface rule as `inject`/`mkdir`; use `mkdir`
     /// first if needed). Symlinks inside `source_dir` are rejected — neither
     /// backend can represent them.
-    fn cp_dir(&self, request: &CpDirRequest) -> Result<()>;
+    ///
+    /// Reports one `Progress` event per file copied through `ctx` — the
+    /// only image operation that walks a caller-controlled number of files,
+    /// so the only one worth it.
+    async fn cp_dir(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()>;
 
     /// Write `contents` to `dest_path` inside whichever partition has role
     /// `role` — resolved from the table's own detected kind (GPT/MBR), no
@@ -39,7 +46,7 @@ pub trait ImageServiceInterface: Send + Sync {
     /// `PartitionSelector::Role` and *does* require one). Used by verticals
     /// that generate their own content (identity, config) rather than
     /// acting on a CLI-supplied `--partition`/`--boot-mode` pair.
-    fn inject_by_role(
+    async fn inject_by_role(
         &self,
         image: &Path,
         role: PartitionRole,
@@ -51,7 +58,7 @@ pub trait ImageServiceInterface: Send + Sync {
     /// Like `inject_by_role`, but creates `dest_path` as a directory,
     /// treating "already exists" as success (see
     /// `adapter::partition_fs::PartitionFilesystem::ensure_dir`).
-    fn ensure_dir_by_role(
+    async fn ensure_dir_by_role(
         &self,
         image: &Path,
         role: PartitionRole,
@@ -61,12 +68,17 @@ pub trait ImageServiceInterface: Send + Sync {
 
     /// Whether `dest_path` exists inside whichever partition has role
     /// `role`. See `inject_by_role` for why this resolves by role alone.
-    fn exists_by_role(&self, image: &Path, role: PartitionRole, dest_path: &str) -> Result<bool>;
+    async fn exists_by_role(
+        &self,
+        image: &Path,
+        role: PartitionRole,
+        dest_path: &str,
+    ) -> Result<bool>;
 
     /// Read the whole content of `dest_path` inside whichever partition has
     /// role `role`. See `inject_by_role` for why this resolves by role
     /// alone.
-    fn read_file_by_role(
+    async fn read_file_by_role(
         &self,
         image: &Path,
         role: PartitionRole,

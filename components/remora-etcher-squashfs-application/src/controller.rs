@@ -5,6 +5,7 @@ use std::{
 
 use error_stack::{Report, ResultExt};
 use remora_etcher_fs_walk::FsWalkAdapterService;
+use remora_etcher_progress::{track_output_file_size, OperationContext, TrackedOutcome};
 use remora_etcher_squashfs::{
     adapter::{InspectedEntry, SquashfsAdapterService},
     application::{BuildSummary, Error, Result, SquashfsServiceInterface},
@@ -26,18 +27,24 @@ impl SquashfsControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl SquashfsServiceInterface for SquashfsControllerImpl {
-    fn build(
+    async fn build(
         &self,
         inputs: &[PathBuf],
         output: &Path,
         options: &BuildOptions,
+        ctx: &OperationContext,
     ) -> Result<BuildSummary> {
         options.validate().change_context(Error::InvalidOptions)?;
         if inputs.is_empty() {
             return Err(Report::new(Error::NoInputs));
         }
+        if ctx.cancel.is_cancelled() {
+            return Err(Report::new(Error::Cancelled));
+        }
 
+        ctx.sink.phase("walking inputs");
         let mut entries = Vec::new();
         let mut newest_mtime: u32 = 0;
         for input in inputs {
@@ -60,18 +67,47 @@ impl SquashfsServiceInterface for SquashfsControllerImpl {
         let out_file = fs::File::create(output)
             .map_err(|_| Report::new(Error::CreateOutput(output.to_path_buf())))?;
 
-        let bytes_written = self
-            .squashfs
-            .write(&entries, options, image_mtime, root_owner, out_file)
-            .change_context(Error::Build)?;
+        // `backhand` buffers pushed entries and does the real read/compress/
+        // write work inside this one opaque `write()` call -- track it by
+        // polling the output file's size against the summed input size,
+        // rather than a per-entry hook that wouldn't reflect real work (see
+        // SquashfsServiceInterface::build's doc comment).
+        let total_input_bytes: u64 = entries
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntryKind::File { source } => fs::metadata(source).ok().map(|m| m.len()),
+                _ => None,
+            })
+            .sum();
 
-        Ok(BuildSummary {
-            entry_count: entries.len(),
-            bytes_written,
+        ctx.sink.phase("writing squashfs image");
+        let squashfs = self.squashfs.clone();
+        let entries_for_work = entries.clone();
+        let options_for_work = options.clone();
+        let output_for_track = output.to_path_buf();
+        match track_output_file_size(ctx, output_for_track, total_input_bytes, move || {
+            squashfs.write(
+                &entries_for_work,
+                &options_for_work,
+                image_mtime,
+                root_owner,
+                out_file,
+            )
         })
+        .await
+        {
+            TrackedOutcome::Completed(res) => {
+                let bytes_written = res.change_context(Error::Build)?;
+                Ok(BuildSummary {
+                    entry_count: entries.len(),
+                    bytes_written,
+                })
+            }
+            TrackedOutcome::Cancelled => Err(Report::new(Error::Cancelled)),
+        }
     }
 
-    fn inspect(&self, image: &Path) -> Result<Vec<InspectedEntry>> {
+    async fn inspect(&self, image: &Path) -> Result<Vec<InspectedEntry>> {
         let file = fs::File::open(image)
             .map_err(|_| Report::new(Error::OpenInput(image.to_path_buf())))?;
         self.squashfs.inspect(file).change_context(Error::Build)
@@ -206,8 +242,8 @@ mod tests {
     use remora_etcher_squashfs_adapter_backhand::SquashfsAdapterImpl;
     use std::io::Write;
 
-    #[test]
-    fn builds_a_minimal_image() {
+    #[tokio::test]
+    async fn builds_a_minimal_image() {
         let dir = tempdir();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         std::fs::File::create(dir.join("etc/hostname"))
@@ -226,7 +262,9 @@ mod tests {
                 std::slice::from_ref(&dir),
                 &output,
                 &BuildOptions::default(),
+                &OperationContext::noop(),
             )
+            .await
             .unwrap();
 
         assert!(summary.entry_count >= 2);

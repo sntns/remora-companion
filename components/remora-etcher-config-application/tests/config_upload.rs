@@ -160,7 +160,7 @@ fn read_back(disk: &Path, mkfs: &str, dest_path: &str) -> Vec<u8> {
     }
 }
 
-fn run_config_upload_round_trip(mkfs: &str) {
+async fn run_config_upload_round_trip(mkfs: &str) {
     let disk = build_disk_with_shared_partition(mkfs);
     let controller = controller();
 
@@ -171,6 +171,7 @@ fn run_config_upload_round_trip(mkfs: &str) {
     // fresh config.ext4 is built (seeded with tzdata/) and injected.
     controller
         .upload(&disk, &source, "/timezone", "slot-A", 0o644)
+        .await
         .unwrap();
 
     let config_bytes = read_back(&disk, mkfs, "/remora/slot-A/config");
@@ -195,6 +196,7 @@ fn run_config_upload_round_trip(mkfs: &str) {
     fs::write(&source2, b"UTC\n").unwrap();
     controller
         .upload(&disk, &source2, "/timezone", "slot-A", 0o644)
+        .await
         .unwrap();
 
     let config_bytes2 = read_back(&disk, mkfs, "/remora/slot-A/config");
@@ -217,20 +219,20 @@ fn run_config_upload_round_trip(mkfs: &str) {
     }
 }
 
-#[test]
+#[tokio::test]
 #[cfg_attr(
     not(target_os = "linux"),
     ignore = "requires sfdisk/mke2fs/fsck.ext4, Linux-only dev tools"
 )]
-fn config_upload_round_trips_on_an_ext4_shared_partition() {
-    run_config_upload_round_trip("ext4");
+async fn config_upload_round_trips_on_an_ext4_shared_partition() {
+    run_config_upload_round_trip("ext4").await;
 }
 
-#[test]
+#[tokio::test]
 #[cfg_attr(
     not(target_os = "linux"),
     ignore = "requires sfdisk/mkfs.vfat/fsck.vfat, Linux-only dev tools"
 )]
-fn config_upload_round_trips_on_a_vfat_shared_partition() {
-    run_config_upload_round_trip("vfat");
+async fn config_upload_round_trips_on_a_vfat_shared_partition() {
+    run_config_upload_round_trip("vfat").await;
 }

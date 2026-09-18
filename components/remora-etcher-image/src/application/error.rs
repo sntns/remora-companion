@@ -14,6 +14,8 @@ pub enum Error {
     Walk(PathBuf),
     #[error("unsupported filesystem entry: {0}")]
     UnsupportedEntry(PathBuf),
+    #[error("copy was cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

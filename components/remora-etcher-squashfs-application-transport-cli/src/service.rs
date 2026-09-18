@@ -68,7 +68,7 @@ impl From<CompressionArg> for Compression {
     }
 }
 
-pub fn run(command: Command, service: &SquashfsService) -> Result<()> {
+pub async fn run(command: Command, service: &SquashfsService) -> Result<()> {
     match command {
         Command::Build {
             inputs,
@@ -84,7 +84,16 @@ pub fn run(command: Command, service: &SquashfsService) -> Result<()> {
                 source_date_epoch,
                 root_mode,
             };
-            let summary = service.build(&inputs, &output, &options)?;
+            let (sink, stream) = remora_etcher_progress::channel();
+            let printer = remora_etcher_progress::print_to_stderr(stream);
+            let ctx = remora_etcher_progress::OperationContext::new(
+                sink,
+                tokio_util::sync::CancellationToken::new(),
+            );
+            let summary = service.build(&inputs, &output, &options, &ctx).await;
+            drop(ctx);
+            let _ = printer.await;
+            let summary = summary?;
             println!(
                 "wrote {} ({} entries) to {}",
                 human_size(summary.bytes_written),
@@ -94,7 +103,7 @@ pub fn run(command: Command, service: &SquashfsService) -> Result<()> {
             Ok(())
         }
         Command::Inspect { image } => {
-            let entries = service.inspect(&image)?;
+            let entries = service.inspect(&image).await?;
             for entry in entries {
                 println!(
                     "{:<5} {:04o} {:>6}:{:<6} {}",

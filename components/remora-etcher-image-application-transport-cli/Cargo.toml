@@ -9,6 +9,9 @@ publish.workspace = true
 [dependencies]
 remora-etcher-image = { path = "../remora-etcher-image" }
 remora-etcher-format = { path = "../remora-etcher-format" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

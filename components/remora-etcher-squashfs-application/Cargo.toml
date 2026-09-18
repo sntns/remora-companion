@@ -9,7 +9,10 @@ publish.workspace = true
 [dependencies]
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 error-stack.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 # Real (not mocked) adapter, for an integration-style test of the use case

@@ -10,6 +10,9 @@ publish.workspace = true
 remora-etcher-disk = { path = "../remora-etcher-disk" }
 remora-etcher-flash = { path = "../remora-etcher-flash" }
 remora-etcher-format = { path = "../remora-etcher-format" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

@@ -20,17 +20,17 @@ pub enum Command {
     },
 }
 
-pub fn run(command: Command, service: &DiskService) -> Result<()> {
+pub async fn run(command: Command, service: &DiskService) -> Result<()> {
     match command {
         Command::List { all } => {
-            let disks = service.list()?;
+            let disks = service.list().await?;
             for info in disks.into_iter().filter(|d| all || d.is_removable) {
                 println!("{}", format_disk_line(&info));
             }
             Ok(())
         }
         Command::Info { device } => {
-            let info = service.info(&device)?;
+            let info = service.info(&device).await?;
             println!("{}", format_disk_line(&info));
             Ok(())
         }

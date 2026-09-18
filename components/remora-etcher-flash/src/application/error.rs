@@ -12,6 +12,8 @@ pub enum Error {
     Bmap,
     #[error("refusing to flash {path}: {reason}")]
     UnsafeTarget { path: PathBuf, reason: &'static str },
+    #[error("flash was cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

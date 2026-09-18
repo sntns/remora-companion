@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use remora_etcher_convert::application::{ConvertService, Result};
+use remora_etcher_progress::OperationContext;
+use tokio_util::sync::CancellationToken;
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -25,15 +27,35 @@ pub enum Command {
     },
 }
 
-pub fn run(command: Command, service: &ConvertService) -> Result<()> {
+pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
     match command {
         Command::ToRaw { image, output } => {
-            service.to_raw(&image, &output)?;
+            let (sink, stream) = remora_etcher_progress::channel();
+            let printer = remora_etcher_progress::print_to_stderr(stream);
+            let result = service
+                .to_raw(
+                    &image,
+                    &output,
+                    &OperationContext::new(sink, CancellationToken::new()),
+                )
+                .await;
+            let _ = printer.await;
+            result?;
             println!("wrote {}", output.display());
             Ok(())
         }
         Command::FromRaw { raw, output } => {
-            service.from_raw(&raw, &output)?;
+            let (sink, stream) = remora_etcher_progress::channel();
+            let printer = remora_etcher_progress::print_to_stderr(stream);
+            let result = service
+                .from_raw(
+                    &raw,
+                    &output,
+                    &OperationContext::new(sink, CancellationToken::new()),
+                )
+                .await;
+            let _ = printer.await;
+            result?;
             println!("wrote {}", output.display());
             Ok(())
         }

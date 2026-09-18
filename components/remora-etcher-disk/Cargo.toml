@@ -10,3 +10,4 @@ publish.workspace = true
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+async-trait.workspace = true

@@ -5,6 +5,7 @@ use remora_etcher_convert::{
     adapter::ContainerFormatAdapter,
     application::{ConvertServiceInterface, Error, Result},
 };
+use remora_etcher_progress::{track_output_file_size, OperationContext, TrackedOutcome};
 
 /// Which container format a path's own extension names -- the only signal
 /// this vertical uses to pick an adapter (or none, for a plain raw copy),
@@ -50,26 +51,64 @@ impl ConvertControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl ConvertServiceInterface for ConvertControllerImpl {
-    fn to_raw(&self, image: &Path, output_raw: &Path) -> Result<()> {
+    async fn to_raw(&self, image: &Path, output_raw: &Path, ctx: &OperationContext) -> Result<()> {
         match self.adapter_for(format_of(image)) {
-            None => fs::copy(image, output_raw).map(|_| ()).map_err(|_| {
-                Report::new(Error::Copy(image.to_path_buf(), output_raw.to_path_buf()))
-            }),
-            Some(adapter) => adapter
-                .decode_to_raw(image, output_raw)
-                .change_context(Error::Decode(image.to_path_buf())),
+            None => {
+                ctx.sink.phase("copying");
+                fs::copy(image, output_raw).map(|_| ()).map_err(|_| {
+                    Report::new(Error::Copy(image.to_path_buf(), output_raw.to_path_buf()))
+                })
+            }
+            Some(adapter) => {
+                ctx.sink.phase("decoding");
+                let adapter = adapter.clone();
+                let input_size = fs::metadata(image).map(|m| m.len()).unwrap_or(0);
+                let image_for_work = image.to_path_buf();
+                let output_for_work = output_raw.to_path_buf();
+                let image = image.to_path_buf();
+                match track_output_file_size(ctx, output_raw.to_path_buf(), input_size, move || {
+                    adapter.decode_to_raw(&image_for_work, &output_for_work)
+                })
+                .await
+                {
+                    TrackedOutcome::Completed(res) => res.change_context(Error::Decode(image)),
+                    TrackedOutcome::Cancelled => Err(Report::new(Error::Cancelled)),
+                }
+            }
         }
     }
 
-    fn from_raw(&self, raw_image: &Path, output: &Path) -> Result<()> {
+    async fn from_raw(
+        &self,
+        raw_image: &Path,
+        output: &Path,
+        ctx: &OperationContext,
+    ) -> Result<()> {
         match self.adapter_for(format_of(output)) {
-            None => fs::copy(raw_image, output).map(|_| ()).map_err(|_| {
-                Report::new(Error::Copy(raw_image.to_path_buf(), output.to_path_buf()))
-            }),
-            Some(adapter) => adapter
-                .encode_from_raw(raw_image, output)
-                .change_context(Error::Encode(output.to_path_buf())),
+            None => {
+                ctx.sink.phase("copying");
+                fs::copy(raw_image, output).map(|_| ()).map_err(|_| {
+                    Report::new(Error::Copy(raw_image.to_path_buf(), output.to_path_buf()))
+                })
+            }
+            Some(adapter) => {
+                ctx.sink.phase("encoding");
+                let adapter = adapter.clone();
+                let input_size = fs::metadata(raw_image).map(|m| m.len()).unwrap_or(0);
+                let raw_image_for_work = raw_image.to_path_buf();
+                let output_for_work = output.to_path_buf();
+                let output = output.to_path_buf();
+                match track_output_file_size(ctx, output.clone(), input_size, move || {
+                    adapter.encode_from_raw(&raw_image_for_work, &output_for_work)
+                })
+                .await
+                {
+                    TrackedOutcome::Completed(res) => res.change_context(Error::Encode(output)),
+                    TrackedOutcome::Cancelled => Err(Report::new(Error::Cancelled)),
+                }
+            }
         }
     }
 }
@@ -99,18 +138,24 @@ mod tests {
         )
     }
 
-    #[test]
-    fn round_trips_through_gzip_by_extension() {
+    #[tokio::test]
+    async fn round_trips_through_gzip_by_extension() {
         let raw = temp_path("raw");
         let mut f = fs::File::create(&raw).unwrap();
         f.write_all(&[1u8, 2, 3, 4, 5, 0, 0, 0]).unwrap();
         drop(f);
 
         let gz = temp_path("out.gz");
-        controller().from_raw(&raw, &gz).unwrap();
+        controller()
+            .from_raw(&raw, &gz, &OperationContext::noop())
+            .await
+            .unwrap();
 
         let back = temp_path("back.raw");
-        controller().to_raw(&gz, &back).unwrap();
+        controller()
+            .to_raw(&gz, &back, &OperationContext::noop())
+            .await
+            .unwrap();
 
         assert_eq!(fs::read(&raw).unwrap(), fs::read(&back).unwrap());
 
@@ -119,14 +164,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_plain_raw_path_is_just_copied() {
+    #[tokio::test]
+    async fn a_plain_raw_path_is_just_copied() {
         let raw = temp_path("raw2");
         fs::write(&raw, b"hello").unwrap();
         let copy = temp_path("copy2.raw");
-        controller().from_raw(&raw, &copy).unwrap();
+        controller()
+            .from_raw(&raw, &copy, &OperationContext::noop())
+            .await
+            .unwrap();
         assert_eq!(fs::read(&copy).unwrap(), b"hello");
         for p in [raw, copy] {
+            let _ = fs::remove_file(p);
+        }
+    }
+
+    #[tokio::test]
+    async fn reports_progress_while_encoding() {
+        let raw = temp_path("raw3");
+        fs::write(&raw, vec![0xABu8; 4096]).unwrap();
+        let qcow2 = temp_path("out3.qcow2");
+
+        let (sink, mut stream) = remora_etcher_progress::channel();
+        let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
+        controller().from_raw(&raw, &qcow2, &ctx).await.unwrap();
+        drop(ctx);
+
+        let mut saw_phase = false;
+        while let Some(event) = tokio_stream::StreamExt::next(&mut stream).await {
+            if matches!(event, remora_etcher_progress::OperationEvent::Phase(_)) {
+                saw_phase = true;
+            }
+        }
+        assert!(saw_phase, "expected at least a Phase event");
+
+        for p in [raw, qcow2] {
             let _ = fs::remove_file(p);
         }
     }

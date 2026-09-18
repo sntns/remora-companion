@@ -1,4 +1,5 @@
 use remora_etcher_disk::model::DiskInfo;
+use remora_etcher_progress::OperationContext;
 
 use crate::model::{FlashOutcome, FlashRequest};
 
@@ -7,9 +8,22 @@ use super::error::Result;
 /// The flash vertical's application-facing port. `preflight` is exposed on
 /// its own (not just folded into `flash`) so a CLI (or a future GUI) can run
 /// the safety check up front, before asking for interactive confirmation.
+///
+/// `flash` reports coarse `Phase` events through `ctx`, not fine-grained
+/// byte progress: the destination is a raw block device, whose reported
+/// size is its fixed capacity, not "bytes written so far" -- unlike a
+/// regular output file, there's no size to poll (see `FlashControllerImpl`).
+/// `ctx.cancel` is checked before the copy starts; once under way, the
+/// underlying `bmap_parser` copy is not preemptible.
+#[async_trait::async_trait]
 pub trait FlashServiceInterface: Send + Sync {
-    fn preflight(&self, info: &DiskInfo, force: bool) -> Result<()>;
-    fn flash(&self, request: &FlashRequest, info: &DiskInfo) -> Result<FlashOutcome>;
+    async fn preflight(&self, info: &DiskInfo, force: bool) -> Result<()>;
+    async fn flash(
+        &self,
+        request: &FlashRequest,
+        info: &DiskInfo,
+        ctx: &OperationContext,
+    ) -> Result<FlashOutcome>;
 }
 
 /// Injectable handle to whatever `FlashServiceInterface` implementation was

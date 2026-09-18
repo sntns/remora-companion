@@ -56,15 +56,12 @@ enum Commands {
     Convert(remora_etcher_convert_application_transport_cli::Command),
 }
 
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
     let options = Options::parse();
     init_tracing(&options);
 
-    let runtime = tokio::runtime::Runtime::new().expect("failed to start the wiring runtime");
-    let services = runtime.block_on(bootstrap::wire());
-    // Wiring is the only thing that needed async; every service call below
-    // is plain synchronous Rust.
-    drop(runtime);
+    let services = bootstrap::wire().await;
 
     // Print the full error-stack chain (`{:?}`), not just the top context's
     // message (`{}`) — the useful detail (e.g. *why* a flash was refused)
@@ -73,7 +70,7 @@ fn main() {
     match options.command {
         Commands::Disk(cmd) => {
             if let Err(report) =
-                remora_etcher_disk_application_transport_cli::run(cmd, &services.disk)
+                remora_etcher_disk_application_transport_cli::run(cmd, &services.disk).await
             {
                 fail(report);
             }
@@ -83,41 +80,43 @@ fn main() {
                 cmd,
                 &services.disk,
                 &services.flash,
-            ) {
+            )
+            .await
+            {
                 fail(report);
             }
         }
         Commands::Image(cmd) => {
             if let Err(report) =
-                remora_etcher_image_application_transport_cli::run(cmd, &services.image)
+                remora_etcher_image_application_transport_cli::run(cmd, &services.image).await
             {
                 fail(report);
             }
         }
         Commands::Squashfs(cmd) => {
             if let Err(report) =
-                remora_etcher_squashfs_application_transport_cli::run(cmd, &services.squashfs)
+                remora_etcher_squashfs_application_transport_cli::run(cmd, &services.squashfs).await
             {
                 fail(report);
             }
         }
         Commands::Identity(cmd) => {
             if let Err(report) =
-                remora_etcher_identity_application_transport_cli::run(cmd, &services.identity)
+                remora_etcher_identity_application_transport_cli::run(cmd, &services.identity).await
             {
                 fail(report);
             }
         }
         Commands::Config(cmd) => {
             if let Err(report) =
-                remora_etcher_config_application_transport_cli::run(cmd, &services.config)
+                remora_etcher_config_application_transport_cli::run(cmd, &services.config).await
             {
                 fail(report);
             }
         }
         Commands::Convert(cmd) => {
             if let Err(report) =
-                remora_etcher_convert_application_transport_cli::run(cmd, &services.convert)
+                remora_etcher_convert_application_transport_cli::run(cmd, &services.convert).await
             {
                 fail(report);
             }

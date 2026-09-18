@@ -6,6 +6,7 @@ use super::error::Result;
 
 /// The identity vertical's application-facing port: what every transport
 /// (CLI today, anything else later) calls into.
+#[async_trait::async_trait]
 pub trait IdentityServiceInterface: Send + Sync {
     /// Build `identity.squashfs` from `inputs` (arbitrary user-supplied
     /// files and/or directories, same semantics as the squashfs vertical's
@@ -18,7 +19,7 @@ pub trait IdentityServiceInterface: Send + Sync {
     /// already provides a root-level file at one of those paths (or, for
     /// the SSH keypair, both halves of it), that file wins and nothing is
     /// generated for it.
-    fn build(
+    async fn build(
         &self,
         inputs: &[PathBuf],
         hostname: Option<&str>,
@@ -30,7 +31,7 @@ pub trait IdentityServiceInterface: Send + Sync {
     /// `build`) and inject it into `Shared:/remora/identity` of `image` in
     /// one shot. Boot mode and filesystem kind (vfat/ext4) are
     /// auto-detected — no `--boot-mode` flag.
-    fn create(
+    async fn create(
         &self,
         inputs: &[PathBuf],
         hostname: Option<&str>,

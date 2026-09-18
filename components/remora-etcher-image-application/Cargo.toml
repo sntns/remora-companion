@@ -9,7 +9,9 @@ publish.workspace = true
 [dependencies]
 remora-etcher-image = { path = "../remora-etcher-image" }
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 error-stack.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 # Real (not mocked) adapters, for an integration-style test of the use case
@@ -17,3 +19,4 @@ error-stack.workspace = true
 remora-etcher-image-adapter-ext4 = { path = "../remora-etcher-image-adapter-ext4" }
 remora-etcher-image-adapter-vfat = { path = "../remora-etcher-image-adapter-vfat" }
 remora-etcher-image-adapter-partition-table = { path = "../remora-etcher-image-adapter-partition-table" }
+tokio = { workspace = true, features = ["macros", "rt"] }

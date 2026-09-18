@@ -6,9 +6,10 @@ use super::error::Result;
 
 /// The disk vertical's application-facing port: what every transport (CLI
 /// today, anything else later) calls into.
+#[async_trait::async_trait]
 pub trait DiskServiceInterface: Send + Sync {
-    fn list(&self) -> Result<Vec<DiskInfo>>;
-    fn info(&self, path: &Path) -> Result<DiskInfo>;
+    async fn list(&self) -> Result<Vec<DiskInfo>>;
+    async fn info(&self, path: &Path) -> Result<DiskInfo>;
 }
 
 /// Injectable handle to whatever `DiskServiceInterface` implementation was

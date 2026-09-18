@@ -40,8 +40,9 @@ impl IdentityControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl IdentityServiceInterface for IdentityControllerImpl {
-    fn build(
+    async fn build(
         &self,
         inputs: &[PathBuf],
         hostname: Option<&str>,
@@ -87,7 +88,13 @@ impl IdentityServiceInterface for IdentityControllerImpl {
         };
         let result = self
             .squashfs
-            .build(&all_inputs, output, &options)
+            .build(
+                &all_inputs,
+                output,
+                &options,
+                &remora_etcher_progress::OperationContext::noop(),
+            )
+            .await
             .change_context(Error::Squashfs);
 
         if wrote_any {
@@ -96,7 +103,7 @@ impl IdentityServiceInterface for IdentityControllerImpl {
         result
     }
 
-    fn create(
+    async fn create(
         &self,
         inputs: &[PathBuf],
         hostname: Option<&str>,
@@ -104,7 +111,7 @@ impl IdentityServiceInterface for IdentityControllerImpl {
         image: &Path,
     ) -> Result<u64> {
         let temp = remora_etcher_scratch::unique_path("remora-etcher-identity-create");
-        self.build(inputs, hostname, machine_id, &temp)?;
+        self.build(inputs, hostname, machine_id, &temp).await?;
 
         let contents =
             fs::read(&temp).map_err(|_| Report::new(Error::ReadBuiltImage(temp.clone())));
@@ -113,6 +120,7 @@ impl IdentityServiceInterface for IdentityControllerImpl {
 
         self.image
             .ensure_dir_by_role(image, PartitionRole::Shared, "/remora", 0o755)
+            .await
             .change_context(Error::Image)?;
         self.image
             .inject_by_role(
@@ -122,6 +130,7 @@ impl IdentityServiceInterface for IdentityControllerImpl {
                 &contents,
                 0o644,
             )
+            .await
             .change_context(Error::Image)?;
 
         Ok(contents.len() as u64)
@@ -209,8 +218,8 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn generates_hostname_machine_id_and_ssh_host_key_when_absent() {
+    #[tokio::test]
+    async fn generates_hostname_machine_id_and_ssh_host_key_when_absent() {
         let extra = tempdir();
         fs::File::create(extra.join("activation"))
             .unwrap()
@@ -220,14 +229,15 @@ mod tests {
         let output = extra.join("../identity.squashfs");
         let summary = controller()
             .build(std::slice::from_ref(&extra), None, None, &output)
+            .await
             .unwrap();
 
         // activation, hostname, machine-id, ssh_host_ed25519_key(.pub).
         assert_eq!(summary.entry_count, 5);
     }
 
-    #[test]
-    fn respects_a_user_supplied_hostname_file() {
+    #[tokio::test]
+    async fn respects_a_user_supplied_hostname_file() {
         let dir = tempdir();
         fs::File::create(dir.join("hostname"))
             .unwrap()
@@ -237,21 +247,22 @@ mod tests {
         let output = dir.join("../identity2.squashfs");
         let summary = controller()
             .build(std::slice::from_ref(&dir), Some("ignored"), None, &output)
+            .await
             .unwrap();
 
         // hostname (user-supplied) + machine-id + ssh_host_ed25519_key(.pub) (generated).
         assert_eq!(summary.entry_count, 4);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg_attr(
         not(target_os = "linux"),
         ignore = "requires unsquashfs, a Linux-only dev tool"
     )]
-    fn generates_a_valid_ed25519_ssh_host_keypair() {
+    async fn generates_a_valid_ed25519_ssh_host_keypair() {
         let dir = tempdir();
         let output = dir.join("../identity3.squashfs");
-        controller().build(&[], None, None, &output).unwrap();
+        controller().build(&[], None, None, &output).await.unwrap();
 
         // Dev-only real tool, mirroring how other tests in this workspace
         // validate squashfs output — never shelled out to by the shipped
@@ -278,7 +289,7 @@ mod tests {
         let public_key = ssh_key::PublicKey::from_openssh(public_line.trim()).unwrap();
         assert_eq!(public_key, *private_key.public_key());
 
-        let entries = controller().squashfs.inspect(&output).unwrap();
+        let entries = controller().squashfs.inspect(&output).await.unwrap();
         let private_entry = entries
             .iter()
             .find(|e| e.path == std::path::Path::new("/ssh_host_ed25519_key"))

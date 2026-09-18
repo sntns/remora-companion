@@ -8,6 +8,8 @@ pub enum Error {
     Encode(PathBuf),
     #[error("failed to copy {0} to {1}")]
     Copy(PathBuf, PathBuf),
+    #[error("conversion was cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

@@ -11,7 +11,9 @@ remora-etcher-identity = { path = "../remora-etcher-identity" }
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }
 remora-etcher-image = { path = "../remora-etcher-image" }
 remora-etcher-scratch = { path = "../remora-etcher-scratch" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 error-stack.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 # Real (not mocked) adapters, for an integration-style test of the use case
@@ -25,3 +27,4 @@ remora-etcher-image-adapter-partition-table = { path = "../remora-etcher-image-a
 remora-etcher-image-adapter-ext4 = { path = "../remora-etcher-image-adapter-ext4" }
 remora-etcher-image-adapter-vfat = { path = "../remora-etcher-image-adapter-vfat" }
 ssh-key = { version = "0.6", features = ["ed25519", "rand_core", "getrandom"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

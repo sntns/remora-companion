@@ -118,7 +118,7 @@ fn read_back(disk: &std::path::Path, mkfs: &str, dest_path: &str) -> Vec<u8> {
     }
 }
 
-fn run_cp_dir_round_trip(mkfs: &str) {
+async fn run_cp_dir_round_trip(mkfs: &str) {
     let disk = build_disk_with_partition(mkfs);
 
     let source = temp_path("source-dir");
@@ -127,13 +127,17 @@ fn run_cp_dir_round_trip(mkfs: &str) {
     fs::write(source.join("nested/inner.txt"), b"nested-file\n").unwrap();
 
     controller()
-        .cp_dir(&CpDirRequest {
-            image: disk.clone(),
-            source_dir: source.clone(),
-            dest_path: "/".to_string(),
-            partition: PartitionSelector::Index(1),
-            boot_mode: None,
-        })
+        .cp_dir(
+            &CpDirRequest {
+                image: disk.clone(),
+                source_dir: source.clone(),
+                dest_path: "/".to_string(),
+                partition: PartitionSelector::Index(1),
+                boot_mode: None,
+            },
+            &remora_etcher_progress::OperationContext::noop(),
+        )
+        .await
         .unwrap();
 
     assert_eq!(read_back(&disk, mkfs, "/top.txt"), b"top-level\n");
@@ -146,20 +150,20 @@ fn run_cp_dir_round_trip(mkfs: &str) {
     let _ = fs::remove_file(&disk);
 }
 
-#[test]
+#[tokio::test]
 #[cfg_attr(
     not(target_os = "linux"),
     ignore = "requires sfdisk/mke2fs, Linux-only dev tools"
 )]
-fn cp_dir_round_trips_on_an_ext4_partition() {
-    run_cp_dir_round_trip("ext4");
+async fn cp_dir_round_trips_on_an_ext4_partition() {
+    run_cp_dir_round_trip("ext4").await;
 }
 
-#[test]
+#[tokio::test]
 #[cfg_attr(
     not(target_os = "linux"),
     ignore = "requires sfdisk/mkfs.vfat, Linux-only dev tools"
 )]
-fn cp_dir_round_trips_on_a_vfat_partition() {
-    run_cp_dir_round_trip("vfat");
+async fn cp_dir_round_trips_on_a_vfat_partition() {
+    run_cp_dir_round_trip("vfat").await;
 }

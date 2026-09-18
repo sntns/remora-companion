@@ -10,6 +10,7 @@ use remora_etcher_image::{
         PartitionTable,
     },
 };
+use remora_etcher_progress::OperationContext;
 
 /// The image vertical's use case: partition-table reading/selection, and
 /// dispatching writes to whichever of the ext4/vfat backends the target
@@ -77,14 +78,15 @@ impl ImageControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl ImageServiceInterface for ImageControllerImpl {
-    fn inspect(&self, path: &Path) -> Result<PartitionTable> {
+    async fn inspect(&self, path: &Path) -> Result<PartitionTable> {
         self.partition_table
             .read(path)
             .change_context(Error::ReadPartitionTable)
     }
 
-    fn inject(&self, request: &InjectRequest) -> Result<()> {
+    async fn inject(&self, request: &InjectRequest) -> Result<()> {
         let (entry, backend) = self.resolve(&request.image, |table| {
             table
                 .select(request.partition, request.boot_mode)
@@ -107,7 +109,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
-    fn mkdir(&self, request: &MkdirRequest) -> Result<()> {
+    async fn mkdir(&self, request: &MkdirRequest) -> Result<()> {
         let (entry, backend) = self.resolve(&request.image, |table| {
             table
                 .select(request.partition, request.boot_mode)
@@ -126,7 +128,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
-    fn cp_dir(&self, request: &CpDirRequest) -> Result<()> {
+    async fn cp_dir(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()> {
         let (entry, backend) = self.resolve(&request.image, |table| {
             table
                 .select(request.partition, request.boot_mode)
@@ -139,7 +141,12 @@ impl ImageServiceInterface for ImageControllerImpl {
             .walk_dir(&request.source_dir)
             .change_context_lazy(|| Error::Walk(request.source_dir.clone()))?;
 
-        for walked_entry in walked {
+        let total = walked.len() as u64;
+        for (i, walked_entry) in walked.into_iter().enumerate() {
+            if ctx.cancel.is_cancelled() {
+                return Err(Report::new(Error::Cancelled));
+            }
+            ctx.sink.progress(i as u64, total);
             let dest_path = to_partition_path(&request.dest_path, &walked_entry.path);
             let mode = walked_entry.metadata.permissions;
 
@@ -174,11 +181,12 @@ impl ImageServiceInterface for ImageControllerImpl {
                 }
             }
         }
+        ctx.sink.progress(total, total);
 
         Ok(())
     }
 
-    fn inject_by_role(
+    async fn inject_by_role(
         &self,
         image: &Path,
         role: PartitionRole,
@@ -200,7 +208,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
-    fn ensure_dir_by_role(
+    async fn ensure_dir_by_role(
         &self,
         image: &Path,
         role: PartitionRole,
@@ -214,7 +222,12 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
-    fn exists_by_role(&self, image: &Path, role: PartitionRole, dest_path: &str) -> Result<bool> {
+    async fn exists_by_role(
+        &self,
+        image: &Path,
+        role: PartitionRole,
+        dest_path: &str,
+    ) -> Result<bool> {
         let (entry, backend) = self.resolve_by_role(image, role)?;
 
         backend
@@ -222,7 +235,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             .change_context(Error::Write)
     }
 
-    fn read_file_by_role(
+    async fn read_file_by_role(
         &self,
         image: &Path,
         role: PartitionRole,

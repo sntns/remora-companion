@@ -6,11 +6,12 @@ use super::error::Result;
 
 /// The config vertical's application-facing port: what every transport (CLI
 /// today, anything else later) calls into.
+#[async_trait::async_trait]
 pub trait ConfigServiceInterface: Send + Sync {
     /// Build a fresh ext4 image at `output` (created/truncated to
     /// `size_bytes`) populated from `source_dir` — the "format + populate"
     /// decomposition of `mkfs.ext4 -d CONFIG_DIR`.
-    fn build(
+    async fn build(
         &self,
         source_dir: &Path,
         output: &Path,
@@ -24,7 +25,7 @@ pub trait ConfigServiceInterface: Send + Sync {
     /// yet (seeded with an empty `tzdata/` dir, matching
     /// `default-config.bb`). Boot mode and filesystem kind are
     /// auto-detected, same as the identity vertical's `create`.
-    fn upload(
+    async fn upload(
         &self,
         image: &Path,
         source: &Path,

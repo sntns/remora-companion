@@ -140,10 +140,10 @@ fn parse_partition_selector(s: &str) -> Result<PartitionSelector> {
     Ok(PartitionSelector::Role(role))
 }
 
-pub fn run(command: Command, service: &ImageService) -> Result<()> {
+pub async fn run(command: Command, service: &ImageService) -> Result<()> {
     match command {
         Command::Inspect { image, boot_mode } => {
-            let table = service.inspect(&image).change_context(Error::Image)?;
+            let table = service.inspect(&image).await.change_context(Error::Image)?;
             println!(
                 "{}: {} table, {} bytes/sector, {} partition(s)",
                 image.display(),
@@ -158,7 +158,7 @@ pub fn run(command: Command, service: &ImageService) -> Result<()> {
             Ok(())
         }
         Command::Partition(PartitionCommand::List { image, boot_mode }) => {
-            let table = service.inspect(&image).change_context(Error::Image)?;
+            let table = service.inspect(&image).await.change_context(Error::Image)?;
             print_partitions(&table, boot_mode.map(BootMode::from));
             Ok(())
         }
@@ -179,7 +179,16 @@ pub fn run(command: Command, service: &ImageService) -> Result<()> {
                     partition: selector,
                     boot_mode: boot_mode.map(BootMode::from),
                 };
-                service.cp_dir(&request).change_context(Error::Image)?;
+                let (sink, stream) = remora_etcher_progress::channel();
+                let printer = remora_etcher_progress::print_to_stderr(stream);
+                let ctx = remora_etcher_progress::OperationContext::new(
+                    sink,
+                    tokio_util::sync::CancellationToken::new(),
+                );
+                let result = service.cp_dir(&request, &ctx).await;
+                drop(ctx);
+                let _ = printer.await;
+                result.change_context(Error::Image)?;
                 println!("copied into {dest_path} inside {}", image.display());
             } else {
                 let request = InjectRequest {
@@ -190,7 +199,10 @@ pub fn run(command: Command, service: &ImageService) -> Result<()> {
                     boot_mode: boot_mode.map(BootMode::from),
                     mode,
                 };
-                service.inject(&request).change_context(Error::Image)?;
+                service
+                    .inject(&request)
+                    .await
+                    .change_context(Error::Image)?;
                 println!("wrote {dest_path} inside {}", image.display());
             }
             Ok(())
@@ -210,7 +222,7 @@ pub fn run(command: Command, service: &ImageService) -> Result<()> {
                 boot_mode: boot_mode.map(BootMode::from),
                 mode,
             };
-            service.mkdir(&request).change_context(Error::Image)?;
+            service.mkdir(&request).await.change_context(Error::Image)?;
             println!("created {dest_path} inside {}", image.display());
             Ok(())
         }

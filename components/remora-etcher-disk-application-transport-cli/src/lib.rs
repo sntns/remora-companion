@@ -5,8 +5,11 @@ pub use service::Command;
 use remora_etcher_disk::{application::DiskService, model::DiskInfo};
 use remora_etcher_format::human_size;
 
-pub fn run(command: Command, service: &DiskService) -> remora_etcher_disk::application::Result<()> {
-    service::run(command, service)
+pub async fn run(
+    command: Command,
+    service: &DiskService,
+) -> remora_etcher_disk::application::Result<()> {
+    service::run(command, service).await
 }
 
 pub(crate) fn format_disk_line(info: &DiskInfo) -> String {

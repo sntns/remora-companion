@@ -40,8 +40,9 @@ impl ConfigControllerImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl ConfigServiceInterface for ConfigControllerImpl {
-    fn build(
+    async fn build(
         &self,
         source_dir: &Path,
         output: &Path,
@@ -92,7 +93,7 @@ impl ConfigServiceInterface for ConfigControllerImpl {
         })
     }
 
-    fn upload(
+    async fn upload(
         &self,
         image: &Path,
         source: &Path,
@@ -110,6 +111,7 @@ impl ConfigServiceInterface for ConfigControllerImpl {
         // ensure they exist here too rather than assuming it.
         self.image
             .ensure_dir_by_role(image, PartitionRole::Shared, "/remora", 0o755)
+            .await
             .change_context(Error::Image)?;
         self.image
             .ensure_dir_by_role(
@@ -118,18 +120,21 @@ impl ConfigServiceInterface for ConfigControllerImpl {
                 &format!("/remora/{slot}"),
                 0o755,
             )
+            .await
             .change_context(Error::Image)?;
 
         let local_image = remora_etcher_scratch::unique_path("remora-etcher-config-local");
         let config_exists = self
             .image
             .exists_by_role(image, PartitionRole::Shared, &config_path)
+            .await
             .change_context(Error::Image)?;
 
         if config_exists {
             let existing = self
                 .image
                 .read_file_by_role(image, PartitionRole::Shared, &config_path)
+                .await
                 .change_context(Error::Image)?;
             fs::write(&local_image, &existing)
                 .map_err(|_| Report::new(Error::WriteTempImage(local_image.clone())))?;
@@ -143,7 +148,8 @@ impl ConfigServiceInterface for ConfigControllerImpl {
                 DEFAULT_CONFIG_SIZE_BYTES,
                 DEFAULT_CONFIG_BLOCK_SIZE,
                 Some("config"),
-            )?;
+            )
+            .await?;
             let _ = fs::remove_dir_all(&seed_dir);
         }
 
@@ -165,6 +171,7 @@ impl ConfigServiceInterface for ConfigControllerImpl {
             .map_err(|_| Report::new(Error::ReadTempImage(local_image.clone())))?;
         self.image
             .inject_by_role(image, PartitionRole::Shared, &config_path, &updated, 0o644)
+            .await
             .change_context(Error::Image)?;
 
         let _ = fs::remove_file(&local_image);
@@ -219,12 +226,12 @@ mod tests {
         dir
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg_attr(
         not(target_os = "linux"),
         ignore = "requires fsck.ext4, a Linux-only dev tool"
     )]
-    fn builds_and_populates_a_config_image() {
+    async fn builds_and_populates_a_config_image() {
         let source = tempdir();
         fs::create_dir_all(source.join("tzdata")).unwrap();
         fs::File::create(source.join("timezone"))
@@ -235,6 +242,7 @@ mod tests {
         let output = source.join("../config.ext4");
         let summary = controller()
             .build(&source, &output, 8 * 1024 * 1024, 1024, Some("config"))
+            .await
             .unwrap();
 
         assert_eq!(summary.entry_count, 2);

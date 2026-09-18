@@ -241,6 +241,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytes"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
 name = "caseless"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1468,6 +1474,7 @@ dependencies = [
 name = "remora-etcher-config"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "busybody",
  "error-stack",
  "remora-etcher-squashfs",
@@ -1478,6 +1485,7 @@ dependencies = [
 name = "remora-etcher-config-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-config",
  "remora-etcher-fs-walk",
@@ -1488,6 +1496,7 @@ dependencies = [
  "remora-etcher-image-application",
  "remora-etcher-scratch",
  "remora-etcher-squashfs",
+ "tokio",
 ]
 
 [[package]]
@@ -1504,8 +1513,10 @@ dependencies = [
 name = "remora-etcher-convert"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "busybody",
  "error-stack",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
 ]
 
@@ -1530,10 +1541,15 @@ dependencies = [
 name = "remora-etcher-convert-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-convert",
  "remora-etcher-convert-adapter-gzip",
  "remora-etcher-convert-adapter-qcow2",
+ "remora-etcher-progress",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1543,12 +1559,17 @@ dependencies = [
  "clap",
  "error-stack",
  "remora-etcher-convert",
+ "remora-etcher-progress",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
 name = "remora-etcher-disk"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "busybody",
  "error-stack",
  "thiserror 1.0.69",
@@ -1566,6 +1587,7 @@ dependencies = [
 name = "remora-etcher-disk-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-disk",
 ]
@@ -1584,10 +1606,12 @@ dependencies = [
 name = "remora-etcher-flash"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "bmap-parser",
  "busybody",
  "error-stack",
  "remora-etcher-disk",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
 ]
 
@@ -1604,10 +1628,13 @@ dependencies = [
 name = "remora-etcher-flash-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-disk",
  "remora-etcher-flash",
  "remora-etcher-flash-adapter-bmap",
+ "remora-etcher-progress",
+ "tokio",
 ]
 
 [[package]]
@@ -1619,7 +1646,10 @@ dependencies = [
  "remora-etcher-disk",
  "remora-etcher-flash",
  "remora-etcher-format",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1640,6 +1670,7 @@ dependencies = [
 name = "remora-etcher-identity"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "busybody",
  "error-stack",
  "remora-etcher-squashfs",
@@ -1661,6 +1692,7 @@ dependencies = [
 name = "remora-etcher-identity-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-fs-walk",
  "remora-etcher-identity",
@@ -1670,11 +1702,13 @@ dependencies = [
  "remora-etcher-image-adapter-partition-table",
  "remora-etcher-image-adapter-vfat",
  "remora-etcher-image-application",
+ "remora-etcher-progress",
  "remora-etcher-scratch",
  "remora-etcher-squashfs",
  "remora-etcher-squashfs-adapter-backhand",
  "remora-etcher-squashfs-application",
  "ssh-key",
+ "tokio",
 ]
 
 [[package]]
@@ -1692,9 +1726,11 @@ name = "remora-etcher-image"
 version = "0.1.1"
 dependencies = [
  "am-fs-ext4",
+ "async-trait",
  "busybody",
  "error-stack",
  "fatfs",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
 ]
 
@@ -1730,12 +1766,15 @@ dependencies = [
 name = "remora-etcher-image-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-fs-walk",
  "remora-etcher-image",
  "remora-etcher-image-adapter-ext4",
  "remora-etcher-image-adapter-partition-table",
  "remora-etcher-image-adapter-vfat",
+ "remora-etcher-progress",
+ "tokio",
 ]
 
 [[package]]
@@ -1746,7 +1785,19 @@ dependencies = [
  "error-stack",
  "remora-etcher-format",
  "remora-etcher-image",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "remora-etcher-progress"
+version = "0.1.1"
+dependencies = [
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1757,10 +1808,12 @@ version = "0.1.1"
 name = "remora-etcher-squashfs"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "backhand",
  "busybody",
  "error-stack",
  "remora-etcher-fs-walk",
+ "remora-etcher-progress",
  "thiserror 1.0.69",
 ]
 
@@ -1777,10 +1830,13 @@ dependencies = [
 name = "remora-etcher-squashfs-application"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "error-stack",
  "remora-etcher-fs-walk",
+ "remora-etcher-progress",
  "remora-etcher-squashfs",
  "remora-etcher-squashfs-adapter-backhand",
+ "tokio",
 ]
 
 [[package]]
@@ -1790,7 +1846,10 @@ dependencies = [
  "clap",
  "error-stack",
  "remora-etcher-format",
+ "remora-etcher-progress",
  "remora-etcher-squashfs",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2180,6 +2239,30 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.7.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

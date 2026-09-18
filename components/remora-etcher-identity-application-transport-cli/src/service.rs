@@ -40,7 +40,7 @@ pub enum Command {
     },
 }
 
-pub fn run(command: Command, service: &IdentityService) -> Result<()> {
+pub async fn run(command: Command, service: &IdentityService) -> Result<()> {
     match command {
         Command::Build {
             inputs,
@@ -48,8 +48,9 @@ pub fn run(command: Command, service: &IdentityService) -> Result<()> {
             hostname,
             machine_id,
         } => {
-            let summary =
-                service.build(&inputs, hostname.as_deref(), machine_id.as_deref(), &output)?;
+            let summary = service
+                .build(&inputs, hostname.as_deref(), machine_id.as_deref(), &output)
+                .await?;
             println!(
                 "wrote {} ({} entries) to {}",
                 human_size(summary.bytes_written),
@@ -64,8 +65,9 @@ pub fn run(command: Command, service: &IdentityService) -> Result<()> {
             hostname,
             machine_id,
         } => {
-            let bytes_written =
-                service.create(&inputs, hostname.as_deref(), machine_id.as_deref(), &image)?;
+            let bytes_written = service
+                .create(&inputs, hostname.as_deref(), machine_id.as_deref(), &image)
+                .await?;
             println!(
                 "wrote identity.squashfs ({}) to {}:/remora/identity",
                 human_size(bytes_written),

@@ -8,9 +8,11 @@ publish.workspace = true
 
 [dependencies]
 remora-etcher-disk = { path = "../remora-etcher-disk" }
+remora-etcher-progress = { path = "../remora-etcher-progress" }
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+async-trait.workspace = true
 # BlockMap wraps bmap_parser::Bmap directly rather than reinventing the .bmap
 # format as a pure domain type: the value only ever exists behind the
 # BmapAdapter::parse port (never constructed ad hoc), and the actual

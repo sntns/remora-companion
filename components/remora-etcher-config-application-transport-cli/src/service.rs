@@ -47,7 +47,7 @@ pub enum Command {
     },
 }
 
-pub fn run(command: Command, service: &ConfigService) -> Result<()> {
+pub async fn run(command: Command, service: &ConfigService) -> Result<()> {
     match command {
         Command::Build {
             input_dir,
@@ -56,7 +56,9 @@ pub fn run(command: Command, service: &ConfigService) -> Result<()> {
             block_size,
             label,
         } => {
-            let summary = service.build(&input_dir, &output, size, block_size, label.as_deref())?;
+            let summary = service
+                .build(&input_dir, &output, size, block_size, label.as_deref())
+                .await?;
             println!(
                 "wrote {} ({} entries) to {}",
                 human_size(summary.bytes_written),
@@ -72,7 +74,9 @@ pub fn run(command: Command, service: &ConfigService) -> Result<()> {
             slot,
             mode,
         } => {
-            service.upload(&image, &src, &dest_path, &slot, mode)?;
+            service
+                .upload(&image, &src, &dest_path, &slot, mode)
+                .await?;
             println!(
                 "wrote {dest_path} into {}:/remora/{slot}/config",
                 image.display()
