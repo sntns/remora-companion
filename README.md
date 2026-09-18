@@ -179,10 +179,25 @@ cargo test --workspace
 - `.github/workflows/release.yml` — on a `v*` tag, builds release binaries
   for `x86_64`/`aarch64` Linux, `x86_64` Windows, and `x86_64`/`aarch64`
   macOS, packages them (`.tar.gz`/`.zip`, plus a `.deb` for `x86_64` Linux
-  via `cargo-deb`), and attaches them to a draft GitHub release.
+  via `cargo-deb`), and publishes them as a GitHub release with
+  auto-generated notes.
 - Linux `.deb` packaging is driven by `[package.metadata.deb]` in
   `containers/remora-etcher/Cargo.toml` (mirrors `remora-disk`'s own
   metadata) — validated locally with `cargo deb -p remora-etcher`.
+
+### Cutting a release
+
+From the [Actions tab](https://github.com/sntns/remora-etcher/actions/workflows/cut-release.yml),
+run **Cut a release** and pick `patch`/`minor`/`major`. That's it — it uses
+[`cargo-release`](https://github.com/crate-ci/cargo-release) to bump
+`[workspace.package].version` (every crate inherits it, so the whole
+workspace moves together in one commit), tag `vX.Y.Z`, and push, which
+triggers `release.yml` to build and publish the release automatically.
+
+This needs a `RELEASE_TOKEN` repo secret — a PAT with `contents: write` on
+this repo — because a push made with the default `GITHUB_TOKEN` never
+triggers another workflow (GitHub's anti-recursion guard), so `release.yml`
+would never fire otherwise.
 
 ## Contributing
 

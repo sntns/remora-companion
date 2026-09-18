@@ -1,0 +1,43 @@
+name: Cut a release
+
+# One-click release: bump the version, commit, tag, and push. The pushed
+# `vX.Y.Z` tag then triggers release.yml (build/package/publish) on its
+# own -- this workflow's only job is picking the next version number.
+#
+# It pushes with a PAT (secrets.RELEASE_TOKEN), not the default
+# GITHUB_TOKEN: a push made with the default token never triggers other
+# workflows (GitHub's anti-recursion guard), so release.yml would silently
+# never fire if this used it instead.
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Release level"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo install cargo-release --locked
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - run: cargo release ${{ inputs.level }} --workspace --execute --no-confirm
