@@ -1423,7 +1423,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remora-etcher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "clap",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-config-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-config",
@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-config-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-convert"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-convert-adapter-gzip"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "flate2",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-convert-adapter-qcow2"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-convert",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-convert-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-convert",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-convert-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1547,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-disk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-disk-adapter-native"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-disk",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-disk-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-disk",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-disk-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-flash"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bmap-parser",
  "busybody",
@@ -1593,7 +1593,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-flash-adapter-bmap"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bmap-parser",
  "error-stack",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-flash-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-disk",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-flash-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1624,11 +1624,11 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-format"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "remora-etcher-fs-walk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-identity"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-identity-adapter-keygen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "rand 0.8.7",
@@ -1659,7 +1659,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-identity-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-fs-walk",
@@ -1679,7 +1679,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-identity-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "am-fs-ext4",
  "busybody",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image-adapter-ext4"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "am-fs-ext4",
  "error-stack",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image-adapter-partition-table"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "gptman",
@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image-adapter-vfat"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "fatfs",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-fs-walk",
@@ -1740,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-image-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -1751,11 +1751,11 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-scratch"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "remora-etcher-squashfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "backhand",
  "busybody",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-squashfs-adapter-backhand"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "backhand",
  "error-stack",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-squashfs-application"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "error-stack",
  "remora-etcher-fs-walk",
@@ -1785,7 +1785,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher-squashfs-application-transport-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "error-stack",
