@@ -1,5 +1,8 @@
 # remora-etcher
 
+[![CI](https://github.com/sntns/remora-etcher/actions/workflows/ci.yml/badge.svg)](https://github.com/sntns/remora-etcher/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 A standalone, cross-platform (Linux/Windows/macOS) provisioning and flashing
 tool for Remora devices — a bit like balena-etcher, but for Remora. No
 dependency on separately-installed third-party utilities (no `mksquashfs`,
@@ -94,3 +97,19 @@ cargo test --workspace
 - Linux `.deb` packaging is driven by `[package.metadata.deb]` in
   `containers/remora-etcher/Cargo.toml` (mirrors `remora-disk`'s own
   metadata) — validated locally with `cargo deb -p remora-etcher`.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+build/test/lint sequence CI expects and the architecture conventions to
+follow, and [CLAUDE.md](CLAUDE.md) for the full DDD/error-handling
+convention. This project follows the
+[Contributor Covenant](CODE_OF_CONDUCT.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
