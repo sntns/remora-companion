@@ -30,7 +30,7 @@ struct FakeProvisioning;
 impl FactoryProvisioningAdapter for FakeProvisioning {
     async fn provision(
         &self,
-        _gateway_url: &str,
+        _api_url: &str,
         _api_key: &str,
         device_name: &str,
         _csr_der: &[u8],
@@ -172,7 +172,7 @@ struct EmptyAccessUrlProvisioning;
 impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
     async fn provision(
         &self,
-        _gateway_url: &str,
+        _api_url: &str,
         _api_key: &str,
         device_name: &str,
         _csr_der: &[u8],
@@ -263,7 +263,7 @@ struct RealCapturedProvisioning {
 impl FactoryProvisioningAdapter for RealCapturedProvisioning {
     async fn provision(
         &self,
-        _gateway_url: &str,
+        _api_url: &str,
         _api_key: &str,
         _device_name: &str,
         _csr_der: &[u8],

@@ -43,7 +43,7 @@ struct CreateFactoryDeviceResponse {
 impl FactoryProvisioningAdapter for GatewayAdapterImpl {
     async fn provision(
         &self,
-        gateway_url: &str,
+        api_url: &str,
         api_key: &str,
         device_name: &str,
         csr_der: &[u8],
@@ -57,7 +57,7 @@ impl FactoryProvisioningAdapter for GatewayAdapterImpl {
             .client
             .post(format!(
                 "{}/remora/v1/factory-device",
-                gateway_url.trim_end_matches('/')
+                api_url.trim_end_matches('/')
             ))
             .header("Authorization", format!("X-SNTNS-API-KEY {api_key}"))
             .json(&body)

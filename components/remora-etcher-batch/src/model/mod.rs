@@ -59,7 +59,7 @@ pub enum BatchStep {
     /// bundle it into an image.
     FactoryProvision {
         device_name: String,
-        gateway_url: String,
+        api_url: String,
         api_key: String,
         /// Escape hatch for a deployment that hasn't configured an
         /// access-url yet; see `FactoryServiceInterface::provision`'s doc

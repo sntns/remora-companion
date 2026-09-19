@@ -118,7 +118,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                     .change_context(Error::Step { index, kind })?,
                 BatchStep::FactoryProvision {
                     device_name,
-                    gateway_url,
+                    api_url,
                     api_key,
                     access_url,
                     output,
@@ -126,7 +126,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                     .factory
                     .provision(
                         &device_name,
-                        &gateway_url,
+                        &api_url,
                         &api_key,
                         access_url.as_deref(),
                         &output,

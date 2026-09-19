@@ -23,10 +23,10 @@ pub enum Command {
         #[arg(long)]
         output: PathBuf,
 
-        /// Base URL of the platform gateway, e.g. https://api.sntns.dev
-        /// (dev) or the production regional equivalent.
+        /// Base URL of the platform API, e.g. https://api.sntns.dev (dev)
+        /// or the production regional equivalent.
         #[arg(long)]
-        gateway_url: String,
+        api_url: String,
 
         /// Platform API key, sent as `Authorization: X-SNTNS-API-KEY
         /// <key>`. The identity behind it needs an IAM policy allowing
@@ -50,7 +50,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
         Command::Provision {
             device_name,
             output,
-            gateway_url,
+            api_url,
             api_key,
             access_url,
         } => {
@@ -60,7 +60,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
             let result = service
                 .provision(
                     &device_name,
-                    &gateway_url,
+                    &api_url,
                     &api_key,
                     access_url.as_deref(),
                     &output,

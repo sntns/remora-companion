@@ -35,7 +35,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
     async fn provision(
         &self,
         device_name: &str,
-        gateway_url: &str,
+        api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
         output: &Path,
@@ -68,7 +68,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         ctx.sink.phase("requesting factory device credential");
         let identity = self
             .provisioning
-            .provision(gateway_url, api_key, device_name, &csr_der)
+            .provision(api_url, api_key, device_name, &csr_der)
             .await
             .change_context(Error::Provision)?;
 

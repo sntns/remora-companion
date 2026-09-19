@@ -28,9 +28,9 @@ pub struct ProvisionedIdentity {
 /// this one is a real network call and is async-native rather than
 /// sync-wrapped for uniformity.
 ///
-/// `gateway_url`/`api_key` are passed per call rather than fixed at
+/// `api_url`/`api_key` are passed per call rather than fixed at
 /// construction time: they're CLI-level configuration (`factory provision
-/// --gateway-url ... --api-key ...`), known only once the subcommand's own
+/// --api-url ... --api-key ...`), known only once the subcommand's own
 /// arguments are parsed, well after the composition root has already
 /// wired every service -- keeping the adapter itself stateless (beyond a
 /// reused HTTP client) avoids coupling wiring order to that.
@@ -42,7 +42,7 @@ pub trait FactoryProvisioningAdapter: Send + Sync {
     /// `device_name` alone.
     async fn provision(
         &self,
-        gateway_url: &str,
+        api_url: &str,
         api_key: &str,
         device_name: &str,
         csr_der: &[u8],

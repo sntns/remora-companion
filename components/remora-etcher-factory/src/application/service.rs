@@ -42,7 +42,7 @@ pub trait FactoryServiceInterface: Send + Sync {
     async fn provision(
         &self,
         device_name: &str,
-        gateway_url: &str,
+        api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
         output: &Path,

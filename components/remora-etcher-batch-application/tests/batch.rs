@@ -124,7 +124,7 @@ struct UnusedProvisioning;
 impl FactoryProvisioningAdapter for UnusedProvisioning {
     async fn provision(
         &self,
-        _gateway_url: &str,
+        _api_url: &str,
         _api_key: &str,
         _device_name: &str,
         _csr_der: &[u8],
@@ -339,7 +339,7 @@ struct FakeProvisioning;
 impl FactoryProvisioningAdapter for FakeProvisioning {
     async fn provision(
         &self,
-        _gateway_url: &str,
+        _api_url: &str,
         _api_key: &str,
         device_name: &str,
         _csr_der: &[u8],
@@ -399,7 +399,7 @@ async fn runs_a_factory_provision_step() {
         .run(
             vec![BatchStep::FactoryProvision {
                 device_name: "batch-e2e-0001".to_string(),
-                gateway_url: "https://api.example.invalid".to_string(),
+                api_url: "https://api.example.invalid".to_string(),
                 api_key: "unused-in-the-fake".to_string(),
                 access_url: None,
                 output: output.clone(),
