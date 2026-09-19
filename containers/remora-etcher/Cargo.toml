@@ -46,6 +46,10 @@ remora-etcher-convert-application-transport-cli = { path = "../../components/rem
 remora-etcher-batch = { path = "../../components/remora-etcher-batch" }
 remora-etcher-batch-application = { path = "../../components/remora-etcher-batch-application" }
 remora-etcher-batch-application-transport-cli = { path = "../../components/remora-etcher-batch-application-transport-cli" }
+remora-etcher-factory = { path = "../../components/remora-etcher-factory" }
+remora-etcher-factory-adapter-gateway = { path = "../../components/remora-etcher-factory-adapter-gateway" }
+remora-etcher-factory-application = { path = "../../components/remora-etcher-factory-application" }
+remora-etcher-factory-application-transport-cli = { path = "../../components/remora-etcher-factory-application-transport-cli" }
 busybody.workspace = true
 tokio.workspace = true
 clap.workspace = true

@@ -11,6 +11,11 @@ use remora_etcher_convert_application::ConvertControllerImpl;
 use remora_etcher_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_etcher_disk_adapter_native::DiskAdapterImpl;
 use remora_etcher_disk_application::DiskControllerImpl;
+use remora_etcher_factory::{
+    adapter::FactoryProvisioningAdapterService, application::FactoryService,
+};
+use remora_etcher_factory_adapter_gateway::GatewayAdapterImpl;
+use remora_etcher_factory_application::FactoryControllerImpl;
 use remora_etcher_flash::{adapter::BmapAdapterService, application::FlashService};
 use remora_etcher_flash_adapter_bmap::BmapAdapterImpl;
 use remora_etcher_flash_application::FlashControllerImpl;
@@ -42,6 +47,7 @@ pub struct Services {
     pub config: ConfigService,
     pub convert: ConvertService,
     pub batch: BatchService,
+    pub factory: FactoryService,
 }
 
 /// The composition root: construct each adapter, register it, pull it back
@@ -227,6 +233,14 @@ pub async fn wire() -> Services {
         squashfs.clone(),
     ));
 
+    // GatewayAdapterImpl is stateless (gateway URL/API key are CLI-level
+    // config, passed per call -- see FactoryProvisioningAdapter's doc
+    // comment), so it needs no set_type/get_type round-trip either.
+    let factory = FactoryService::new(FactoryControllerImpl::new(
+        FactoryProvisioningAdapterService::new(GatewayAdapterImpl::default()),
+        image.clone(),
+    ));
+
     Services {
         disk,
         flash,
@@ -236,5 +250,6 @@ pub async fn wire() -> Services {
         config,
         convert,
         batch,
+        factory,
     }
 }

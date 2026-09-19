@@ -60,6 +60,13 @@ enum Commands {
     /// fails partway through.
     #[command(subcommand)]
     Batch(remora_etcher_batch_application_transport_cli::Command),
+
+    /// Manufacture a device against sntns-platform's factory-device
+    /// endpoint and inject its credential into an image. Not a `batch`
+    /// step -- a network call with per-unit output, unlike batch's
+    /// local/reproducible steps.
+    #[command(subcommand)]
+    Factory(remora_etcher_factory_application_transport_cli::Command),
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -130,6 +137,13 @@ async fn main() {
         Commands::Batch(cmd) => {
             if let Err(report) =
                 remora_etcher_batch_application_transport_cli::run(cmd, &services.batch).await
+            {
+                fail(report);
+            }
+        }
+        Commands::Factory(cmd) => {
+            if let Err(report) =
+                remora_etcher_factory_application_transport_cli::run(cmd, &services.factory).await
             {
                 fail(report);
             }

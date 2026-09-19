@@ -1,0 +1,65 @@
+use crate::model::CertificateReference;
+
+use super::error::Result;
+
+/// What the platform's factory-device call hands back, before the
+/// locally-generated private key is added at the application layer (see
+/// `crate::model::FactoryCredential`).
+#[derive(Debug, Clone)]
+pub struct ProvisionedIdentity {
+    pub factory_device_name: String,
+    pub certificate_reference: CertificateReference,
+    pub certificate_der: Vec<u8>,
+    pub certificate_authority_der: Vec<u8>,
+    pub server_certificate_authority_der: Vec<u8>,
+}
+
+/// DI seam for `remora-etcher-factory-application`: the actual network
+/// call to `sntns-platform`'s factory-device provisioning endpoint.
+///
+/// Unlike this workspace's other adapters (which wrap blocking local file
+/// I/O and stay synchronous by design -- see CLAUDE.md's DI convention),
+/// this one is a real network call and is async-native rather than
+/// sync-wrapped for uniformity.
+///
+/// `gateway_url`/`api_key` are passed per call rather than fixed at
+/// construction time: they're CLI-level configuration (`factory provision
+/// --gateway-url ... --api-key ...`), known only once the subcommand's own
+/// arguments are parsed, well after the composition root has already
+/// wired every service -- keeping the adapter itself stateless (beyond a
+/// reused HTTP client) avoids coupling wiring order to that.
+#[async_trait::async_trait]
+pub trait FactoryProvisioningAdapter: Send + Sync {
+    /// Request a factory device credential for `device_name` (the durable
+    /// hardware serial), presenting `csr_der` -- a DER-encoded PKCS#10 CSR
+    /// whose subject is ignored server-side; identity comes from
+    /// `device_name` alone.
+    async fn provision(
+        &self,
+        gateway_url: &str,
+        api_key: &str,
+        device_name: &str,
+        csr_der: &[u8],
+    ) -> Result<ProvisionedIdentity>;
+}
+
+/// Injectable handle to whatever `FactoryProvisioningAdapter` was wired at
+/// startup.
+#[derive(Clone)]
+pub struct FactoryProvisioningAdapterService(
+    busybody::Service<Box<dyn FactoryProvisioningAdapter>>,
+);
+
+impl FactoryProvisioningAdapterService {
+    pub fn new<T: FactoryProvisioningAdapter + 'static>(adapter: T) -> Self {
+        Self(busybody::Service::new(Box::new(adapter)))
+    }
+}
+
+impl std::ops::Deref for FactoryProvisioningAdapterService {
+    type Target = busybody::Service<Box<dyn FactoryProvisioningAdapter>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
