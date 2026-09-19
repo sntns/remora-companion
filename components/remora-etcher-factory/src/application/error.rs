@@ -6,8 +6,14 @@ pub enum Error {
     Csr,
     #[error("failed to provision a factory device credential")]
     Provision,
-    #[error("failed to write the factory credential into the image")]
-    Image,
+    #[error(
+        "the platform did not return an access URL for this deployment, and no --access-url override was given"
+    )]
+    MissingAccessUrl,
+    #[error("failed to render remora-factory.yaml")]
+    Render,
+    #[error("failed to write {0}")]
+    WriteOutput(std::path::PathBuf),
     #[error("factory provisioning was cancelled")]
     Cancelled,
 }

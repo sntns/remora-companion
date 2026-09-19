@@ -99,6 +99,14 @@ base64 = "0.22"
 # Local keypair + PKCS#10 CSR generation for factory provisioning -- the
 # platform never sees the private key, only the CSR built from it.
 rcgen = "0.14"
+# PKCS#8 -> SEC1 private-key conversion for remora-factory.yaml: rcgen's own
+# DER output is PKCS#8, but the known-good files this renders to match use
+# SEC1 (`BEGIN EC PRIVATE KEY`). Key *generation* deliberately stays with
+# rcgen -- p256's own RNG-based generation hits a rand_core version conflict
+# with elliptic-curve 0.14's trait bounds; this crate is only used for the
+# PKCS8->SEC1 format conversion of a key rcgen already generated.
+p256 = { version = "0.14", features = ["pkcs8", "std"] }
+pem = "4.0"
 
 # am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
 # aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes

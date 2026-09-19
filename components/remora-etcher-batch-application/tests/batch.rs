@@ -27,6 +27,11 @@ use remora_etcher_convert::{adapter::ContainerFormatAdapter, application::Conver
 use remora_etcher_convert_adapter_gzip::GzipAdapterImpl;
 use remora_etcher_convert_adapter_qcow2::Qcow2AdapterImpl;
 use remora_etcher_convert_application::ConvertControllerImpl;
+use remora_etcher_factory::{
+    adapter::{FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity},
+    application::FactoryService,
+};
+use remora_etcher_factory_application::FactoryControllerImpl;
 use remora_etcher_fs_walk::FsWalkAdapterService;
 use remora_etcher_identity::application::IdentityService;
 use remora_etcher_identity_adapter_keygen::KeygenAdapterImpl;
@@ -109,6 +114,25 @@ fn build_raw_disk_with_shared_partition() -> PathBuf {
     disk
 }
 
+/// Stands in for the real gateway call -- none of these tests exercise a
+/// `FactoryProvision` step that actually reaches it, this only satisfies
+/// `BatchControllerImpl::new`'s dependency on a wired `FactoryService`,
+/// same as every other vertical's `controller()` helper below.
+struct UnusedProvisioning;
+
+#[async_trait::async_trait]
+impl FactoryProvisioningAdapter for UnusedProvisioning {
+    async fn provision(
+        &self,
+        _gateway_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+        _csr_der: &[u8],
+    ) -> remora_etcher_factory::adapter::Result<ProvisionedIdentity> {
+        unreachable!("no test in this file exercises a FactoryProvision step")
+    }
+}
+
 fn read_shared_partition_file(disk: &Path, dest_path: &str) -> Vec<u8> {
     Ext4AdapterImpl
         .read_file(disk, PARTITION_OFFSET, PARTITION_SIZE, dest_path)
@@ -148,7 +172,11 @@ fn controller() -> BatchControllerImpl {
         remora_etcher_squashfs::adapter::SquashfsAdapterService::new(SquashfsAdapterImpl),
     ));
 
-    BatchControllerImpl::new(convert, identity, config, image, squashfs)
+    let factory = FactoryService::new(FactoryControllerImpl::new(
+        FactoryProvisioningAdapterService::new(UnusedProvisioning),
+    ));
+
+    BatchControllerImpl::new(convert, identity, config, image, squashfs, factory)
 }
 
 #[tokio::test]
@@ -303,4 +331,86 @@ async fn stops_at_the_first_failing_step_without_running_the_rest() {
     for p in [raw, packaged, inject_source, working_raw, final_packaged] {
         let _ = fs::remove_file(&p);
     }
+}
+
+struct FakeProvisioning;
+
+#[async_trait::async_trait]
+impl FactoryProvisioningAdapter for FakeProvisioning {
+    async fn provision(
+        &self,
+        _gateway_url: &str,
+        _api_key: &str,
+        device_name: &str,
+        _csr_der: &[u8],
+    ) -> remora_etcher_factory::adapter::Result<ProvisionedIdentity> {
+        Ok(ProvisionedIdentity {
+            certificate_der: b"fake-certificate-der".to_vec(),
+            certificate_authority_der: b"fake-factory-ca-der".to_vec(),
+            server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
+            key_id: format!("test:kms:certificate:{device_name}"),
+            access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
+        })
+    }
+}
+
+/// `FactoryProvision` is the one step that isn't locally reproducible (a
+/// real run calls out to sntns-platform) -- exercised here with a fake
+/// adapter standing in for the network call, same posture as
+/// `remora-etcher-factory-application`'s own tests, to prove it dispatches
+/// correctly as a batch step and produces the same `remora-factory.yaml` a
+/// standalone `factory provision` invocation would.
+#[tokio::test]
+async fn runs_a_factory_provision_step() {
+    let convert = ConvertService::new(ConvertControllerImpl::new(
+        Arc::new(Qcow2AdapterImpl),
+        Arc::new(GzipAdapterImpl),
+    ));
+    let image = ImageService::new(ImageControllerImpl::new(
+        PartitionTableAdapterService::new(PartitionTableAdapterImpl),
+        Arc::new(Ext4AdapterImpl),
+        Arc::new(VfatAdapterImpl),
+        FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
+    ));
+    let identity = IdentityService::new(IdentityControllerImpl::new(
+        remora_etcher_identity::adapter::KeygenAdapterService::new(KeygenAdapterImpl),
+        SquashfsService::new(SquashfsControllerImpl::new(
+            FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
+            remora_etcher_squashfs::adapter::SquashfsAdapterService::new(SquashfsAdapterImpl),
+        )),
+        image.clone(),
+    ));
+    let config = ConfigService::new(ConfigControllerImpl::new(
+        Ext4AdapterService::new(Ext4AdapterImpl),
+        FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
+        image.clone(),
+    ));
+    let squashfs = SquashfsService::new(SquashfsControllerImpl::new(
+        FsWalkAdapterService::new(remora_etcher_fs_walk::FsWalkAdapterImpl),
+        remora_etcher_squashfs::adapter::SquashfsAdapterService::new(SquashfsAdapterImpl),
+    ));
+    let factory = FactoryService::new(FactoryControllerImpl::new(
+        FactoryProvisioningAdapterService::new(FakeProvisioning),
+    ));
+    let controller = BatchControllerImpl::new(convert, identity, config, image, squashfs, factory);
+
+    let output = temp_path("remora-factory.yaml");
+    controller
+        .run(
+            vec![BatchStep::FactoryProvision {
+                device_name: "batch-e2e-0001".to_string(),
+                gateway_url: "https://api.example.invalid".to_string(),
+                api_key: "unused-in-the-fake".to_string(),
+                access_url: None,
+                output: output.clone(),
+            }],
+            &OperationContext::noop(),
+        )
+        .await
+        .expect("the factory-provision step should succeed against the fake adapter");
+
+    let yaml = fs::read_to_string(&output).expect("the step should have written the yaml");
+    let _ = fs::remove_file(&output);
+    assert!(yaml.contains("key_id: \"test:kms:certificate:batch-e2e-0001\""));
+    assert!(yaml.starts_with("url: https://remora.access.eu2.sntns.io/access/v1\n"));
 }

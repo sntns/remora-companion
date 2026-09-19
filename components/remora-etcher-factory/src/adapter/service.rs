@@ -1,5 +1,3 @@
-use crate::model::CertificateReference;
-
 use super::error::Result;
 
 /// What the platform's factory-device call hands back, before the
@@ -7,11 +5,19 @@ use super::error::Result;
 /// `crate::model::FactoryCredential`).
 #[derive(Debug, Clone)]
 pub struct ProvisionedIdentity {
-    pub factory_device_name: String,
-    pub certificate_reference: CertificateReference,
     pub certificate_der: Vec<u8>,
     pub certificate_authority_der: Vec<u8>,
     pub server_certificate_authority_der: Vec<u8>,
+    /// `certificateReference.urn` on the wire -- the keyid the device puts
+    /// on its own RFC 9421 signatures later, not derivable from the
+    /// certificate itself.
+    pub key_id: String,
+    /// The access-tier URL this device should phone home to, chosen
+    /// entirely by the platform (never by the caller -- a factory tool
+    /// choosing which server a device obeys would defeat the point).
+    /// Empty when a deployment hasn't configured an access-url yet; the
+    /// application layer treats that as a hard failure, not a default.
+    pub access_url: String,
 }
 
 /// DI seam for `remora-etcher-factory-application`: the actual network

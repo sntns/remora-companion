@@ -1,8 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use error_stack::Report;
-use remora_etcher_factory::{
-    adapter::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
-    model::CertificateReference,
+use remora_etcher_factory::adapter::{
+    Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -20,15 +19,11 @@ struct CreateFactoryDeviceRequest {
 
 #[derive(serde::Deserialize)]
 struct CertificateReferenceWire {
-    id: String,
     urn: String,
-    name: String,
 }
 
 #[derive(serde::Deserialize)]
 struct CreateFactoryDeviceResponse {
-    #[serde(rename = "factoryDeviceName")]
-    factory_device_name: String,
     #[serde(rename = "certificateReference")]
     certificate_reference: CertificateReferenceWire,
     certificate: String,
@@ -36,6 +31,12 @@ struct CreateFactoryDeviceResponse {
     certificate_authority_certificate: String,
     #[serde(rename = "serverCertificateAuthorityCertificate")]
     server_certificate_authority_certificate: String,
+    /// New field, not yet present on every deployment -- `#[serde(default)]`
+    /// so an old/unconfigured gateway that omits it decodes to `""` rather
+    /// than failing the whole response; the application layer is what
+    /// turns an empty value into a hard error.
+    #[serde(rename = "accessUrl", default)]
+    access_url: String,
 }
 
 #[async_trait::async_trait]
@@ -82,12 +83,7 @@ impl FactoryProvisioningAdapter for GatewayAdapterImpl {
         };
 
         Ok(ProvisionedIdentity {
-            factory_device_name: parsed.factory_device_name,
-            certificate_reference: CertificateReference {
-                id: parsed.certificate_reference.id,
-                urn: parsed.certificate_reference.urn,
-                name: parsed.certificate_reference.name,
-            },
+            key_id: parsed.certificate_reference.urn,
             certificate_der: decode("certificate", &parsed.certificate)?,
             certificate_authority_der: decode(
                 "certificateAuthorityCertificate",
@@ -97,6 +93,7 @@ impl FactoryProvisioningAdapter for GatewayAdapterImpl {
                 "serverCertificateAuthorityCertificate",
                 &parsed.server_certificate_authority_certificate,
             )?,
+            access_url: parsed.access_url,
         })
     }
 }

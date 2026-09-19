@@ -13,6 +13,7 @@ remora-etcher-identity = { path = "../remora-etcher-identity" }
 remora-etcher-config = { path = "../remora-etcher-config" }
 remora-etcher-image = { path = "../remora-etcher-image" }
 remora-etcher-squashfs = { path = "../remora-etcher-squashfs" }
+remora-etcher-factory = { path = "../remora-etcher-factory" }
 remora-etcher-progress = { path = "../remora-etcher-progress" }
 error-stack.workspace = true
 async-trait.workspace = true
@@ -33,4 +34,5 @@ remora-etcher-image-adapter-partition-table = { path = "../remora-etcher-image-a
 remora-etcher-image-adapter-ext4 = { path = "../remora-etcher-image-adapter-ext4" }
 remora-etcher-image-adapter-vfat = { path = "../remora-etcher-image-adapter-vfat" }
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
+remora-etcher-factory-application = { path = "../remora-etcher-factory-application" }
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -46,6 +46,28 @@ pub enum BatchStep {
         output: PathBuf,
         options: BuildOptions,
     },
+    /// See `remora_etcher_factory::application::FactoryServiceInterface::provision`.
+    ///
+    /// Unlike every other step, this one is a network call against a
+    /// specific platform environment with per-unit output (a new key and
+    /// serial each time) -- a recipe containing it is not
+    /// reproducible/replayable offline the way the rest of `batch` is.
+    /// Included anyway on request; see the batch vertical's own doc
+    /// comment for the tradeoff. Produces a standalone `remora-factory.yaml`
+    /// at `output`, same as running `factory provision` directly -- pair it
+    /// with a later `IdentityCreate` step (`inputs` including this file) to
+    /// bundle it into an image.
+    FactoryProvision {
+        device_name: String,
+        gateway_url: String,
+        api_key: String,
+        /// Escape hatch for a deployment that hasn't configured an
+        /// access-url yet; see `FactoryServiceInterface::provision`'s doc
+        /// comment. Normally omitted -- the platform's response supplies it.
+        #[serde(default)]
+        access_url: Option<String>,
+        output: PathBuf,
+    },
 }
 
 impl BatchStep {
@@ -62,6 +84,7 @@ impl BatchStep {
             BatchStep::ImageMkdir(_) => "image-mkdir",
             BatchStep::ImageCpDir(_) => "image-cp-dir",
             BatchStep::SquashfsBuild { .. } => "squashfs-build",
+            BatchStep::FactoryProvision { .. } => "factory-provision",
         }
     }
 }

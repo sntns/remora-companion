@@ -5,6 +5,7 @@ use remora_etcher_batch::{
 };
 use remora_etcher_config::application::ConfigService;
 use remora_etcher_convert::application::ConvertService;
+use remora_etcher_factory::application::FactoryService;
 use remora_etcher_identity::application::IdentityService;
 use remora_etcher_image::application::ImageService;
 use remora_etcher_progress::OperationContext;
@@ -22,6 +23,7 @@ pub struct BatchControllerImpl {
     config: ConfigService,
     image: ImageService,
     squashfs: SquashfsService,
+    factory: FactoryService,
 }
 
 impl BatchControllerImpl {
@@ -31,6 +33,7 @@ impl BatchControllerImpl {
         config: ConfigService,
         image: ImageService,
         squashfs: SquashfsService,
+        factory: FactoryService,
     ) -> Self {
         Self {
             convert,
@@ -38,6 +41,7 @@ impl BatchControllerImpl {
             config,
             image,
             squashfs,
+            factory,
         }
     }
 }
@@ -111,6 +115,24 @@ impl BatchServiceInterface for BatchControllerImpl {
                     .build(&inputs, &output, &options, ctx)
                     .await
                     .map(|_| ())
+                    .change_context(Error::Step { index, kind })?,
+                BatchStep::FactoryProvision {
+                    device_name,
+                    gateway_url,
+                    api_key,
+                    access_url,
+                    output,
+                } => self
+                    .factory
+                    .provision(
+                        &device_name,
+                        &gateway_url,
+                        &api_key,
+                        access_url.as_deref(),
+                        &output,
+                        ctx,
+                    )
+                    .await
                     .change_context(Error::Step { index, kind })?,
             }
         }

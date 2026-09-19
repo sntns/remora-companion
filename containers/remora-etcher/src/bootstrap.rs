@@ -222,6 +222,13 @@ pub async fn wire() -> Services {
         .await
         .expect("ConvertService was just registered");
 
+    // GatewayAdapterImpl is stateless (gateway URL/API key are CLI-level
+    // config, passed per call -- see FactoryProvisioningAdapter's doc
+    // comment), so it needs no set_type/get_type round-trip either.
+    let factory = FactoryService::new(FactoryControllerImpl::new(
+        FactoryProvisioningAdapterService::new(GatewayAdapterImpl::default()),
+    ));
+
     // Pure orchestration over the other verticals' already-wired services —
     // no adapter of its own, so no set_type/get_type round-trip needed;
     // just construct it directly like the ext4_fs/vfat_fs handles above.
@@ -231,14 +238,7 @@ pub async fn wire() -> Services {
         config.clone(),
         image.clone(),
         squashfs.clone(),
-    ));
-
-    // GatewayAdapterImpl is stateless (gateway URL/API key are CLI-level
-    // config, passed per call -- see FactoryProvisioningAdapter's doc
-    // comment), so it needs no set_type/get_type round-trip either.
-    let factory = FactoryService::new(FactoryControllerImpl::new(
-        FactoryProvisioningAdapterService::new(GatewayAdapterImpl::default()),
-        image.clone(),
+        factory.clone(),
     ));
 
     Services {

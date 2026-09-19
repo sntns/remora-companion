@@ -5,29 +5,28 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use remora_etcher_factory::{
     adapter::FactoryProvisioningAdapterService,
     application::{Error, FactoryServiceInterface, Result},
+    model::FactoryCredential,
 };
-use remora_etcher_image::{application::ImageService, model::PartitionRole};
 use remora_etcher_progress::OperationContext;
+
+use crate::yaml;
 
 /// The factory vertical's use case: generate a device keypair + CSR
 /// locally (via the injected keygen -- no adapter seam for this, unlike
 /// most of this workspace's I/O: `rcgen` is pure computation, not
 /// infrastructure access with a swap-worthy alternative), request a
 /// factory credential from the injected `FactoryProvisioningAdapterService`,
-/// and inject everything the device needs into the image's shared
-/// partition via the injected `ImageService` (this vertical's
-/// cross-vertical dependency, same pattern as identity/config).
+/// and render the result as `remora-factory.yaml` at `output`. Deliberately
+/// has no dependency on `ImageService` -- see `FactoryServiceInterface`'s
+/// own doc comment for why bundling into an image is a separate, later
+/// step (`identity create`), not this controller's job.
 pub struct FactoryControllerImpl {
     provisioning: FactoryProvisioningAdapterService,
-    image: ImageService,
 }
 
 impl FactoryControllerImpl {
-    pub fn new(provisioning: FactoryProvisioningAdapterService, image: ImageService) -> Self {
-        Self {
-            provisioning,
-            image,
-        }
+    pub fn new(provisioning: FactoryProvisioningAdapterService) -> Self {
+        Self { provisioning }
     }
 }
 
@@ -36,10 +35,10 @@ impl FactoryServiceInterface for FactoryControllerImpl {
     async fn provision(
         &self,
         device_name: &str,
-        access_url: &str,
         gateway_url: &str,
         api_key: &str,
-        image: &Path,
+        access_url_override: Option<&str>,
+        output: &Path,
         ctx: &OperationContext,
     ) -> Result<()> {
         if ctx.cancel.is_cancelled() {
@@ -73,60 +72,32 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             .await
             .change_context(Error::Provision)?;
 
-        ctx.sink.phase("writing credential into the image");
-        self.image
-            .ensure_dir_by_role(image, PartitionRole::Shared, "/remora", 0o755)
-            .await
-            .change_context(Error::Image)?;
-        self.image
-            .ensure_dir_by_role(image, PartitionRole::Shared, "/remora/factory", 0o755)
-            .await
-            .change_context(Error::Image)?;
+        // The platform always knows which access tier a device should use;
+        // an empty response means a deployment hasn't configured one yet,
+        // which is the *only* case the override exists for -- see
+        // `FactoryServiceInterface::provision`'s doc comment.
+        let access_url = if !identity.access_url.is_empty() {
+            identity.access_url.clone()
+        } else if let Some(override_url) = access_url_override {
+            override_url.to_string()
+        } else {
+            return Err(Report::new(Error::MissingAccessUrl));
+        };
 
-        let files: [(&str, &[u8], u16); 4] = [
-            ("/remora/factory/private_key.der", &private_key_der, 0o600),
-            (
-                "/remora/factory/certificate.der",
-                &identity.certificate_der,
-                0o644,
-            ),
-            (
-                "/remora/factory/factory_ca.der",
-                &identity.certificate_authority_der,
-                0o644,
-            ),
-            (
-                "/remora/factory/server_ca.der",
-                &identity.server_certificate_authority_der,
-                0o644,
-            ),
-        ];
-        for (dest_path, contents, mode) in files {
-            self.image
-                .inject_by_role(image, PartitionRole::Shared, dest_path, contents, mode)
-                .await
-                .change_context(Error::Image)?;
-        }
-        self.image
-            .inject_by_role(
-                image,
-                PartitionRole::Shared,
-                "/remora/factory/keyid",
-                identity.certificate_reference.urn.as_bytes(),
-                0o644,
-            )
-            .await
-            .change_context(Error::Image)?;
-        self.image
-            .inject_by_role(
-                image,
-                PartitionRole::Shared,
-                "/remora/factory/access_url",
-                access_url.as_bytes(),
-                0o644,
-            )
-            .await
-            .change_context(Error::Image)?;
+        let credential = FactoryCredential {
+            private_key_der,
+            certificate_der: identity.certificate_der,
+            certificate_authority_der: identity.certificate_authority_der,
+            server_certificate_authority_der: identity.server_certificate_authority_der,
+            key_id: identity.key_id,
+        };
+
+        ctx.sink.phase("rendering remora-factory.yaml");
+        let rendered = yaml::render(&credential, &access_url)?;
+
+        ctx.sink.phase("writing output");
+        std::fs::write(output, rendered)
+            .change_context_lazy(|| Error::WriteOutput(output.to_path_buf()))?;
 
         ctx.sink.phase("done");
         Ok(())
