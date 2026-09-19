@@ -246,3 +246,43 @@ fn print_partitions(table: &PartitionTable, boot_mode: Option<BootMode>) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_bare_number_as_an_index() {
+        assert_eq!(
+            parse_partition_selector("2").unwrap(),
+            PartitionSelector::Index(2)
+        );
+    }
+
+    #[test]
+    fn parses_every_known_role_case_insensitively() {
+        let cases = [
+            ("shared", PartitionRole::Shared),
+            ("SHARED", PartitionRole::Shared),
+            ("efi", PartitionRole::Efi),
+            ("slota", PartitionRole::SlotA),
+            ("SlotA", PartitionRole::SlotA),
+            ("slotb", PartitionRole::SlotB),
+            ("data", PartitionRole::Data),
+        ];
+        for (input, role) in cases {
+            assert_eq!(
+                parse_partition_selector(input).unwrap(),
+                PartitionSelector::Role(role),
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_anything_else() {
+        assert!(parse_partition_selector("slot-a").is_err());
+        assert!(parse_partition_selector("").is_err());
+        assert!(parse_partition_selector("-1").is_err());
+    }
+}

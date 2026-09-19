@@ -44,3 +44,78 @@ pub async fn run(command: Command, service: &BatchService) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Never actually run in these tests -- they only exercise the
+    /// read-recipe-file/parse-JSON path, which returns before `service` is
+    /// ever touched, except for the empty-recipe success case.
+    struct AlwaysSucceeds;
+
+    #[async_trait::async_trait]
+    impl remora_etcher_batch::application::BatchServiceInterface for AlwaysSucceeds {
+        async fn run(
+            &self,
+            _steps: Vec<BatchStep>,
+            _ctx: &OperationContext,
+        ) -> remora_etcher_batch::application::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn service() -> BatchService {
+        BatchService::new(AlwaysSucceeds)
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "remora-etcher-batch-cli-test-{label}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        path
+    }
+
+    #[tokio::test]
+    async fn fails_clearly_when_the_recipe_file_does_not_exist() {
+        let recipe = temp_path("missing.json");
+        let err = run(Command::Run { recipe }, &service()).await.unwrap_err();
+        assert!(format!("{err:?}").contains("failed to read recipe file"));
+    }
+
+    #[tokio::test]
+    async fn fails_clearly_on_malformed_json() {
+        let recipe = temp_path("bad.json");
+        std::fs::write(&recipe, "not json").unwrap();
+        let err = run(
+            Command::Run {
+                recipe: recipe.clone(),
+            },
+            &service(),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("as a batch recipe"));
+        let _ = std::fs::remove_file(&recipe);
+    }
+
+    #[tokio::test]
+    async fn runs_an_empty_recipe_successfully() {
+        let recipe = temp_path("empty.json");
+        std::fs::write(&recipe, "[]").unwrap();
+        run(
+            Command::Run {
+                recipe: recipe.clone(),
+            },
+            &service(),
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_file(&recipe);
+    }
+}

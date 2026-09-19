@@ -1526,6 +1526,7 @@ dependencies = [
 name = "remora-etcher-batch-application-transport-cli"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "clap",
  "error-stack",
  "remora-etcher-batch",
