@@ -6,9 +6,12 @@
 ///
 /// Rendered as `remora-factory.yaml` at the application layer (PEM
 /// encoding/SEC1 conversion are format-conversion concerns, not domain
-/// data -- see `remora-etcher-factory-application`), matching the schema
-/// read from two real provisioned devices' factory.yaml files: `url`,
-/// `key`, `certificate`, `key_id`, `authority`, `server_authority`.
+/// data -- see `remora-etcher-factory-application`), matching
+/// `remora-edge`'s actual `FactoryIdentity` parser: `url`, `key`,
+/// `certificate`, `key-id`, `authority`, `server-authority` (hyphenated,
+/// not underscored -- two real provisioned devices' files under
+/// `~/provisioning` use underscores, but those predate the parser and are
+/// themselves wrong).
 #[derive(Debug, Clone)]
 pub struct FactoryCredential {
     /// PKCS#8 DER. Generated locally; never sent anywhere. Rendered into
@@ -28,6 +31,7 @@ pub struct FactoryCredential {
     pub server_certificate_authority_der: Vec<u8>,
     /// The keyid the device puts on its own RFC 9421 request signatures
     /// later -- not derivable from the certificate itself, so it has to
-    /// travel alongside it. `remora-factory.yaml`'s `key_id`.
+    /// travel alongside it. `remora-factory.yaml`'s `key-id` (a required
+    /// field there with no serde default -- get the spelling right).
     pub key_id: String,
 }

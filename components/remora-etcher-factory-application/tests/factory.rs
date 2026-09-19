@@ -115,7 +115,7 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
         "https://remora.access.eu2.sntns.io/access/v1"
     );
     assert_eq!(
-        extract_scalar(&yaml, "key_id"),
+        extract_scalar(&yaml, "key-id"),
         "test:kms:certificate:e2e-serial-0001"
     );
 
@@ -136,10 +136,33 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
         pem::parse(&authority_pem).unwrap().contents(),
         b"fake-factory-ca-der"
     );
-    let server_authority_pem = extract_block(&yaml, "server_authority");
+    let server_authority_pem = extract_block(&yaml, "server-authority");
     assert_eq!(
         pem::parse(&server_authority_pem).unwrap().contents(),
         b"fake-server-ca-der"
+    );
+
+    // The two keys the platform-side session flagged as easy to get wrong
+    // (underscore vs hyphen) -- assert the literal on-disk spelling, not
+    // just that *some* value round-trips, so a regression here fails this
+    // test instead of silently producing a yaml remora-edge's parser
+    // either rejects outright (`key-id`, no serde default) or silently
+    // drops (`server-authority`, `Option` with `#[serde(default)]`).
+    assert!(
+        yaml.contains("key-id: \""),
+        "missing/misspelled key-id:\n{yaml}"
+    );
+    assert!(
+        yaml.contains("server-authority: |\n"),
+        "missing/misspelled server-authority:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains("key_id"),
+        "key-id must be hyphenated, not underscored:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains("server_authority"),
+        "server-authority must be hyphenated, not underscored:\n{yaml}"
     );
 }
 
@@ -350,7 +373,7 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
     let _ = fs::remove_file(&output);
 
     assert_eq!(extract_scalar(&yaml, "url"), fixture::ACCESS_URL);
-    assert_eq!(extract_scalar(&yaml, "key_id"), fixture::KEYID);
+    assert_eq!(extract_scalar(&yaml, "key-id"), fixture::KEYID);
 
     let written_certificate_der = pem::parse(extract_block(&yaml, "certificate"))
         .unwrap()
@@ -358,7 +381,7 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
     let written_factory_ca_der = pem::parse(extract_block(&yaml, "authority"))
         .unwrap()
         .into_contents();
-    let written_server_ca_der = pem::parse(extract_block(&yaml, "server_authority"))
+    let written_server_ca_der = pem::parse(extract_block(&yaml, "server-authority"))
         .unwrap()
         .into_contents();
 

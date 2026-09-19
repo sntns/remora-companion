@@ -411,6 +411,6 @@ async fn runs_a_factory_provision_step() {
 
     let yaml = fs::read_to_string(&output).expect("the step should have written the yaml");
     let _ = fs::remove_file(&output);
-    assert!(yaml.contains("key_id: \"test:kms:certificate:batch-e2e-0001\""));
+    assert!(yaml.contains("key-id: \"test:kms:certificate:batch-e2e-0001\""));
     assert!(yaml.starts_with("url: https://remora.access.eu2.sntns.io/access/v1\n"));
 }
