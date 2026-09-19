@@ -15,6 +15,11 @@ async-trait.workspace = true
 rcgen.workspace = true
 
 [dev-dependencies]
+# Only to *verify* a real platform-issued certificate set in one
+# integration test (chain, SAN, EKU, key match) -- production code never
+# parses/verifies these certificates itself, the device does that later.
+x509-parser = { version = "0.18", features = ["verify"] }
+base64.workspace = true
 remora-etcher-fs-walk = { path = "../remora-etcher-fs-walk" }
 remora-etcher-image-application = { path = "../remora-etcher-image-application" }
 remora-etcher-image-adapter-partition-table = { path = "../remora-etcher-image-adapter-partition-table" }

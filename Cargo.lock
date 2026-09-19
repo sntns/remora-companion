@@ -2229,6 +2229,7 @@ name = "remora-etcher-factory-application"
 version = "0.1.1"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "error-stack",
  "rcgen",
  "remora-etcher-factory",
@@ -2240,6 +2241,7 @@ dependencies = [
  "remora-etcher-image-application",
  "remora-etcher-progress",
  "tokio",
+ "x509-parser",
 ]
 
 [[package]]
