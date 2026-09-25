@@ -131,6 +131,15 @@ impl FactoryProvisioningAdapter for UnusedProvisioning {
     ) -> remora_etcher_factory::adapter::Result<ProvisionedIdentity> {
         unreachable!("no test in this file exercises a FactoryProvision step")
     }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        unreachable!("no test in this file exercises a FactoryProvision step")
+    }
 }
 
 fn read_shared_partition_file(disk: &Path, dest_path: &str) -> Vec<u8> {
@@ -352,6 +361,15 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
         })
     }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        Ok(())
+    }
 }
 
 /// `FactoryProvision` is the one step that isn't locally reproducible (a
@@ -402,6 +420,7 @@ async fn runs_a_factory_provision_step() {
                 api_url: "https://api.example.invalid".to_string(),
                 api_key: "unused-in-the-fake".to_string(),
                 access_url: None,
+                force: false,
                 output: output.clone(),
             }],
             &OperationContext::noop(),

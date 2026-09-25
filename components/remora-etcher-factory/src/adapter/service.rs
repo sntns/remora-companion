@@ -47,6 +47,12 @@ pub trait FactoryProvisioningAdapter: Send + Sync {
         device_name: &str,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity>;
+
+    /// Delete `device_name`'s existing factory-device credential, if any --
+    /// used by `provision`'s `--force` to clear the way for a fresh create
+    /// rather than let the platform reject a duplicate. A device that
+    /// doesn't exist yet is not an error: this is idempotent.
+    async fn delete(&self, api_url: &str, api_key: &str, device_name: &str) -> Result<()>;
 }
 
 /// Injectable handle to whatever `FactoryProvisioningAdapter` was wired at

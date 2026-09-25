@@ -35,6 +35,13 @@ pub enum Command {
         #[arg(long, env = "REMORA_FACTORY_API_KEY")]
         api_key: String,
 
+        /// Delete any existing factory-device credential for `device_name`
+        /// first (a no-op if there isn't one), instead of letting the
+        /// platform reject a duplicate create. Use when re-manufacturing a
+        /// serial that was already provisioned once.
+        #[arg(long)]
+        force: bool,
+
         /// Escape hatch, not the normal path: the platform's response
         /// always carries the access-tier URL a device should use. Only
         /// consulted when that response comes back empty, which means a
@@ -52,6 +59,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
             output,
             api_url,
             api_key,
+            force,
             access_url,
         } => {
             let (sink, stream) = remora_etcher_progress::channel();
@@ -63,6 +71,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
                     &api_url,
                     &api_key,
                     access_url.as_deref(),
+                    force,
                     &output,
                     &ctx,
                 )

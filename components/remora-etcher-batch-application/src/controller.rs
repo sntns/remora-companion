@@ -121,6 +121,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                     api_url,
                     api_key,
                     access_url,
+                    force,
                     output,
                 } => self
                     .factory
@@ -129,6 +130,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                         &api_url,
                         &api_key,
                         access_url.as_deref(),
+                        force,
                         &output,
                         ctx,
                     )

@@ -6,6 +6,10 @@
 //! `certificateReference.{id,urn,name}`, `certificate`,
 //! `certificateAuthorityCertificate`, `serverCertificateAuthorityCertificate`
 //! -- all base64 DER).
+//!
+//! `delete` (used by `provision --force`) is `DELETE
+//! /remora/v1/factory-device/{deviceName}`, same auth header; a 404 means
+//! there was nothing to delete and is treated as success.
 
 mod service;
 

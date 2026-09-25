@@ -39,12 +39,20 @@ pub trait FactoryServiceInterface: Send + Sync {
     /// empty URL into the credential would produce a device that can
     /// never phone home, discovered at the worst possible moment, so this
     /// call fails instead unless an override is given for that case.
+    ///
+    /// `force`: delete `device_name`'s existing factory-device credential
+    /// first (a no-op if there isn't one), rather than let the platform
+    /// reject a duplicate create -- for re-manufacturing a device serial
+    /// that was already provisioned once (a botched run, a reused test
+    /// unit, ...).
+    #[allow(clippy::too_many_arguments)]
     async fn provision(
         &self,
         device_name: &str,
         api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
+        force: bool,
         output: &Path,
         ctx: &OperationContext,
     ) -> Result<()>;

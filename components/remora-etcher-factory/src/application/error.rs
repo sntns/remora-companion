@@ -6,6 +6,8 @@ pub enum Error {
     Csr,
     #[error("failed to provision a factory device credential")]
     Provision,
+    #[error("failed to delete the existing factory device credential")]
+    Delete,
     #[error(
         "the platform did not return an access URL for this deployment, and no --access-url override was given"
     )]

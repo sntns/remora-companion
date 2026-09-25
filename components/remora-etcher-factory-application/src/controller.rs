@@ -38,6 +38,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
+        force: bool,
         output: &Path,
         ctx: &OperationContext,
     ) -> Result<()> {
@@ -45,6 +46,18 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             return Err(Report::new(Error::Cancelled));
         }
 
+        if force {
+            ctx.sink
+                .phase("deleting existing factory device credential");
+            self.provisioning
+                .delete(api_url, api_key, device_name)
+                .await
+                .change_context(Error::Delete)?;
+        }
+
+        if ctx.cancel.is_cancelled() {
+            return Err(Report::new(Error::Cancelled));
+        }
         ctx.sink.phase("generating device keypair");
         let key_pair = KeyPair::generate().change_context(Error::Keygen)?;
         let private_key_der = key_pair.serialize_der();

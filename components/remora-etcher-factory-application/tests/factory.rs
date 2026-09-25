@@ -9,7 +9,10 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use remora_etcher_factory::{
@@ -42,6 +45,15 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
         })
+    }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        Ok(())
     }
 }
 
@@ -101,6 +113,7 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
             "https://api.example.invalid",
             "unused-in-the-fake",
             None,
+            false,
             &output,
             &OperationContext::noop(),
         )
@@ -185,6 +198,15 @@ impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
             access_url: String::new(),
         })
     }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -197,6 +219,7 @@ async fn fails_when_the_platform_omits_an_access_url_and_no_override_was_given()
             "https://api.example.invalid",
             "unused-in-the-fake",
             None,
+            false,
             &output,
             &OperationContext::noop(),
         )
@@ -219,6 +242,7 @@ async fn honors_the_access_url_override_when_the_platform_response_is_empty() {
             "https://api.example.invalid",
             "unused-in-the-fake",
             Some("https://override.example.invalid/access/v1"),
+            false,
             &output,
             &OperationContext::noop(),
         )
@@ -275,6 +299,15 @@ impl FactoryProvisioningAdapter for RealCapturedProvisioning {
             key_id: self.keyid.clone(),
             access_url: self.access_url.clone(),
         })
+    }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        Ok(())
     }
 }
 
@@ -363,6 +396,7 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
             "https://api.example.invalid",
             "unused",
             None,
+            false,
             &output,
             &OperationContext::noop(),
         )
@@ -406,4 +440,88 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
     let key_pem = extract_block(&yaml, "key");
     assert!(key_pem.starts_with("-----BEGIN EC PRIVATE KEY-----"));
     p256::SecretKey::from_sec1_pem(&key_pem).expect("rendered key must parse as a SEC1 EC key");
+}
+
+/// Records call order rather than actually reaching a platform, so
+/// `--force`'s "delete before create" ordering can be asserted directly.
+struct RecordingProvisioning {
+    calls: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[async_trait::async_trait]
+impl FactoryProvisioningAdapter for RecordingProvisioning {
+    async fn provision(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        device_name: &str,
+        _csr_der: &[u8],
+    ) -> remora_etcher_factory::adapter::Result<ProvisionedIdentity> {
+        self.calls.lock().unwrap().push("provision");
+        Ok(ProvisionedIdentity {
+            certificate_der: b"fake-certificate-der".to_vec(),
+            certificate_authority_der: b"fake-factory-ca-der".to_vec(),
+            server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
+            key_id: format!("test:kms:certificate:{device_name}"),
+            access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
+        })
+    }
+
+    async fn delete(
+        &self,
+        _api_url: &str,
+        _api_key: &str,
+        _device_name: &str,
+    ) -> remora_etcher_factory::adapter::Result<()> {
+        self.calls.lock().unwrap().push("delete");
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn force_deletes_the_existing_credential_before_provisioning() {
+    let output = temp_path("remora-factory.yaml");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    controller(RecordingProvisioning {
+        calls: calls.clone(),
+    })
+    .provision(
+        "e2e-serial-0005",
+        "https://api.example.invalid",
+        "unused-in-the-fake",
+        None,
+        true,
+        &output,
+        &OperationContext::noop(),
+    )
+    .await
+    .expect("provisioning should succeed against the fake adapter");
+
+    let _ = fs::remove_file(&output);
+    assert_eq!(*calls.lock().unwrap(), vec!["delete", "provision"]);
+}
+
+#[tokio::test]
+async fn without_force_the_existing_credential_is_left_alone() {
+    let output = temp_path("remora-factory.yaml");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    controller(RecordingProvisioning {
+        calls: calls.clone(),
+    })
+    .provision(
+        "e2e-serial-0006",
+        "https://api.example.invalid",
+        "unused-in-the-fake",
+        None,
+        false,
+        &output,
+        &OperationContext::noop(),
+    )
+    .await
+    .expect("provisioning should succeed against the fake adapter");
+
+    let _ = fs::remove_file(&output);
+    assert_eq!(*calls.lock().unwrap(), vec!["provision"]);
 }

@@ -66,6 +66,9 @@ pub enum BatchStep {
         /// comment. Normally omitted -- the platform's response supplies it.
         #[serde(default)]
         access_url: Option<String>,
+        /// See `FactoryServiceInterface::provision`'s `force` doc comment.
+        #[serde(default)]
+        force: bool,
         output: PathBuf,
     },
 }
