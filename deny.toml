@@ -35,6 +35,13 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
+    # Pulled in by reqwest/rustls (remora-etcher-factory-adapter-gateway's
+    # network call to sntns-platform): ring/rustls-webpki/untrusted are
+    # ISC (an OSI-approved, MIT/BSD-equivalent permissive license);
+    # webpki-roots (Mozilla's CA bundle) is CDLA-Permissive-2.0, also
+    # permissive.
+    "ISC",
+    "CDLA-Permissive-2.0",
 ]
 # This project is Apache-2.0 (see Cargo.toml `license = "Apache-2.0"`), so
 # copyleft dependencies (GPL, AGPL, LGPL, ...) are not on the allow list
