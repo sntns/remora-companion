@@ -57,8 +57,9 @@ impl ConvertServiceInterface for ConvertControllerImpl {
         match self.adapter_for(format_of(image)) {
             None => {
                 ctx.sink.phase("copying");
-                fs::copy(image, output_raw).map(|_| ()).map_err(|_| {
+                fs::copy(image, output_raw).map(|_| ()).map_err(|e| {
                     Report::new(Error::Copy(image.to_path_buf(), output_raw.to_path_buf()))
+                        .attach(e.to_string())
                 })
             }
             Some(adapter) => {
@@ -95,8 +96,9 @@ impl ConvertServiceInterface for ConvertControllerImpl {
         match self.adapter_for(format_of(output)) {
             None => {
                 ctx.sink.phase("copying");
-                fs::copy(raw_image, output).map(|_| ()).map_err(|_| {
+                fs::copy(raw_image, output).map(|_| ()).map_err(|e| {
                     Report::new(Error::Copy(raw_image.to_path_buf(), output.to_path_buf()))
+                        .attach(e.to_string())
                 })
             }
             Some(adapter) => {
