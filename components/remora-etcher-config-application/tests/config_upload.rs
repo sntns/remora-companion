@@ -236,3 +236,40 @@ async fn config_upload_round_trips_on_an_ext4_shared_partition() {
 async fn config_upload_round_trips_on_a_vfat_shared_partition() {
     run_config_upload_round_trip("vfat").await;
 }
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mke2fs/fsck.ext4, Linux-only dev tools"
+)]
+async fn config_upload_creates_missing_ancestor_directories() {
+    // A fresh config.ext4 is seeded with only `tzdata/` at its root -- any
+    // caller uploading to a nested path (e.g. tplsth's `/c/<file>` coder
+    // config) must not have to create `/c` itself first.
+    let disk = build_disk_with_shared_partition("ext4");
+    let controller = controller();
+
+    let source = temp_path("coder-source");
+    fs::write(&source, b"{\"coder\":1}").unwrap();
+
+    controller
+        .upload(&disk, &source, "/c/coder1.json", "slot-A", 0o644)
+        .await
+        .unwrap();
+
+    let config_bytes = read_back(&disk, "ext4", "/remora/slot-A/config");
+    let inner = temp_path("inner-config-nested");
+    fs::write(&inner, &config_bytes).unwrap();
+    assert_eq!(
+        Ext4AdapterImpl
+            .read_file(&inner, 0, config_bytes.len() as u64, "/c/coder1.json")
+            .unwrap(),
+        b"{\"coder\":1}"
+    );
+
+    fsck_shared_partition(&disk, "ext4");
+
+    for p in [source, inner, disk] {
+        let _ = fs::remove_file(p);
+    }
+}

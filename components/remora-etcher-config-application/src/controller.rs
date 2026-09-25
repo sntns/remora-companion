@@ -38,6 +38,42 @@ impl ConfigControllerImpl {
             image,
         }
     }
+
+    /// `upload` only ever guarantees the config image's own root exists (a
+    /// fresh one is seeded with just `tzdata/`) -- a caller uploading to a
+    /// nested path like `/c/coder1.json` needs `/c` created first, same
+    /// "narrow surface" rule `write_file`'s own doc comment states. Create
+    /// whatever ancestor directories of `dest_relative_path` don't exist yet
+    /// (mkdir -p semantics), so `upload` itself doesn't inherit that
+    /// restriction for callers that don't need it.
+    fn ensure_parent_dirs(
+        &self,
+        local_image: &Path,
+        local_size: u64,
+        dest_relative_path: &str,
+    ) -> Result<()> {
+        let mut components: Vec<&str> = dest_relative_path
+            .split('/')
+            .filter(|c| !c.is_empty())
+            .collect();
+        components.pop(); // drop the file name itself, only ancestors matter here
+
+        let mut current = String::new();
+        for component in components {
+            current.push('/');
+            current.push_str(component);
+            let exists = self
+                .ext4
+                .exists(local_image, 0, local_size, &current)
+                .change_context_lazy(|| Error::Populate(local_image.to_path_buf()))?;
+            if !exists {
+                self.ext4
+                    .create_dir(local_image, 0, local_size, &current, 0o755)
+                    .change_context_lazy(|| Error::Populate(local_image.to_path_buf()))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -156,6 +192,7 @@ impl ConfigServiceInterface for ConfigControllerImpl {
         let local_size = fs::metadata(&local_image)
             .map_err(|_| Report::new(Error::ReadTempImage(local_image.clone())))?
             .len();
+        self.ensure_parent_dirs(&local_image, local_size, dest_relative_path)?;
         self.ext4
             .write_file(
                 &local_image,
