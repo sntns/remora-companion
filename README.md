@@ -1,6 +1,6 @@
 # remora-etcher
 
-[![CI](https://github.com/sntns/remora-etcher/actions/workflows/ci.yml/badge.svg)](https://github.com/sntns/remora-etcher/actions/workflows/ci.yml)
+[![CI](https://github.com/sntns/remora-companion/actions/workflows/ci.yml/badge.svg)](https://github.com/sntns/remora-companion/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A standalone, cross-platform (Linux/Windows/macOS) provisioning and flashing
@@ -14,11 +14,11 @@ implemented in Rust.
 On Linux or macOS, install the latest release binary with:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/sntns/remora-etcher/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sntns/remora-companion/main/install.sh | bash
 ```
 
 This detects your OS/arch, downloads the matching archive from the
-[latest GitHub release](https://github.com/sntns/remora-etcher/releases/latest),
+[latest GitHub release](https://github.com/sntns/remora-companion/releases/latest),
 and installs `remora-etcher` into `/usr/local/bin` (or `~/.local/bin` if
 that isn't writable). Install a specific version instead of the latest
 with `REMORA_ETCHER_VERSION=vX.Y.Z`, or change the install location with
@@ -26,7 +26,7 @@ with `REMORA_ETCHER_VERSION=vX.Y.Z`, or change the install location with
 
 On Windows, or if you'd rather not pipe a script into `bash`, grab the
 matching archive/`.deb` directly from the
-[releases page](https://github.com/sntns/remora-etcher/releases) instead.
+[releases page](https://github.com/sntns/remora-companion/releases) instead.
 
 ## Features
 
@@ -187,7 +187,7 @@ cargo test --workspace
 
 ### Cutting a release
 
-From the [Actions tab](https://github.com/sntns/remora-etcher/actions/workflows/cut-release.yml),
+From the [Actions tab](https://github.com/sntns/remora-companion/actions/workflows/cut-release.yml),
 run **Cut a release** and pick `patch`/`minor`/`major`. That's it — it uses
 [`cargo-release`](https://github.com/crate-ci/cargo-release) to bump
 `[workspace.package].version` (every crate inherits it, so the whole

@@ -3,7 +3,7 @@
 # Installs the right remora-etcher release binary for the current OS/arch.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/sntns/remora-etcher/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sntns/remora-companion/main/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- v0.1.0        # install a specific tag
 #
 # Env vars:
@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-REPO="sntns/remora-etcher"
+REPO="sntns/remora-companion"
 BIN_NAME="remora-etcher"
 VERSION="${REMORA_ETCHER_VERSION:-${1:-latest}}"
 
