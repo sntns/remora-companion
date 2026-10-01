@@ -1,0 +1,18 @@
+[package]
+name = "remora-flash-application-transport-cli"
+description = "clap command exposing the flash application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-disk = { path = "../disk" }
+remora-flash = { path = "../flash" }
+remora-format = { path = "../format" }
+remora-progress = { path = "../progress" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

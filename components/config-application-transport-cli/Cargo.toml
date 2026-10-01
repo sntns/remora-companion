@@ -1,0 +1,13 @@
+[package]
+name = "remora-config-application-transport-cli"
+description = "clap subcommands exposing the config application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-config = { path = "../config" }
+remora-format = { path = "../format" }
+clap.workspace = true
+error-stack.workspace = true

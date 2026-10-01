@@ -151,7 +151,7 @@ vertical's `ImageService` instead (see `containers/remora-etcher/src/bootstrap.r
 since writing into a partition is `image`'s job either way.
 
 Three small shared utility crates with no vertical prefix
-(`remora-etcher-fs-walk`, `remora-etcher-scratch`, `remora-etcher-format`)
+(`remora-fs-walk`, `remora-scratch`, `remora-format`)
 mirror remora-edge's own `components/store`/`config` convention.
 `containers/remora-etcher` is the single binary: a composition root that
 wires every adapter and use case together via

@@ -1,0 +1,38 @@
+[package]
+name = "remora-batch-application"
+description = "Use-case implementation for the batch vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-batch = { path = "../batch" }
+remora-convert = { path = "../convert" }
+remora-identity = { path = "../identity" }
+remora-config = { path = "../config" }
+remora-image = { path = "../image" }
+remora-squashfs = { path = "../squashfs" }
+remora-factory = { path = "../factory" }
+remora-progress = { path = "../progress" }
+error-stack.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Real (not mocked) adapters, for an integration-style test of the use case
+# end to end — same posture as the other application crates' tests.
+remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }
+remora-convert-adapter-qcow2 = { path = "../convert-adapter-qcow2" }
+remora-convert-application = { path = "../convert-application" }
+remora-identity-adapter-keygen = { path = "../identity-adapter-keygen" }
+remora-identity-application = { path = "../identity-application" }
+remora-config-application = { path = "../config-application" }
+remora-squashfs-application = { path = "../squashfs-application" }
+remora-squashfs-adapter-backhand = { path = "../squashfs-adapter-backhand" }
+remora-image-application = { path = "../image-application" }
+remora-image-adapter-partition-table = { path = "../image-adapter-partition-table" }
+remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
+remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
+remora-fs-walk = { path = "../fs-walk" }
+remora-factory-application = { path = "../factory-application" }
+tokio = { workspace = true, features = ["macros", "rt"] }

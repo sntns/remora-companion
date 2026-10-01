@@ -1,0 +1,20 @@
+[package]
+name = "remora-convert-application"
+description = "Use-case implementation for the convert vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-convert = { path = "../convert" }
+remora-progress = { path = "../progress" }
+error-stack.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }
+remora-convert-adapter-qcow2 = { path = "../convert-adapter-qcow2" }
+tokio = { workspace = true, features = ["macros", "rt"] }
+tokio-stream.workspace = true
+tokio-util.workspace = true

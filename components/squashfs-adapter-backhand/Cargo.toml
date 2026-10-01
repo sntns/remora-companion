@@ -1,0 +1,12 @@
+[package]
+name = "remora-squashfs-adapter-backhand"
+description = "Concrete SquashfsAdapter: wraps backhand"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-squashfs = { path = "../squashfs" }
+error-stack.workspace = true
+backhand = "0.25"

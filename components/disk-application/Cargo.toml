@@ -1,0 +1,12 @@
+[package]
+name = "remora-disk-application"
+description = "Use-case implementation for the disk vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-disk = { path = "../disk" }
+error-stack.workspace = true
+async-trait.workspace = true

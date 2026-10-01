@@ -1,38 +1,36 @@
 use std::sync::Arc;
 
-use remora_etcher_batch::application::BatchService;
-use remora_etcher_batch_application::BatchControllerImpl;
-use remora_etcher_config::application::ConfigService;
-use remora_etcher_config_application::ConfigControllerImpl;
-use remora_etcher_convert::application::ConvertService;
-use remora_etcher_convert_adapter_gzip::GzipAdapterImpl;
-use remora_etcher_convert_adapter_qcow2::Qcow2AdapterImpl;
-use remora_etcher_convert_application::ConvertControllerImpl;
-use remora_etcher_disk::{adapter::DiskAdapterService, application::DiskService};
-use remora_etcher_disk_adapter_native::DiskAdapterImpl;
-use remora_etcher_disk_application::DiskControllerImpl;
-use remora_etcher_factory::{
-    adapter::FactoryProvisioningAdapterService, application::FactoryService,
-};
-use remora_etcher_factory_adapter_gateway::GatewayAdapterImpl;
-use remora_etcher_factory_application::FactoryControllerImpl;
-use remora_etcher_flash::{adapter::BmapAdapterService, application::FlashService};
-use remora_etcher_flash_adapter_bmap::BmapAdapterImpl;
-use remora_etcher_flash_application::FlashControllerImpl;
-use remora_etcher_identity::{adapter::KeygenAdapterService, application::IdentityService};
-use remora_etcher_identity_adapter_keygen::KeygenAdapterImpl;
-use remora_etcher_identity_application::IdentityControllerImpl;
-use remora_etcher_image::adapter::ext4::Ext4AdapterService;
-use remora_etcher_image::{
+use remora_batch::application::BatchService;
+use remora_batch_application::BatchControllerImpl;
+use remora_config::application::ConfigService;
+use remora_config_application::ConfigControllerImpl;
+use remora_convert::application::ConvertService;
+use remora_convert_adapter_gzip::GzipAdapterImpl;
+use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
+use remora_convert_application::ConvertControllerImpl;
+use remora_disk::{adapter::DiskAdapterService, application::DiskService};
+use remora_disk_adapter_native::DiskAdapterImpl;
+use remora_disk_application::DiskControllerImpl;
+use remora_factory::{adapter::FactoryProvisioningAdapterService, application::FactoryService};
+use remora_factory_adapter_gateway::GatewayAdapterImpl;
+use remora_factory_application::FactoryControllerImpl;
+use remora_flash::{adapter::BmapAdapterService, application::FlashService};
+use remora_flash_adapter_bmap::BmapAdapterImpl;
+use remora_flash_application::FlashControllerImpl;
+use remora_identity::{adapter::KeygenAdapterService, application::IdentityService};
+use remora_identity_adapter_keygen::KeygenAdapterImpl;
+use remora_identity_application::IdentityControllerImpl;
+use remora_image::adapter::ext4::Ext4AdapterService;
+use remora_image::{
     adapter::partition_table::PartitionTableAdapterService, application::ImageService,
 };
-use remora_etcher_image_adapter_ext4::Ext4AdapterImpl;
-use remora_etcher_image_adapter_partition_table::PartitionTableAdapterImpl;
-use remora_etcher_image_adapter_vfat::VfatAdapterImpl;
-use remora_etcher_image_application::ImageControllerImpl;
-use remora_etcher_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
-use remora_etcher_squashfs_adapter_backhand::SquashfsAdapterImpl;
-use remora_etcher_squashfs_application::SquashfsControllerImpl;
+use remora_image_adapter_ext4::Ext4AdapterImpl;
+use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
+use remora_image_adapter_vfat::VfatAdapterImpl;
+use remora_image_application::ImageControllerImpl;
+use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
+use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
+use remora_squashfs_application::SquashfsControllerImpl;
 
 /// Every service the CLI can dispatch into, wired once at startup. All
 /// fields deref all the way down to `dyn ...ServiceInterface` (`DiskService`
@@ -102,12 +100,12 @@ pub async fn wire() -> Services {
         .expect("PartitionTableAdapterService was just registered");
 
     container
-        .set_type(remora_etcher_fs_walk::FsWalkAdapterService::new(
-            remora_etcher_fs_walk::FsWalkAdapterImpl,
+        .set_type(remora_fs_walk::FsWalkAdapterService::new(
+            remora_fs_walk::FsWalkAdapterImpl,
         ))
         .await;
     let fs_walk = container
-        .get_type::<remora_etcher_fs_walk::FsWalkAdapterService>()
+        .get_type::<remora_fs_walk::FsWalkAdapterService>()
         .await
         .expect("FsWalkAdapterService was just registered");
 
@@ -116,9 +114,9 @@ pub async fn wire() -> Services {
     // set_type/get_type round-trip for these two (busybody keys purely on
     // TypeId, and `Arc<dyn PartitionFilesystem>` would collide between them
     // if both went through it under the same type).
-    let ext4_fs: Arc<dyn remora_etcher_image::adapter::partition_fs::PartitionFilesystem> =
+    let ext4_fs: Arc<dyn remora_image::adapter::partition_fs::PartitionFilesystem> =
         Arc::new(Ext4AdapterImpl);
-    let vfat_fs: Arc<dyn remora_etcher_image::adapter::partition_fs::PartitionFilesystem> =
+    let vfat_fs: Arc<dyn remora_image::adapter::partition_fs::PartitionFilesystem> =
         Arc::new(VfatAdapterImpl);
 
     container
@@ -136,7 +134,7 @@ pub async fn wire() -> Services {
 
     // The config vertical injects Ext4Adapter directly too (not through
     // PartitionFilesystem) to manipulate a standalone config.ext4 file —
-    // see remora-etcher-image's Ext4Adapter doc comment.
+    // see remora-image's Ext4Adapter doc comment.
     container
         .set_type(Ext4AdapterService::new(Ext4AdapterImpl))
         .await;
@@ -185,7 +183,7 @@ pub async fn wire() -> Services {
         .expect("IdentityService was just registered");
 
     let fs_walk_for_config = container
-        .get_type::<remora_etcher_fs_walk::FsWalkAdapterService>()
+        .get_type::<remora_fs_walk::FsWalkAdapterService>()
         .await
         .expect("FsWalkAdapterService was registered earlier");
 
@@ -206,9 +204,9 @@ pub async fn wire() -> Services {
     // container: ContainerFormatAdapter is implemented by two distinct
     // concrete types at once, which would collide under the same wrapper
     // TypeId if registered there.
-    let qcow2_adapter: Arc<dyn remora_etcher_convert::adapter::ContainerFormatAdapter> =
+    let qcow2_adapter: Arc<dyn remora_convert::adapter::ContainerFormatAdapter> =
         Arc::new(Qcow2AdapterImpl);
-    let gzip_adapter: Arc<dyn remora_etcher_convert::adapter::ContainerFormatAdapter> =
+    let gzip_adapter: Arc<dyn remora_convert::adapter::ContainerFormatAdapter> =
         Arc::new(GzipAdapterImpl);
 
     container

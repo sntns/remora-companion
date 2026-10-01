@@ -1,0 +1,22 @@
+[package]
+name = "remora-image-application"
+description = "Use-case implementation for the image vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-image = { path = "../image" }
+remora-fs-walk = { path = "../fs-walk" }
+remora-progress = { path = "../progress" }
+error-stack.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Real (not mocked) adapters, for an integration-style test of the use case
+# end to end — same posture as the other application crates' tests.
+remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
+remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
+remora-image-adapter-partition-table = { path = "../image-adapter-partition-table" }
+tokio = { workspace = true, features = ["macros", "rt"] }

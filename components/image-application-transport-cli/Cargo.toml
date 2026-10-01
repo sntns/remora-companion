@@ -1,0 +1,17 @@
+[package]
+name = "remora-image-application-transport-cli"
+description = "clap subcommands exposing the image application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-image = { path = "../image" }
+remora-format = { path = "../format" }
+remora-progress = { path = "../progress" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

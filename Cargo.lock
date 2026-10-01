@@ -2146,109 +2146,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "remora-etcher"
-version = "0.3.0"
-dependencies = [
- "busybody",
- "clap",
- "remora-etcher-batch",
- "remora-etcher-batch-application",
- "remora-etcher-batch-application-transport-cli",
- "remora-etcher-config",
- "remora-etcher-config-application",
- "remora-etcher-config-application-transport-cli",
- "remora-etcher-convert",
- "remora-etcher-convert-adapter-gzip",
- "remora-etcher-convert-adapter-qcow2",
- "remora-etcher-convert-application",
- "remora-etcher-convert-application-transport-cli",
- "remora-etcher-disk",
- "remora-etcher-disk-adapter-native",
- "remora-etcher-disk-application",
- "remora-etcher-disk-application-transport-cli",
- "remora-etcher-factory",
- "remora-etcher-factory-adapter-gateway",
- "remora-etcher-factory-application",
- "remora-etcher-factory-application-transport-cli",
- "remora-etcher-flash",
- "remora-etcher-flash-adapter-bmap",
- "remora-etcher-flash-application",
- "remora-etcher-flash-application-transport-cli",
- "remora-etcher-fs-walk",
- "remora-etcher-identity",
- "remora-etcher-identity-adapter-keygen",
- "remora-etcher-identity-application",
- "remora-etcher-identity-application-transport-cli",
- "remora-etcher-image",
- "remora-etcher-image-adapter-ext4",
- "remora-etcher-image-adapter-partition-table",
- "remora-etcher-image-adapter-vfat",
- "remora-etcher-image-application",
- "remora-etcher-image-application-transport-cli",
- "remora-etcher-scratch",
- "remora-etcher-squashfs",
- "remora-etcher-squashfs-adapter-backhand",
- "remora-etcher-squashfs-application",
- "remora-etcher-squashfs-application-transport-cli",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "remora-etcher-batch"
+name = "remora-batch"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-etcher-image",
- "remora-etcher-progress",
- "remora-etcher-squashfs",
+ "remora-image",
+ "remora-progress",
+ "remora-squashfs",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-batch-application"
+name = "remora-batch-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-batch",
- "remora-etcher-config",
- "remora-etcher-config-application",
- "remora-etcher-convert",
- "remora-etcher-convert-adapter-gzip",
- "remora-etcher-convert-adapter-qcow2",
- "remora-etcher-convert-application",
- "remora-etcher-factory",
- "remora-etcher-factory-application",
- "remora-etcher-fs-walk",
- "remora-etcher-identity",
- "remora-etcher-identity-adapter-keygen",
- "remora-etcher-identity-application",
- "remora-etcher-image",
- "remora-etcher-image-adapter-ext4",
- "remora-etcher-image-adapter-partition-table",
- "remora-etcher-image-adapter-vfat",
- "remora-etcher-image-application",
- "remora-etcher-progress",
- "remora-etcher-squashfs",
- "remora-etcher-squashfs-adapter-backhand",
- "remora-etcher-squashfs-application",
+ "remora-batch",
+ "remora-config",
+ "remora-config-application",
+ "remora-convert",
+ "remora-convert-adapter-gzip",
+ "remora-convert-adapter-qcow2",
+ "remora-convert-application",
+ "remora-factory",
+ "remora-factory-application",
+ "remora-fs-walk",
+ "remora-identity",
+ "remora-identity-adapter-keygen",
+ "remora-identity-application",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-image-application",
+ "remora-progress",
+ "remora-squashfs",
+ "remora-squashfs-adapter-backhand",
+ "remora-squashfs-application",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-batch-application-transport-cli"
+name = "remora-batch-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "clap",
  "error-stack",
- "remora-etcher-batch",
- "remora-etcher-progress",
+ "remora-batch",
+ "remora-progress",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -2256,102 +2206,102 @@ dependencies = [
 ]
 
 [[package]]
-name = "remora-etcher-config"
+name = "remora-config"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-etcher-squashfs",
+ "remora-squashfs",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-config-application"
+name = "remora-config-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-config",
- "remora-etcher-fs-walk",
- "remora-etcher-image",
- "remora-etcher-image-adapter-ext4",
- "remora-etcher-image-adapter-partition-table",
- "remora-etcher-image-adapter-vfat",
- "remora-etcher-image-application",
- "remora-etcher-scratch",
- "remora-etcher-squashfs",
+ "remora-config",
+ "remora-fs-walk",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-image-application",
+ "remora-scratch",
+ "remora-squashfs",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-config-application-transport-cli"
+name = "remora-config-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-config",
- "remora-etcher-format",
+ "remora-config",
+ "remora-format",
 ]
 
 [[package]]
-name = "remora-etcher-convert"
+name = "remora-convert"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-etcher-progress",
+ "remora-progress",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-convert-adapter-gzip"
+name = "remora-convert-adapter-gzip"
 version = "0.3.0"
 dependencies = [
  "error-stack",
  "flate2",
- "remora-etcher-convert",
+ "remora-convert",
 ]
 
 [[package]]
-name = "remora-etcher-convert-adapter-qcow2"
+name = "remora-convert-adapter-qcow2"
 version = "0.3.0"
 dependencies = [
  "error-stack",
- "remora-etcher-convert",
+ "remora-convert",
 ]
 
 [[package]]
-name = "remora-etcher-convert-application"
+name = "remora-convert-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-convert",
- "remora-etcher-convert-adapter-gzip",
- "remora-etcher-convert-adapter-qcow2",
- "remora-etcher-progress",
+ "remora-convert",
+ "remora-convert-adapter-gzip",
+ "remora-convert-adapter-qcow2",
+ "remora-progress",
  "tokio",
  "tokio-stream",
  "tokio-util",
 ]
 
 [[package]]
-name = "remora-etcher-convert-application-transport-cli"
+name = "remora-convert-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-convert",
- "remora-etcher-progress",
+ "remora-convert",
+ "remora-progress",
  "tokio",
  "tokio-stream",
  "tokio-util",
 ]
 
 [[package]]
-name = "remora-etcher-disk"
+name = "remora-disk"
 version = "0.3.0"
 dependencies = [
  "async-trait",
@@ -2361,58 +2311,108 @@ dependencies = [
 ]
 
 [[package]]
-name = "remora-etcher-disk-adapter-native"
+name = "remora-disk-adapter-native"
 version = "0.3.0"
 dependencies = [
  "error-stack",
- "remora-etcher-disk",
+ "remora-disk",
 ]
 
 [[package]]
-name = "remora-etcher-disk-application"
+name = "remora-disk-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-disk",
+ "remora-disk",
 ]
 
 [[package]]
-name = "remora-etcher-disk-application-transport-cli"
+name = "remora-disk-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-disk",
- "remora-etcher-format",
+ "remora-disk",
+ "remora-format",
 ]
 
 [[package]]
-name = "remora-etcher-factory"
+name = "remora-etcher"
+version = "0.3.0"
+dependencies = [
+ "busybody",
+ "clap",
+ "remora-batch",
+ "remora-batch-application",
+ "remora-batch-application-transport-cli",
+ "remora-config",
+ "remora-config-application",
+ "remora-config-application-transport-cli",
+ "remora-convert",
+ "remora-convert-adapter-gzip",
+ "remora-convert-adapter-qcow2",
+ "remora-convert-application",
+ "remora-convert-application-transport-cli",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
+ "remora-disk-application-transport-cli",
+ "remora-factory",
+ "remora-factory-adapter-gateway",
+ "remora-factory-application",
+ "remora-factory-application-transport-cli",
+ "remora-flash",
+ "remora-flash-adapter-bmap",
+ "remora-flash-application",
+ "remora-flash-application-transport-cli",
+ "remora-fs-walk",
+ "remora-identity",
+ "remora-identity-adapter-keygen",
+ "remora-identity-application",
+ "remora-identity-application-transport-cli",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-image-application",
+ "remora-image-application-transport-cli",
+ "remora-scratch",
+ "remora-squashfs",
+ "remora-squashfs-adapter-backhand",
+ "remora-squashfs-application",
+ "remora-squashfs-application-transport-cli",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "remora-factory"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-etcher-progress",
+ "remora-progress",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-factory-adapter-gateway"
+name = "remora-factory-adapter-gateway"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "error-stack",
- "remora-etcher-factory",
+ "remora-factory",
  "reqwest",
  "serde",
 ]
 
 [[package]]
-name = "remora-etcher-factory-application"
+name = "remora-factory-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
@@ -2421,80 +2421,80 @@ dependencies = [
  "p256 0.14.0",
  "pem",
  "rcgen",
- "remora-etcher-factory",
- "remora-etcher-progress",
+ "remora-factory",
+ "remora-progress",
  "tokio",
  "x509-parser",
 ]
 
 [[package]]
-name = "remora-etcher-factory-application-transport-cli"
+name = "remora-factory-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-factory",
- "remora-etcher-progress",
+ "remora-factory",
+ "remora-progress",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
-name = "remora-etcher-flash"
+name = "remora-flash"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "bmap-parser",
  "busybody",
  "error-stack",
- "remora-etcher-disk",
- "remora-etcher-progress",
+ "remora-disk",
+ "remora-progress",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-flash-adapter-bmap"
+name = "remora-flash-adapter-bmap"
 version = "0.3.0"
 dependencies = [
  "bmap-parser",
  "error-stack",
- "remora-etcher-flash",
+ "remora-flash",
 ]
 
 [[package]]
-name = "remora-etcher-flash-application"
+name = "remora-flash-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-disk",
- "remora-etcher-flash",
- "remora-etcher-flash-adapter-bmap",
- "remora-etcher-progress",
+ "remora-disk",
+ "remora-flash",
+ "remora-flash-adapter-bmap",
+ "remora-progress",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-flash-application-transport-cli"
+name = "remora-flash-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-disk",
- "remora-etcher-flash",
- "remora-etcher-format",
- "remora-etcher-progress",
+ "remora-disk",
+ "remora-flash",
+ "remora-format",
+ "remora-progress",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
-name = "remora-etcher-format"
+name = "remora-format"
 version = "0.3.0"
 
 [[package]]
-name = "remora-etcher-fs-walk"
+name = "remora-fs-walk"
 version = "0.3.0"
 dependencies = [
  "busybody",
@@ -2504,62 +2504,62 @@ dependencies = [
 ]
 
 [[package]]
-name = "remora-etcher-identity"
+name = "remora-identity"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-etcher-squashfs",
+ "remora-squashfs",
  "ssh-key",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-identity-adapter-keygen"
+name = "remora-identity-adapter-keygen"
 version = "0.3.0"
 dependencies = [
  "error-stack",
  "rand 0.8.7",
- "remora-etcher-identity",
+ "remora-identity",
  "ssh-key",
 ]
 
 [[package]]
-name = "remora-etcher-identity-application"
+name = "remora-identity-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-fs-walk",
- "remora-etcher-identity",
- "remora-etcher-identity-adapter-keygen",
- "remora-etcher-image",
- "remora-etcher-image-adapter-ext4",
- "remora-etcher-image-adapter-partition-table",
- "remora-etcher-image-adapter-vfat",
- "remora-etcher-image-application",
- "remora-etcher-progress",
- "remora-etcher-scratch",
- "remora-etcher-squashfs",
- "remora-etcher-squashfs-adapter-backhand",
- "remora-etcher-squashfs-application",
+ "remora-fs-walk",
+ "remora-identity",
+ "remora-identity-adapter-keygen",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-image-application",
+ "remora-progress",
+ "remora-scratch",
+ "remora-squashfs",
+ "remora-squashfs-adapter-backhand",
+ "remora-squashfs-application",
  "ssh-key",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-identity-application-transport-cli"
+name = "remora-identity-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-format",
- "remora-etcher-identity",
+ "remora-format",
+ "remora-identity",
 ]
 
 [[package]]
-name = "remora-etcher-image"
+name = "remora-image"
 version = "0.3.0"
 dependencies = [
  "am-fs-ext4",
@@ -2567,70 +2567,70 @@ dependencies = [
  "busybody",
  "error-stack",
  "fatfs",
- "remora-etcher-progress",
+ "remora-progress",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-image-adapter-ext4"
+name = "remora-image-adapter-ext4"
 version = "0.3.0"
 dependencies = [
  "am-fs-ext4",
  "error-stack",
- "remora-etcher-image",
+ "remora-image",
 ]
 
 [[package]]
-name = "remora-etcher-image-adapter-partition-table"
+name = "remora-image-adapter-partition-table"
 version = "0.3.0"
 dependencies = [
  "error-stack",
  "gptman",
  "mbrman",
- "remora-etcher-image",
+ "remora-image",
 ]
 
 [[package]]
-name = "remora-etcher-image-adapter-vfat"
+name = "remora-image-adapter-vfat"
 version = "0.3.0"
 dependencies = [
  "error-stack",
  "fatfs",
- "remora-etcher-image",
+ "remora-image",
 ]
 
 [[package]]
-name = "remora-etcher-image-application"
+name = "remora-image-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-fs-walk",
- "remora-etcher-image",
- "remora-etcher-image-adapter-ext4",
- "remora-etcher-image-adapter-partition-table",
- "remora-etcher-image-adapter-vfat",
- "remora-etcher-progress",
+ "remora-fs-walk",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-progress",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-image-application-transport-cli"
+name = "remora-image-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-format",
- "remora-etcher-image",
- "remora-etcher-progress",
+ "remora-format",
+ "remora-image",
+ "remora-progress",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
-name = "remora-etcher-progress"
+name = "remora-progress"
 version = "0.3.0"
 dependencies = [
  "tokio",
@@ -2639,54 +2639,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "remora-etcher-scratch"
+name = "remora-scratch"
 version = "0.3.0"
 
 [[package]]
-name = "remora-etcher-squashfs"
+name = "remora-squashfs"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "backhand",
  "busybody",
  "error-stack",
- "remora-etcher-fs-walk",
- "remora-etcher-progress",
+ "remora-fs-walk",
+ "remora-progress",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-etcher-squashfs-adapter-backhand"
+name = "remora-squashfs-adapter-backhand"
 version = "0.3.0"
 dependencies = [
  "backhand",
  "error-stack",
- "remora-etcher-squashfs",
+ "remora-squashfs",
 ]
 
 [[package]]
-name = "remora-etcher-squashfs-application"
+name = "remora-squashfs-application"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "remora-etcher-fs-walk",
- "remora-etcher-progress",
- "remora-etcher-squashfs",
- "remora-etcher-squashfs-adapter-backhand",
+ "remora-fs-walk",
+ "remora-progress",
+ "remora-squashfs",
+ "remora-squashfs-adapter-backhand",
  "tokio",
 ]
 
 [[package]]
-name = "remora-etcher-squashfs-application-transport-cli"
+name = "remora-squashfs-application-transport-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
  "error-stack",
- "remora-etcher-format",
- "remora-etcher-progress",
- "remora-etcher-squashfs",
+ "remora-format",
+ "remora-progress",
+ "remora-squashfs",
  "tokio",
  "tokio-util",
 ]

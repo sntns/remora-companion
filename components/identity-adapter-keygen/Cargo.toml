@@ -1,0 +1,13 @@
+[package]
+name = "remora-identity-adapter-keygen"
+description = "Concrete KeygenAdapter: wraps rand + ssh-key"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-identity = { path = "../identity" }
+error-stack.workspace = true
+rand = "0.8"
+ssh-key = { version = "0.6", features = ["ed25519", "rand_core", "getrandom"] }

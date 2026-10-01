@@ -2,12 +2,15 @@
 
 DDD-style workspace, matching [remora-edge](https://github.com/sntns/remora-edge)'s
 convention. One `components/<vertical>` crate group per bounded context
-(currently `disk`, `flash`, `image`, `squashfs`, `identity`, `config`), plus
-two shared utility crates with no vertical prefix, plus one binary in
-`containers/remora-etcher`. Before adding a new vertical or touching an
-existing one, read the equivalent files in an already-migrated vertical
-(`components/remora-etcher-flash*` is the smallest complete example) rather
-than inventing a new shape.
+(currently `disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
+`convert`, `batch`, `factory`), plus shared utility crates with no vertical
+prefix, plus the binaries in `containers/` (`remora-etcher`). Components are
+generic, not owned by one binary: the directory is `components/<vertical>`
+and the package is `remora-<vertical>` (lib `remora_<vertical>`), exactly
+like remora-edge — never prefix a component with a binary's name. Before
+adding a new vertical or touching an existing one, read the equivalent files
+in an already-migrated vertical (`components/flash*` is the smallest
+complete example) rather than inventing a new shape.
 
 ## Crate-per-role, not module-per-role
 
@@ -18,8 +21,8 @@ Each vertical is (at least) four crates, never one:
   `application/`). No I/O, no adapter *implementations* — only the
   contracts. It's fine for a domain crate to depend on a third-party crate
   for an inert value type an adapter's signature needs to name (e.g.
-  `remora-etcher-flash`'s `BlockMap` wraps `bmap_parser::Bmap` directly, and
-  `remora-etcher-image`'s ext4/vfat errors wrap `fs_ext4`/`fatfs`'s own
+  `remora-flash`'s `BlockMap` wraps `bmap_parser::Bmap` directly, and
+  `remora-image`'s ext4/vfat errors wrap `fs_ext4`/`fatfs`'s own
   error types) — reimplementing those as parallel pure types purely to avoid
   the dependency would be busywork with no isolation benefit, since the real
   DI seam is the port trait, not the value's shape. What must never leak
@@ -37,7 +40,7 @@ Each vertical is (at least) four crates, never one:
   (e.g. `-adapter-ext4` wraps `am-fs-ext4`). One crate per real backend, not
   per OS: cross-platform dispatch (`linux.rs`/`macos.rs`/`windows.rs` behind
   `#[cfg(target_os = "...")]`) stays *inside* one adapter crate (see
-  `remora-etcher-disk-adapter-native`) — only genuinely alternate backends
+  `remora-disk-adapter-native`) — only genuinely alternate backends
   (ext4 vs. vfat, GPT vs. MBR within one reader) get split further, and GPT/
   MBR specifically stay as internal modules of one `-adapter-partition-table`
   crate because they're always tried together (`read()` falls back from one
@@ -50,13 +53,13 @@ Each vertical is (at least) four crates, never one:
 Two shared, no-prefix utility crates exist for cross-vertical infrastructure
 that isn't itself a bounded context:
 
-- `remora-etcher-fs-walk` — wraps `walkdir`. Bundles its port trait and real
+- `remora-fs-walk` — wraps `walkdir`. Bundles its port trait and real
   implementation in *one* crate (no separate `-adapter-*`), because unlike
   ext4/vfat there is only ever one real backend — the split exists to make
   swapping backends *and* faking behavior in tests both possible; with a
   single backend and only the second need applying, one crate is enough
   (same reasoning as remora-edge's own `components/store`/`config`).
-- `remora-etcher-scratch` — a plain function (`unique_path`) generating a
+- `remora-scratch` — a plain function (`unique_path`) generating a
   unique temp path. **Not** wrapped in a port/DI seam: which directory
   scratch files live in isn't a business decision any test needs to
   substitute, so the ceremony would be pure overhead. Contrast this
@@ -82,7 +85,7 @@ Mirrors remora-edge exactly:
   `service.rs` holds the `*Impl` struct and its trait impl, plus whatever
   private helpers it needs (these stay as plain `std::result::Result<T,
   Error>` internally, wrapped in `Report::new`/`.change_context(...)` only
-  at the trait-impl method boundary — see `remora-etcher-image-adapter-ext4`
+  at the trait-impl method boundary — see `remora-image-adapter-ext4`
   for the pattern). Inside a **transport-cli crate**: `service.rs` holds the
   `Command` enum and `run()`.
 

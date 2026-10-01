@@ -1,0 +1,17 @@
+[package]
+name = "remora-batch"
+description = "Domain crate for the batch vertical: a serializable BatchStep recipe and the batch application port, composing several other verticals' operations into one call"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-image = { path = "../image" }
+remora-squashfs = { path = "../squashfs" }
+remora-progress = { path = "../progress" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+serde.workspace = true

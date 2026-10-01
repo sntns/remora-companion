@@ -1,0 +1,18 @@
+[package]
+name = "remora-identity"
+description = "Domain crate for the identity vertical: the KeygenAdapter port and the identity application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-squashfs = { path = "../squashfs" }
+async-trait.workspace = true
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+# Error::GenerateSshHostKey wraps this crate's own error type directly —
+# same rationale as remora-flash's BlockMap / remora-image's
+# ext4/fatfs errors.
+ssh-key = { version = "0.6", features = ["ed25519", "rand_core", "getrandom"] }
