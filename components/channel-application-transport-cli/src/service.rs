@@ -304,11 +304,11 @@ fn quote(word: &str) -> String {
     }
 }
 
-#[cfg(test)]
+// Unix quoting only: Windows quotes for CreateProcess instead.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn quotes_only_what_the_shell_would_split() {
         assert_eq!(quote("/usr/bin/rmra"), "/usr/bin/rmra");
