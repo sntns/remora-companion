@@ -71,7 +71,7 @@ enum Commands {
     Update(remora_update_application_transport_cli::Args),
 
     /// Enable shell completion (contexts, devices, releases... with Tab).
-    Completion(completion::CompletionArgs),
+    Completion(remora_completion::Args),
 }
 
 fn main() {
@@ -136,14 +136,13 @@ async fn run() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(&report, verbose, 1)),
-        Commands::Completion(args) => completion::instructions(args),
+        Commands::Completion(args) => remora_completion::instructions(
+            "rmra",
+            args,
+            "Contexts, devices, releases and deployments complete with Tab.",
+        ),
         Commands::Update(args) => {
-            let app = remora_update::model::App {
-                name: "rmra".into(),
-                version: remora_update::model::Version::parse(env!("CARGO_PKG_VERSION"))
-                    .expect("the package version is semver"),
-                executable: std::env::current_exe().unwrap_or_else(|_| "rmra".into()),
-            };
+            let app = remora_update::model::App::running("rmra", env!("CARGO_PKG_VERSION"));
             exit_on_error(
                 remora_update_application_transport_cli::run(args, &services.update, &app).await,
                 verbose,

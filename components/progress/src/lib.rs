@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 /// A single advancement notification for a long-running operation.
@@ -87,33 +87,6 @@ impl OperationContext {
             cancel: CancellationToken::new(),
         }
     }
-}
-
-/// Drains `stream`, printing each event to stderr as a plain line — the
-/// default the CLI transport crates use so they don't each reimplement
-/// this. A GUI wouldn't use this at all: it drains the same stream itself,
-/// in-process, to drive a real progress bar/log panel.
-///
-/// Spawned rather than awaited directly so the caller can run it
-/// concurrently with the operation it's reporting on; join the returned
-/// handle after the operation completes and its `ProgressSink` has been
-/// dropped (closing the channel, ending `stream`) to make sure every event
-/// is printed before anything else.
-pub fn print_to_stderr(
-    mut stream: UnboundedReceiverStream<OperationEvent>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        while let Some(event) = stream.next().await {
-            match event {
-                OperationEvent::Phase(phase) => eprintln!("==> {phase}"),
-                OperationEvent::Progress { done, total: 0 } => {
-                    eprintln!("    {done} (total unknown)")
-                }
-                OperationEvent::Progress { done, total } => eprintln!("    {done}/{total}"),
-                OperationEvent::Log(message) => eprintln!("    {message}"),
-            }
-        }
-    })
 }
 
 /// What happened to a [`track_output_file_size`]-wrapped operation.

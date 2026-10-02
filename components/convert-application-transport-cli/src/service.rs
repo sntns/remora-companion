@@ -31,7 +31,7 @@ pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
     match command {
         Command::ToRaw { image, output } => {
             let (sink, stream) = remora_progress::channel();
-            let printer = remora_progress::print_to_stderr(stream);
+            let follow = remora_tui::follow(stream);
             let result = service
                 .to_raw(
                     &image,
@@ -39,14 +39,14 @@ pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
                     &OperationContext::new(sink, CancellationToken::new()),
                 )
                 .await;
-            let _ = printer.await;
+            follow.finish(&result).await;
             result?;
-            println!("wrote {}", output.display());
+            remora_tui::success(format!("Wrote {}", remora_tui::accent(output.display())));
             Ok(())
         }
         Command::FromRaw { raw, output } => {
             let (sink, stream) = remora_progress::channel();
-            let printer = remora_progress::print_to_stderr(stream);
+            let follow = remora_tui::follow(stream);
             let result = service
                 .from_raw(
                     &raw,
@@ -54,9 +54,9 @@ pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
                     &OperationContext::new(sink, CancellationToken::new()),
                 )
                 .await;
-            let _ = printer.await;
+            follow.finish(&result).await;
             result?;
-            println!("wrote {}", output.display());
+            remora_tui::success(format!("Wrote {}", remora_tui::accent(output.display())));
             Ok(())
         }
     }

@@ -79,7 +79,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
             let serial = DeviceSerial::from_parts(device_name, serial_policy, force)
                 .map_err(|e| Report::new(Error::InvalidSerial(e)))?;
             let (sink, stream) = remora_progress::channel();
-            let printer = remora_progress::print_to_stderr(stream);
+            let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
             let result = service
                 .provision(
@@ -92,17 +92,17 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
                 )
                 .await;
             drop(ctx);
-            let _ = printer.await;
+            follow.finish(&result).await;
             let device = result?;
 
             // The serial alone on stdout, so a label printer (or a script)
             // can consume it; the human-readable summary goes to stderr.
-            eprintln!(
-                "provisioned {} ({}) and wrote its factory credential to {}",
-                device.serial_number,
-                device.factory_device_name,
-                output.display()
-            );
+            remora_tui::success(format!(
+                "Provisioned {} {}, credential in {}",
+                remora_tui::accent(&device.serial_number),
+                remora_tui::dim(format!("({})", device.factory_device_name)),
+                remora_tui::accent(output.display())
+            ));
             println!("{}", device.serial_number);
             Ok(())
         }

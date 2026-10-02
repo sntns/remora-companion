@@ -10,12 +10,14 @@
 //! Not a port: how a line is drawn is not a business decision any test
 //! needs to substitute (same reasoning as `remora-scratch`).
 
+mod operation;
 mod progress;
 mod report;
 mod spinner;
 mod table;
 mod time;
 
+pub use operation::{follow, Follow, Phase};
 pub use progress::{Progress, Watch, WatchLine};
 pub use report::render_report;
 pub use spinner::Spinner;

@@ -34,6 +34,18 @@ pub struct App {
     pub executable: PathBuf,
 }
 
+impl App {
+    /// The running binary named `name`, at `version` (its own
+    /// `CARGO_PKG_VERSION`, which the release process keeps semver).
+    pub fn running(name: &str, version: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            version: Version::parse(version).expect("the package version is semver"),
+            executable: std::env::current_exe().unwrap_or_else(|_| name.into()),
+        }
+    }
+}
+
 /// What a check found.
 #[derive(Debug, Clone)]
 pub struct UpdateCheck {

@@ -51,12 +51,15 @@ pub async fn run(command: Command, service: &IdentityService) -> Result<()> {
             let summary = service
                 .build(&inputs, hostname.as_deref(), machine_id.as_deref(), &output)
                 .await?;
-            println!(
-                "wrote {} ({} entries) to {}",
-                human_size(summary.bytes_written),
-                summary.entry_count,
-                output.display()
-            );
+            remora_tui::success(format!(
+                "Wrote {} {}",
+                remora_tui::accent(output.display()),
+                remora_tui::dim(format!(
+                    "({}, {} entries)",
+                    human_size(summary.bytes_written),
+                    summary.entry_count
+                ))
+            ));
             Ok(())
         }
         Command::Create {
@@ -68,11 +71,11 @@ pub async fn run(command: Command, service: &IdentityService) -> Result<()> {
             let bytes_written = service
                 .create(&inputs, hostname.as_deref(), machine_id.as_deref(), &image)
                 .await?;
-            println!(
-                "wrote identity.squashfs ({}) to {}:/remora/identity",
-                human_size(bytes_written),
-                image.display()
-            );
+            remora_tui::success(format!(
+                "Wrote identity.squashfs to {} {}",
+                remora_tui::accent(format!("{}:/remora/identity", image.display())),
+                remora_tui::dim(format!("({})", human_size(bytes_written)))
+            ));
             Ok(())
         }
     }

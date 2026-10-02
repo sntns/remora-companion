@@ -2836,6 +2836,7 @@ dependencies = [
  "error-stack",
  "remora-batch",
  "remora-progress",
+ "remora-tui",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -2914,7 +2915,9 @@ dependencies = [
 name = "remora-completion"
 version = "0.6.0"
 dependencies = [
+ "clap",
  "clap_complete",
+ "remora-tui",
 ]
 
 [[package]]
@@ -2954,6 +2957,7 @@ dependencies = [
  "error-stack",
  "remora-config",
  "remora-format",
+ "remora-tui",
 ]
 
 [[package]]
@@ -3068,6 +3072,7 @@ dependencies = [
  "error-stack",
  "remora-convert",
  "remora-progress",
+ "remora-tui",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -3155,8 +3160,10 @@ version = "0.6.0"
 dependencies = [
  "clap",
  "error-stack",
+ "remora-completion",
  "remora-disk",
  "remora-format",
+ "remora-tui",
 ]
 
 [[package]]
@@ -3165,9 +3172,12 @@ version = "0.6.0"
 dependencies = [
  "busybody",
  "clap",
+ "clap_complete",
+ "error-stack",
  "remora-batch",
  "remora-batch-application",
  "remora-batch-application-transport-cli",
+ "remora-completion",
  "remora-config",
  "remora-config-application",
  "remora-config-application-transport-cli",
@@ -3188,6 +3198,7 @@ dependencies = [
  "remora-flash-adapter-bmap",
  "remora-flash-application",
  "remora-flash-application-transport-cli",
+ "remora-format",
  "remora-fs-walk",
  "remora-identity",
  "remora-identity-adapter-keygen",
@@ -3204,6 +3215,11 @@ dependencies = [
  "remora-squashfs-adapter-backhand",
  "remora-squashfs-application",
  "remora-squashfs-application-transport-cli",
+ "remora-tui",
+ "remora-update",
+ "remora-update-adapter-github",
+ "remora-update-application",
+ "remora-update-application-transport-cli",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3258,6 +3274,7 @@ dependencies = [
  "error-stack",
  "remora-factory",
  "remora-progress",
+ "remora-tui",
  "tokio",
  "tokio-util",
 ]
@@ -3303,10 +3320,12 @@ version = "0.6.0"
 dependencies = [
  "clap",
  "error-stack",
+ "remora-completion",
  "remora-disk",
  "remora-flash",
  "remora-format",
  "remora-progress",
+ "remora-tui",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -3379,6 +3398,7 @@ dependencies = [
  "error-stack",
  "remora-format",
  "remora-identity",
+ "remora-tui",
 ]
 
 [[package]]
@@ -3447,6 +3467,7 @@ dependencies = [
  "remora-format",
  "remora-image",
  "remora-progress",
+ "remora-tui",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -3590,6 +3611,7 @@ dependencies = [
  "remora-format",
  "remora-progress",
  "remora-squashfs",
+ "remora-tui",
  "tokio",
  "tokio-util",
 ]
@@ -3602,6 +3624,9 @@ dependencies = [
  "comfy-table",
  "console",
  "error-stack",
+ "remora-progress",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

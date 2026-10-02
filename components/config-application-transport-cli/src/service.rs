@@ -59,12 +59,15 @@ pub async fn run(command: Command, service: &ConfigService) -> Result<()> {
             let summary = service
                 .build(&input_dir, &output, size, block_size, label.as_deref())
                 .await?;
-            println!(
-                "wrote {} ({} entries) to {}",
-                human_size(summary.bytes_written),
-                summary.entry_count,
-                output.display()
-            );
+            remora_tui::success(format!(
+                "Wrote {} {}",
+                remora_tui::accent(output.display()),
+                remora_tui::dim(format!(
+                    "({}, {} entries)",
+                    human_size(summary.bytes_written),
+                    summary.entry_count
+                ))
+            ));
             Ok(())
         }
         Command::Upload {
@@ -77,10 +80,10 @@ pub async fn run(command: Command, service: &ConfigService) -> Result<()> {
             service
                 .upload(&image, &src, &dest_path, &slot, mode)
                 .await?;
-            println!(
-                "wrote {dest_path} into {}:/remora/{slot}/config",
-                image.display()
-            );
+            remora_tui::success(format!(
+                "Wrote {dest_path} into {}",
+                remora_tui::accent(format!("{}:/remora/{slot}/config", image.display()))
+            ));
             Ok(())
         }
     }

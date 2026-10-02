@@ -7,6 +7,9 @@
 //! lists them. Transports thus stay free of any service wiring, and an
 //! argument nobody provides for just completes nothing.
 //!
+//! [`Args`]/[`instructions`] are the `<bin> completion` command every
+//! binary offers: it prints the line that enables completion in a shell.
+//!
 //! Not a port: completion is a terminal nicety, never behavior a test needs
 //! to substitute (same reasoning as `remora-tui`).
 
@@ -27,6 +30,8 @@ pub enum Kind {
     Release,
     /// A deployment name (from the platform).
     Deployment,
+    /// A local disk's device path (`/dev/sdb`), e.g. a flash target.
+    Disk,
 }
 
 /// One completion: the value, and a short description shells may show.
@@ -118,6 +123,78 @@ impl ValueCompleter for ScpOperand {
     }
 }
 
+/// Shells `<bin> completion` can set up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+    Elvish,
+    Powershell,
+}
+
+/// `<bin> completion`'s arguments.
+#[derive(Debug, clap::Args)]
+pub struct Args {
+    /// The shell to set up (default: from $SHELL).
+    #[arg(value_enum)]
+    shell: Option<Shell>,
+}
+
+/// `<bin> completion`: says how to enable completion for `bin`, and prints
+/// the line itself on stdout (for `<bin> completion zsh >> ~/.zshrc`).
+/// Generated on shell start rather than written to a file, so it always
+/// matches the installed binary (clap_complete's own advice, its protocol
+/// being unstable). `completes` tells what Tab then offers. Returns the
+/// exit code.
+pub fn instructions(bin: &str, args: Args, completes: &str) -> i32 {
+    let Some(shell) = args.shell.or_else(shell_from_env) else {
+        remora_tui::warning(format!(
+            "Can't tell your shell: pass it, e.g. `{bin} completion zsh`"
+        ));
+        return 1;
+    };
+    let (file, line) = enable_line(bin, shell);
+    remora_tui::note(format!("Enable completion: add this line to {file}"), &line);
+    remora_tui::step(format!("Then open a new shell. {completes}"));
+    println!("{line}");
+    0
+}
+
+fn shell_from_env() -> Option<Shell> {
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    match shell.rsplit('/').next().unwrap_or_default() {
+        "bash" => Some(Shell::Bash),
+        "zsh" => Some(Shell::Zsh),
+        "fish" => Some(Shell::Fish),
+        "elvish" => Some(Shell::Elvish),
+        _ if cfg!(windows) => Some(Shell::Powershell),
+        _ => None,
+    }
+}
+
+/// The startup file to edit, and the line enabling `bin`'s completion there.
+fn enable_line(bin: &str, shell: Shell) -> (&'static str, String) {
+    match shell {
+        Shell::Bash => ("~/.bashrc", format!("source <(COMPLETE=bash {bin})")),
+        Shell::Zsh => ("~/.zshrc", format!("source <(COMPLETE=zsh {bin})")),
+        Shell::Fish => (
+            "~/.config/fish/config.fish",
+            format!("COMPLETE=fish {bin} | source"),
+        ),
+        Shell::Elvish => (
+            "~/.config/elvish/rc.elv",
+            format!("eval (E:COMPLETE=elvish {bin} | slurp)"),
+        ),
+        Shell::Powershell => (
+            "$PROFILE",
+            format!(
+                "$env:COMPLETE = \"powershell\"; {bin} | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE"
+            ),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +219,20 @@ mod tests {
         assert_eq!(values("root@b8"), ["root@B827EB9D6166:"]);
         assert!(values("525400C0FFEE:/da").is_empty());
         assert!(values("-r").is_empty());
+    }
+
+    #[test]
+    fn enable_lines_name_the_binary() {
+        assert_eq!(
+            enable_line("remora-etcher", Shell::Zsh),
+            (
+                "~/.zshrc",
+                "source <(COMPLETE=zsh remora-etcher)".to_owned()
+            )
+        );
+        assert_eq!(
+            enable_line("rmra", Shell::Powershell).1,
+            "$env:COMPLETE = \"powershell\"; rmra | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE"
+        );
     }
 }

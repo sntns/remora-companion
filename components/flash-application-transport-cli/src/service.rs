@@ -1,9 +1,6 @@
-use std::{
-    io::{self, Write},
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use remora_disk::application::DiskService;
 use remora_flash::{application::FlashService, model::FlashRequest};
 use remora_format::human_size;
@@ -31,6 +28,7 @@ pub struct Command {
     /// Destination device path, e.g. /dev/sdb. Its *whole disk* is
     /// overwritten — not a single partition.
     #[arg(long)]
+    #[arg(add = remora_completion::values(remora_completion::Kind::Disk))]
     device: PathBuf,
 
     /// Allow flashing a disk that isn't marked removable. Never overrides
@@ -38,7 +36,8 @@ pub struct Command {
     #[arg(long)]
     force: bool,
 
-    /// Skip the interactive confirmation prompt (for scripted use).
+    /// Skip the interactive confirmation prompt (for scripted use; required
+    /// when no one is at the terminal to answer it).
     #[arg(long)]
     yes: bool,
 }
@@ -60,7 +59,7 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
     };
 
     let info = disk.info(&device).await.change_context(Error::Disk)?;
-    println!("target: {}", disk_line(&info));
+    remora_tui::note("Target", disk_line(&info));
 
     // The real guard (removable / not-the-system-disk) lives in
     // FlashServiceInterface::preflight and cannot be bypassed from here;
@@ -69,9 +68,17 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
         .preflight(&info, force)
         .await
         .change_context(Error::Flash)?;
-    if !yes && !confirm(&device).change_context(Error::Confirm)? {
-        println!("aborted: device path did not match");
-        return Ok(());
+    if !yes {
+        if !remora_tui::interactive() {
+            return Err(Report::new(Error::Unattended));
+        }
+        if !confirm(&device)? {
+            remora_tui::info(format!(
+                "Left {} untouched",
+                remora_tui::accent(device.display())
+            ));
+            return Ok(());
+        }
     }
 
     let request = FlashRequest {
@@ -81,23 +88,23 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
         force,
     };
     let (sink, stream) = remora_progress::channel();
-    let printer = remora_progress::print_to_stderr(stream);
+    let follow = remora_tui::follow(stream);
     let ctx =
         remora_progress::OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
     let outcome = flash.flash(&request, &info, &ctx).await;
     drop(ctx);
-    let _ = printer.await;
+    follow.finish(&outcome).await;
     let outcome = outcome.change_context(Error::Flash)?;
-    println!(
-        "wrote {} to {} ({})",
+    remora_tui::success(format!(
+        "Wrote {} to {} {}",
         human_size(outcome.bytes_written),
-        info.path.display(),
-        if outcome.used_bmap {
-            "bmap-verified"
+        remora_tui::accent(info.path.display()),
+        remora_tui::dim(if outcome.used_bmap {
+            "(bmap-verified)"
         } else {
-            "full copy, no bmap"
-        }
-    );
+            "(full copy, no bmap)"
+        })
+    ));
     Ok(())
 }
 
@@ -112,28 +119,36 @@ fn default_bmap_path(image: &Path) -> Option<PathBuf> {
 }
 
 fn disk_line(info: &remora_disk::model::DiskInfo) -> String {
+    let yes_no = |on: bool| if on { "yes" } else { "no" };
     format!(
-        "{:<12} {:>10}  removable={:<5} system={:<5} {}",
-        info.path.display().to_string(),
-        human_size(info.size_bytes),
-        info.is_removable,
-        info.is_system_disk,
+        "{}  {}\nsize: {}  removable: {}  system: {}",
+        remora_tui::accent(info.path.display()),
         info.model.as_deref().unwrap_or("-"),
+        human_size(info.size_bytes),
+        yes_no(info.is_removable),
+        yes_no(info.is_system_disk),
     )
 }
 
 /// Require the user to type the device path back, so a `--force`d flash of a
 /// non-removable disk (or any flash at all) isn't one careless Enter away
-/// from wiping the wrong disk.
-fn confirm(device: &std::path::Path) -> io::Result<bool> {
-    print!(
-        "Type the device path ({}) to confirm overwriting it: ",
-        device.display()
-    );
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input.trim() == device.to_string_lossy())
+/// from wiping the wrong disk. Anything else typed (or Esc) leaves it alone.
+fn confirm(device: &Path) -> Result<bool> {
+    let expected = device.to_string_lossy().into_owned();
+    let typed: String = remora_tui::input(format!(
+        "Type {} to overwrite it",
+        remora_tui::accent(&expected)
+    ))
+    .interact()
+    .or_else(|e| {
+        if e.kind() == std::io::ErrorKind::Interrupted {
+            Ok(String::new())
+        } else {
+            Err(e)
+        }
+    })
+    .change_context(Error::Confirm)?;
+    Ok(typed.trim() == expected)
 }
 
 #[cfg(test)]

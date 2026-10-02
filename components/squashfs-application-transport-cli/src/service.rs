@@ -85,21 +85,24 @@ pub async fn run(command: Command, service: &SquashfsService) -> Result<()> {
                 root_mode,
             };
             let (sink, stream) = remora_progress::channel();
-            let printer = remora_progress::print_to_stderr(stream);
+            let follow = remora_tui::follow(stream);
             let ctx = remora_progress::OperationContext::new(
                 sink,
                 tokio_util::sync::CancellationToken::new(),
             );
             let summary = service.build(&inputs, &output, &options, &ctx).await;
             drop(ctx);
-            let _ = printer.await;
+            follow.finish(&summary).await;
             let summary = summary?;
-            println!(
-                "wrote {} ({} entries) to {}",
-                human_size(summary.bytes_written),
-                summary.entry_count,
-                output.display()
-            );
+            remora_tui::success(format!(
+                "Wrote {} {}",
+                remora_tui::accent(output.display()),
+                remora_tui::dim(format!(
+                    "({}, {} entries)",
+                    human_size(summary.bytes_written),
+                    summary.entry_count
+                ))
+            ));
             Ok(())
         }
         Command::Inspect { image } => {

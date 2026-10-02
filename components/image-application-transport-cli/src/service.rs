@@ -144,16 +144,16 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
     match command {
         Command::Inspect { image, boot_mode } => {
             let table = service.inspect(&image).await.change_context(Error::Image)?;
-            println!(
+            remora_tui::info(format!(
                 "{}: {} table, {} bytes/sector, {} partition(s)",
-                image.display(),
+                remora_tui::accent(image.display()),
                 match table.kind {
                     TableKind::Mbr => "MBR",
                     TableKind::Gpt => "GPT",
                 },
                 table.sector_size,
                 table.partitions.len(),
-            );
+            ));
             print_partitions(&table, boot_mode.map(BootMode::from));
             Ok(())
         }
@@ -180,16 +180,19 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     boot_mode: boot_mode.map(BootMode::from),
                 };
                 let (sink, stream) = remora_progress::channel();
-                let printer = remora_progress::print_to_stderr(stream);
+                let follow = remora_tui::follow(stream);
                 let ctx = remora_progress::OperationContext::new(
                     sink,
                     tokio_util::sync::CancellationToken::new(),
                 );
                 let result = service.cp_dir(&request, &ctx).await;
                 drop(ctx);
-                let _ = printer.await;
+                follow.finish(&result).await;
                 result.change_context(Error::Image)?;
-                println!("copied into {dest_path} inside {}", image.display());
+                remora_tui::success(format!(
+                    "Copied into {dest_path} inside {}",
+                    remora_tui::accent(image.display())
+                ));
             } else {
                 let request = InjectRequest {
                     image: image.clone(),
@@ -203,7 +206,10 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     .inject(&request)
                     .await
                     .change_context(Error::Image)?;
-                println!("wrote {dest_path} inside {}", image.display());
+                remora_tui::success(format!(
+                    "Wrote {dest_path} inside {}",
+                    remora_tui::accent(image.display())
+                ));
             }
             Ok(())
         }
@@ -223,28 +229,35 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                 mode,
             };
             service.mkdir(&request).await.change_context(Error::Image)?;
-            println!("created {dest_path} inside {}", image.display());
+            remora_tui::success(format!(
+                "Created {dest_path} inside {}",
+                remora_tui::accent(image.display())
+            ));
             Ok(())
         }
     }
 }
 
 fn print_partitions(table: &PartitionTable, boot_mode: Option<BootMode>) {
+    let mut rows = remora_tui::Table::new(["#", "start", "size", "type", "label", "role"]);
     for entry in &table.partitions {
         let role = boot_mode
             .and_then(|mode| mode.role_of(entry.index))
             .map(|role| format!("{role:?}"))
             .unwrap_or_else(|| "-".to_string());
-        println!(
-            "{:>3}  {:>12}  {:>10}  {:<8}  {:<36}  {}",
-            entry.index,
-            entry.start_bytes,
-            human_size(entry.size_bytes),
-            entry.partition_type,
-            entry.label.as_deref().unwrap_or("-"),
-            role,
+        rows.row(
+            [
+                entry.index.to_string(),
+                entry.start_bytes.to_string(),
+                human_size(entry.size_bytes),
+                entry.partition_type.to_string(),
+                entry.label.clone().unwrap_or_else(|| "-".to_string()),
+                role,
+            ],
+            false,
         );
     }
+    rows.print();
 }
 
 #[cfg(test)]

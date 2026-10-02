@@ -1,6 +1,7 @@
 mod bootstrap;
+mod completion;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 #[derive(Parser)]
 #[command(
@@ -12,7 +13,8 @@ struct Options {
     #[command(subcommand)]
     command: Commands,
 
-    /// Increase verbosity (-v, -vv, -vvv).
+    /// Increase verbosity (-v, -vv, -vvv). From -v on, errors are shown in
+    /// full, with where each cause was raised.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
 
@@ -62,96 +64,102 @@ enum Commands {
     Batch(remora_batch_application_transport_cli::Command),
 
     /// Manufacture a device against sntns-platform's factory-device
-    /// endpoint and inject its credential into an image. Not a `batch`
-    /// step -- a network call with per-unit output, unlike batch's
-    /// local/reproducible steps.
+    /// endpoint, writing its credential as a `remora-factory.yaml` to
+    /// bundle into an image with `identity create`.
     #[command(subcommand)]
     Factory(remora_factory_application_transport_cli::Command),
+
+    /// Update remora-etcher itself to its latest release.
+    Update(remora_update_application_transport_cli::Args),
+
+    /// Enable shell completion (commands, options, disks and paths with Tab).
+    Completion(remora_completion::Args),
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
+fn main() {
+    // Shell completion: when the shell calls back with COMPLETE set, answer
+    // and exit before anything else. Outside the async runtime on purpose:
+    // the provider runs its own, and a runtime can't nest in another.
+    remora_completion::install(completion::provide);
+    clap_complete::CompleteEnv::with_factory(Options::command).complete();
+
     let options = Options::parse();
     init_tracing(&options);
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("the tokio runtime builds");
+    let code = runtime.block_on(run(options));
+    std::process::exit(code);
+}
+
+async fn run(options: Options) -> i32 {
+    let verbose = options.verbose > 0;
     let services = bootstrap::wire().await;
 
-    // Print the full error-stack chain (`{:?}`), not just the top context's
-    // message (`{}`) — the useful detail (e.g. *why* a flash was refused)
-    // usually lives a few `change_context` hops down, and `Display` on a
-    // type-erased `Box<dyn Error>` only ever shows the outermost one.
     match options.command {
-        Commands::Disk(cmd) => {
-            if let Err(report) =
-                remora_disk_application_transport_cli::run(cmd, &services.disk).await
-            {
-                fail(report);
-            }
+        Commands::Disk(cmd) => exit_on_error(
+            remora_disk_application_transport_cli::run(cmd, &services.disk).await,
+            verbose,
+        ),
+        Commands::Flash(cmd) => exit_on_error(
+            remora_flash_application_transport_cli::run(cmd, &services.disk, &services.flash).await,
+            verbose,
+        ),
+        Commands::Image(cmd) => exit_on_error(
+            remora_image_application_transport_cli::run(cmd, &services.image).await,
+            verbose,
+        ),
+        Commands::Squashfs(cmd) => exit_on_error(
+            remora_squashfs_application_transport_cli::run(cmd, &services.squashfs).await,
+            verbose,
+        ),
+        Commands::Identity(cmd) => exit_on_error(
+            remora_identity_application_transport_cli::run(cmd, &services.identity).await,
+            verbose,
+        ),
+        Commands::Config(cmd) => exit_on_error(
+            remora_config_application_transport_cli::run(cmd, &services.config).await,
+            verbose,
+        ),
+        Commands::Convert(cmd) => exit_on_error(
+            remora_convert_application_transport_cli::run(cmd, &services.convert).await,
+            verbose,
+        ),
+        Commands::Batch(cmd) => exit_on_error(
+            remora_batch_application_transport_cli::run(cmd, &services.batch).await,
+            verbose,
+        ),
+        Commands::Factory(cmd) => exit_on_error(
+            remora_factory_application_transport_cli::run(cmd, &services.factory).await,
+            verbose,
+        ),
+        Commands::Update(args) => {
+            let app =
+                remora_update::model::App::running("remora-etcher", env!("CARGO_PKG_VERSION"));
+            exit_on_error(
+                remora_update_application_transport_cli::run(args, &services.update, &app).await,
+                verbose,
+            )
         }
-        Commands::Flash(cmd) => {
-            if let Err(report) =
-                remora_flash_application_transport_cli::run(cmd, &services.disk, &services.flash)
-                    .await
-            {
-                fail(report);
-            }
-        }
-        Commands::Image(cmd) => {
-            if let Err(report) =
-                remora_image_application_transport_cli::run(cmd, &services.image).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Squashfs(cmd) => {
-            if let Err(report) =
-                remora_squashfs_application_transport_cli::run(cmd, &services.squashfs).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Identity(cmd) => {
-            if let Err(report) =
-                remora_identity_application_transport_cli::run(cmd, &services.identity).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Config(cmd) => {
-            if let Err(report) =
-                remora_config_application_transport_cli::run(cmd, &services.config).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Convert(cmd) => {
-            if let Err(report) =
-                remora_convert_application_transport_cli::run(cmd, &services.convert).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Batch(cmd) => {
-            if let Err(report) =
-                remora_batch_application_transport_cli::run(cmd, &services.batch).await
-            {
-                fail(report);
-            }
-        }
-        Commands::Factory(cmd) => {
-            if let Err(report) =
-                remora_factory_application_transport_cli::run(cmd, &services.factory).await
-            {
-                fail(report);
-            }
-        }
+        Commands::Completion(args) => remora_completion::instructions(
+            "remora-etcher",
+            args,
+            "Commands, options, disks and paths complete with Tab.",
+        ),
     }
 }
 
-fn fail(report: impl std::fmt::Debug) -> ! {
-    tracing::error!("{report:?}");
-    eprintln!("error: {report:?}");
-    std::process::exit(1);
+fn exit_on_error<C>(result: Result<(), error_stack::Report<C>>, verbose: bool) -> i32 {
+    match result {
+        Ok(()) => 0,
+        Err(report) => {
+            tracing::debug!("{report:?}");
+            remora_tui::render_report(&report, verbose);
+            1
+        }
+    }
 }
 
 fn init_tracing(options: &Options) {
@@ -169,5 +177,8 @@ fn init_tracing(options: &Options) {
         EnvFilter::new(format!("remora_etcher={level}"))
     };
 
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
