@@ -30,6 +30,7 @@ use remora_convert_application::ConvertControllerImpl;
 use remora_factory::{
     adapter::{FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity},
     application::FactoryService,
+    model::DeviceSerial,
 };
 use remora_factory_application::FactoryControllerImpl;
 use remora_fs_walk::FsWalkAdapterService;
@@ -126,18 +127,9 @@ impl FactoryProvisioningAdapter for UnusedProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        _device_name: &str,
+        _serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
-        unreachable!("no test in this file exercises a FactoryProvision step")
-    }
-
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
         unreachable!("no test in this file exercises a FactoryProvision step")
     }
 }
@@ -342,6 +334,15 @@ async fn stops_at_the_first_failing_step_without_running_the_rest() {
     }
 }
 
+/// The serial a fake adapter "issues": the explicit name as-is, or a
+/// made-up allocation standing in for the platform's policy.
+fn serial_of(serial: &DeviceSerial) -> String {
+    match serial {
+        DeviceSerial::Explicit { device_name, .. } => device_name.clone(),
+        DeviceSerial::FromPolicy(policy) => format!("{policy}-1H7Z"),
+    }
+}
+
 struct FakeProvisioning;
 
 #[async_trait::async_trait]
@@ -350,25 +351,19 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        device_name: &str,
+        serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
+        let device_name = serial_of(serial);
         Ok(ProvisionedIdentity {
+            serial_number: device_name.clone(),
+            factory_device_name: format!("test:remora:factory-device:{device_name}"),
             certificate_der: b"fake-certificate-der".to_vec(),
             certificate_authority_der: b"fake-factory-ca-der".to_vec(),
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
         })
-    }
-
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
-        Ok(())
     }
 }
 
@@ -416,7 +411,8 @@ async fn runs_a_factory_provision_step() {
     controller
         .run(
             vec![BatchStep::FactoryProvision {
-                device_name: "batch-e2e-0001".to_string(),
+                device_name: Some("batch-e2e-0001".to_string()),
+                serial_number_policy: None,
                 api_url: "https://api.example.invalid".to_string(),
                 api_key: "unused-in-the-fake".to_string(),
                 access_url: None,

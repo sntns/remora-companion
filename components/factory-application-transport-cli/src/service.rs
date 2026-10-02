@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
-use remora_factory::application::{FactoryService, Result};
+use error_stack::Report;
+use remora_factory::{
+    application::{Error, FactoryService, Result},
+    model::DeviceSerial,
+};
 use remora_progress::OperationContext;
 
 #[derive(clap::Subcommand)]
@@ -14,10 +18,19 @@ pub enum Command {
     /// call against a specific platform environment with per-unit output,
     /// not something a recipe can replay locally/offline.
     Provision {
-        /// Durable hardware serial -- the device's identity, not a
-        /// resource name scoped to whoever currently owns it.
-        #[arg(long)]
-        device_name: String,
+        /// Let the platform allocate a fresh serial from this policy (e.g.
+        /// `hubs`) -- the normal path, and the only way to be sure the
+        /// serial was never used. The issued serial is printed on stdout,
+        /// for the label.
+        #[arg(long, required_unless_present = "device_name")]
+        serial_policy: Option<String>,
+
+        /// Durable hardware serial chosen outside the platform -- the
+        /// device's identity, not a resource name scoped to whoever
+        /// currently owns it. Refused if it was already manufactured,
+        /// unless `--force`.
+        #[arg(long, conflicts_with = "serial_policy")]
+        device_name: Option<String>,
 
         /// Where to write the resulting `remora-factory.yaml`.
         #[arg(long)]
@@ -35,11 +48,11 @@ pub enum Command {
         #[arg(long, env = "REMORA_FACTORY_API_KEY")]
         api_key: String,
 
-        /// Delete any existing factory-device credential for `device_name`
-        /// first (a no-op if there isn't one), instead of letting the
-        /// platform reject a duplicate create. Use when re-manufacturing a
-        /// serial that was already provisioned once.
-        #[arg(long)]
+        /// Re-sign a `--device-name` that was already manufactured (a
+        /// mis-flashed board, a reused test unit); the platform revokes its
+        /// previous IDevID. Not allowed with `--serial-policy`, which always
+        /// allocates a new serial.
+        #[arg(long, requires = "device_name", conflicts_with = "serial_policy")]
         force: bool,
 
         /// Escape hatch, not the normal path: the platform's response
@@ -55,6 +68,7 @@ pub enum Command {
 pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
     match command {
         Command::Provision {
+            serial_policy,
             device_name,
             output,
             api_url,
@@ -62,28 +76,34 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
             force,
             access_url,
         } => {
+            let serial = DeviceSerial::from_parts(device_name, serial_policy, force)
+                .map_err(|e| Report::new(Error::InvalidSerial(e)))?;
             let (sink, stream) = remora_progress::channel();
             let printer = remora_progress::print_to_stderr(stream);
             let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
             let result = service
                 .provision(
-                    &device_name,
+                    &serial,
                     &api_url,
                     &api_key,
                     access_url.as_deref(),
-                    force,
                     &output,
                     &ctx,
                 )
                 .await;
             drop(ctx);
             let _ = printer.await;
-            result?;
+            let device = result?;
 
-            println!(
-                "provisioned {device_name} and wrote its factory credential to {}",
+            // The serial alone on stdout, so a label printer (or a script)
+            // can consume it; the human-readable summary goes to stderr.
+            eprintln!(
+                "provisioned {} ({}) and wrote its factory credential to {}",
+                device.serial_number,
+                device.factory_device_name,
                 output.display()
             );
+            println!("{}", device.serial_number);
             Ok(())
         }
     }

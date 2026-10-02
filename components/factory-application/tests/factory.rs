@@ -18,6 +18,7 @@ use std::{
 use remora_factory::{
     adapter::{FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity},
     application::FactoryServiceInterface,
+    model::DeviceSerial,
 };
 use remora_factory_application::FactoryControllerImpl;
 use remora_progress::OperationContext;
@@ -35,10 +36,13 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        device_name: &str,
+        serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
+        let device_name = serial_of(serial);
         Ok(ProvisionedIdentity {
+            serial_number: device_name.clone(),
+            factory_device_name: format!("test:remora:factory-device:{device_name}"),
             certificate_der: b"fake-certificate-der".to_vec(),
             certificate_authority_der: b"fake-factory-ca-der".to_vec(),
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
@@ -46,14 +50,14 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
         })
     }
+}
 
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
-        Ok(())
+/// The serial a fake adapter "issues": the explicit name as-is, or a
+/// made-up allocation standing in for the platform's policy.
+fn serial_of(serial: &DeviceSerial) -> String {
+    match serial {
+        DeviceSerial::Explicit { device_name, .. } => device_name.clone(),
+        DeviceSerial::FromPolicy(policy) => format!("{policy}-1H7Z"),
     }
 }
 
@@ -109,11 +113,13 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
 
     controller(FakeProvisioning)
         .provision(
-            "e2e-serial-0001",
+            &DeviceSerial::Explicit {
+                device_name: "e2e-serial-0001".to_string(),
+                force: false,
+            },
             "https://api.example.invalid",
             "unused-in-the-fake",
             None,
-            false,
             &output,
             &OperationContext::noop(),
         )
@@ -187,25 +193,19 @@ impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        device_name: &str,
+        serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
+        let device_name = serial_of(serial);
         Ok(ProvisionedIdentity {
+            serial_number: device_name.clone(),
+            factory_device_name: format!("test:remora:factory-device:{device_name}"),
             certificate_der: b"fake-certificate-der".to_vec(),
             certificate_authority_der: b"fake-factory-ca-der".to_vec(),
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: String::new(),
         })
-    }
-
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
-        Ok(())
     }
 }
 
@@ -215,11 +215,13 @@ async fn fails_when_the_platform_omits_an_access_url_and_no_override_was_given()
 
     let result = controller(EmptyAccessUrlProvisioning)
         .provision(
-            "e2e-serial-0003",
+            &DeviceSerial::Explicit {
+                device_name: "e2e-serial-0003".to_string(),
+                force: false,
+            },
             "https://api.example.invalid",
             "unused-in-the-fake",
             None,
-            false,
             &output,
             &OperationContext::noop(),
         )
@@ -238,11 +240,13 @@ async fn honors_the_access_url_override_when_the_platform_response_is_empty() {
 
     controller(EmptyAccessUrlProvisioning)
         .provision(
-            "e2e-serial-0004",
+            &DeviceSerial::Explicit {
+                device_name: "e2e-serial-0004".to_string(),
+                force: false,
+            },
             "https://api.example.invalid",
             "unused-in-the-fake",
             Some("https://override.example.invalid/access/v1"),
-            false,
             &output,
             &OperationContext::noop(),
         )
@@ -276,6 +280,8 @@ mod real_captured_credential {
 }
 
 struct RealCapturedProvisioning {
+    serial_number: String,
+    factory_device_name: String,
     certificate_der: Vec<u8>,
     certificate_authority_der: Vec<u8>,
     server_certificate_authority_der: Vec<u8>,
@@ -289,25 +295,18 @@ impl FactoryProvisioningAdapter for RealCapturedProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        _device_name: &str,
+        _serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
         Ok(ProvisionedIdentity {
+            serial_number: self.serial_number.clone(),
+            factory_device_name: self.factory_device_name.clone(),
             certificate_der: self.certificate_der.clone(),
             certificate_authority_der: self.certificate_authority_der.clone(),
             server_certificate_authority_der: self.server_certificate_authority_der.clone(),
             key_id: self.keyid.clone(),
             access_url: self.access_url.clone(),
         })
-    }
-
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
-        Ok(())
     }
 }
 
@@ -383,6 +382,8 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
 
     let output = temp_path("remora-factory.yaml");
     let provisioning = RealCapturedProvisioning {
+        serial_number: fixture::DEVICE_NAME.to_string(),
+        factory_device_name: fixture::EXPECTED_URI_SAN.to_string(),
         certificate_der: certificate_der.clone(),
         certificate_authority_der: factory_ca_der.clone(),
         server_certificate_authority_der: server_ca_der.clone(),
@@ -392,11 +393,13 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
 
     controller(provisioning)
         .provision(
-            fixture::DEVICE_NAME,
+            &DeviceSerial::Explicit {
+                device_name: fixture::DEVICE_NAME.to_string(),
+                force: false,
+            },
             "https://api.example.invalid",
             "unused",
             None,
-            false,
             &output,
             &OperationContext::noop(),
         )
@@ -442,10 +445,10 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
     p256::SecretKey::from_sec1_pem(&key_pem).expect("rendered key must parse as a SEC1 EC key");
 }
 
-/// Records call order rather than actually reaching a platform, so
-/// `--force`'s "delete before create" ordering can be asserted directly.
+/// Records the `DeviceSerial` the controller hands the adapter, so the
+/// policy/explicit/force choice can be asserted as what reaches the wire.
 struct RecordingProvisioning {
-    calls: Arc<Mutex<Vec<&'static str>>>,
+    seen: Arc<Mutex<Vec<DeviceSerial>>>,
 }
 
 #[async_trait::async_trait]
@@ -454,11 +457,14 @@ impl FactoryProvisioningAdapter for RecordingProvisioning {
         &self,
         _api_url: &str,
         _api_key: &str,
-        device_name: &str,
+        serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
-        self.calls.lock().unwrap().push("provision");
+        self.seen.lock().unwrap().push(serial.clone());
+        let device_name = serial_of(serial);
         Ok(ProvisionedIdentity {
+            serial_number: device_name.clone(),
+            factory_device_name: format!("test:remora:factory-device:{device_name}"),
             certificate_der: b"fake-certificate-der".to_vec(),
             certificate_authority_der: b"fake-factory-ca-der".to_vec(),
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
@@ -466,62 +472,77 @@ impl FactoryProvisioningAdapter for RecordingProvisioning {
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
         })
     }
+}
 
-    async fn delete(
-        &self,
-        _api_url: &str,
-        _api_key: &str,
-        _device_name: &str,
-    ) -> remora_factory::adapter::Result<()> {
-        self.calls.lock().unwrap().push("delete");
-        Ok(())
-    }
+async fn provision_recording(serial: DeviceSerial) -> (Vec<DeviceSerial>, String) {
+    let output = temp_path("remora-factory.yaml");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+
+    let device = controller(RecordingProvisioning { seen: seen.clone() })
+        .provision(
+            &serial,
+            "https://api.example.invalid",
+            "unused-in-the-fake",
+            None,
+            &output,
+            &OperationContext::noop(),
+        )
+        .await
+        .expect("provisioning should succeed against the fake adapter");
+
+    let _ = fs::remove_file(&output);
+    let seen = seen.lock().unwrap().clone();
+    (seen, device.serial_number)
 }
 
 #[tokio::test]
-async fn force_deletes_the_existing_credential_before_provisioning() {
-    let output = temp_path("remora-factory.yaml");
-    let calls = Arc::new(Mutex::new(Vec::new()));
-
-    controller(RecordingProvisioning {
-        calls: calls.clone(),
-    })
-    .provision(
-        "e2e-serial-0005",
-        "https://api.example.invalid",
-        "unused-in-the-fake",
-        None,
-        true,
-        &output,
-        &OperationContext::noop(),
-    )
-    .await
-    .expect("provisioning should succeed against the fake adapter");
-
-    let _ = fs::remove_file(&output);
-    assert_eq!(*calls.lock().unwrap(), vec!["delete", "provision"]);
+async fn force_reaches_the_adapter_with_the_explicit_device_name() {
+    let serial = DeviceSerial::Explicit {
+        device_name: "e2e-serial-0005".to_string(),
+        force: true,
+    };
+    let (seen, issued) = provision_recording(serial.clone()).await;
+    assert_eq!(seen, vec![serial]);
+    assert_eq!(issued, "e2e-serial-0005");
 }
 
+/// A policy-allocated serial only exists once the platform answers -- the
+/// controller must hand back the one the platform issued (for the label),
+/// not anything it made up itself.
 #[tokio::test]
-async fn without_force_the_existing_credential_is_left_alone() {
-    let output = temp_path("remora-factory.yaml");
-    let calls = Arc::new(Mutex::new(Vec::new()));
+async fn a_policy_request_returns_the_platform_allocated_serial() {
+    let (seen, issued) = provision_recording(DeviceSerial::FromPolicy("hubs".to_string())).await;
+    assert_eq!(seen, vec![DeviceSerial::FromPolicy("hubs".to_string())]);
+    assert_eq!(issued, "hubs-1H7Z");
+}
 
-    controller(RecordingProvisioning {
-        calls: calls.clone(),
-    })
-    .provision(
-        "e2e-serial-0006",
-        "https://api.example.invalid",
-        "unused-in-the-fake",
-        None,
-        false,
-        &output,
-        &OperationContext::noop(),
-    )
-    .await
-    .expect("provisioning should succeed against the fake adapter");
+#[test]
+fn from_parts_rejects_what_the_platform_would() {
+    use remora_factory::model::DeviceSerialError;
+    let name = || Some("1H7Z".to_string());
+    let policy = || Some("hubs".to_string());
 
-    let _ = fs::remove_file(&output);
-    assert_eq!(*calls.lock().unwrap(), vec!["provision"]);
+    assert_eq!(
+        DeviceSerial::from_parts(name(), policy(), false),
+        Err(DeviceSerialError::Both)
+    );
+    assert_eq!(
+        DeviceSerial::from_parts(None, None, false),
+        Err(DeviceSerialError::Neither)
+    );
+    assert_eq!(
+        DeviceSerial::from_parts(None, policy(), true),
+        Err(DeviceSerialError::ForceWithPolicy)
+    );
+    assert_eq!(
+        DeviceSerial::from_parts(None, policy(), false),
+        Ok(DeviceSerial::FromPolicy("hubs".to_string()))
+    );
+    assert_eq!(
+        DeviceSerial::from_parts(name(), None, true),
+        Ok(DeviceSerial::Explicit {
+            device_name: "1H7Z".to_string(),
+            force: true
+        })
+    );
 }

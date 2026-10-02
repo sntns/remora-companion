@@ -1,13 +1,13 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    InvalidSerial(crate::model::DeviceSerialError),
     #[error("failed to generate a device keypair")]
     Keygen,
     #[error("failed to build a certificate signing request")]
     Csr,
     #[error("failed to provision a factory device credential")]
     Provision,
-    #[error("failed to delete the existing factory device credential")]
-    Delete,
     #[error(
         "the platform did not return an access URL for this deployment, and no --access-url override was given"
     )]

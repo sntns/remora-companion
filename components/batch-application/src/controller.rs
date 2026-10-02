@@ -5,7 +5,7 @@ use remora_batch::{
 };
 use remora_config::application::ConfigService;
 use remora_convert::application::ConvertService;
-use remora_factory::application::FactoryService;
+use remora_factory::{application::FactoryService, model::DeviceSerial};
 use remora_identity::application::IdentityService;
 use remora_image::application::ImageService;
 use remora_progress::OperationContext;
@@ -118,24 +118,31 @@ impl BatchServiceInterface for BatchControllerImpl {
                     .change_context(Error::Step { index, kind })?,
                 BatchStep::FactoryProvision {
                     device_name,
+                    serial_number_policy,
                     api_url,
                     api_key,
                     access_url,
                     force,
                     output,
-                } => self
-                    .factory
-                    .provision(
-                        &device_name,
-                        &api_url,
-                        &api_key,
-                        access_url.as_deref(),
-                        force,
-                        &output,
-                        ctx,
-                    )
-                    .await
-                    .change_context(Error::Step { index, kind })?,
+                } => {
+                    let serial = DeviceSerial::from_parts(device_name, serial_number_policy, force)
+                        .map_err(|e| {
+                            Report::new(remora_factory::application::Error::InvalidSerial(e))
+                        })
+                        .change_context(Error::Step { index, kind })?;
+                    self.factory
+                        .provision(
+                            &serial,
+                            &api_url,
+                            &api_key,
+                            access_url.as_deref(),
+                            &output,
+                            ctx,
+                        )
+                        .await
+                        .map(|_| ())
+                        .change_context(Error::Step { index, kind })?
+                }
             }
         }
         ctx.sink.phase("done");
