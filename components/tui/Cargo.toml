@@ -1,0 +1,13 @@
+[package]
+name = "remora-tui"
+description = "Shared terminal presentation for the CLI transports: clack-style log lines, spinners and prompts on stderr, tables, and error-stack reports rendered for a human"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+cliclack.workspace = true
+console.workspace = true
+comfy-table.workspace = true
+error-stack.workspace = true

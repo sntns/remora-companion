@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package sntns.service.remorachannel.v1;
+
+import "sntns/service/v1/model.proto";
+
+// ChannelService lets an operator reach inside a device. Opening a channel is
+// gRPC only: a tunnel is bidirectional, which the REST gateway cannot map.
+service ChannelService {
+    // OpenDeviceChannel opens a connection at the device's end and carries its
+    // bytes until either side stops. Authorised once, on the opening message.
+    rpc OpenDeviceChannel(stream ChannelServiceOpenDeviceChannelRequest) returns (stream ChannelServiceOpenDeviceChannelResponse);
+
+    // SignDeviceSshCertificate certifies an operator's SSH key to log into a
+    // device's sshd, for 15 minutes, for one role on that device only.
+    rpc SignDeviceSshCertificate(ChannelServiceSignDeviceSshCertificateRequest) returns (ChannelServiceSignDeviceSshCertificateResponse);
+}
+
+message ChannelServiceSignDeviceSshCertificateRequest {
+    // The device's name (its serial); the gateway scopes it to the caller's tenant.
+    string channel_device_name = 1;
+    // The operator's public key, in OpenSSH authorized-keys format.
+    string ssh_public_key = 2;
+    // "user" or "admin"; empty means "user".
+    string ssh_role = 3;
+}
+
+message ChannelServiceSignDeviceSshCertificateResponse {
+    // The user certificate, in OpenSSH format.
+    string ssh_certificate = 1;
+    // The account on the device the certificate logs into.
+    string ssh_user = 2;
+    // The name the device's host certificate carries, for HostKeyAlias.
+    string ssh_host_key_alias = 3;
+    // "@cert-authority *<suffix> <host authority>", for known_hosts.
+    string ssh_known_hosts = 4;
+}
+
+// Names the device and what to reach on it. Sent once, before any byte.
+message ChannelServiceOpenDeviceChannelInitialRequest {
+    string channel_device_name = 1;
+    // What is being opened ("ssh"), never a host and port.
+    string channel_profile = 2;
+}
+
+message ChannelServiceOpenDeviceChannelSubsequentRequest {
+    bytes channel_chunk = 1;
+}
+
+message ChannelServiceOpenDeviceChannelRequest {
+    oneof request {
+        ChannelServiceOpenDeviceChannelInitialRequest initial_request = 1;
+        ChannelServiceOpenDeviceChannelSubsequentRequest subsequent_request = 2;
+    }
+}
+
+// Sent once, when the device has accepted. Wait for it before writing.
+message ChannelServiceOpenDeviceChannelOpenedResponse {
+    .sntns.service.v1.ResourceReference channel_device_reference = 1;
+    // "stream" or "datagram".
+    string channel_kind = 2;
+}
+
+message ChannelServiceOpenDeviceChannelChunkResponse {
+    bytes channel_chunk = 1;
+}
+
+// The device's end will send no more bytes (shutdown(SHUT_WR)), without
+// ending the call: a server cannot end only its half of a bidi stream.
+message ChannelServiceOpenDeviceChannelEofResponse {
+}
+
+message ChannelServiceOpenDeviceChannelResponse {
+    oneof response {
+        ChannelServiceOpenDeviceChannelOpenedResponse opened_response = 1;
+        ChannelServiceOpenDeviceChannelChunkResponse chunk_response = 2;
+        ChannelServiceOpenDeviceChannelEofResponse eof_response = 3;
+    }
+}

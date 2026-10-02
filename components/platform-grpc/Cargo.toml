@@ -1,0 +1,19 @@
+[package]
+name = "remora-platform-grpc"
+description = "Shared gRPC client plumbing for sntns-platform's public gateways: vendored protos, TLS and per-RPC credentials -- used by adapter crates only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+tonic.workspace = true
+tonic-prost.workspace = true
+prost.workspace = true
+thiserror.workspace = true
+error-stack.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+protox.workspace = true

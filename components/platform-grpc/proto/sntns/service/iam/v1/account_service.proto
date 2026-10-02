@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package sntns.service.iam.v1;
+
+import "sntns/service/v1/model.proto";
+
+service AccountService {
+    // GetCurrentAccount describes the authenticated principal's account.
+    rpc GetCurrentAccount(AccountServiceGetCurrentAccountRequest) returns (AccountServiceGetCurrentAccountResponse);
+}
+
+message AccountDescriptor {
+    .sntns.service.v1.ResourceReference resource = 1;
+    map<string, string> labels = 2;
+}
+
+message AccountServiceGetCurrentAccountRequest {
+}
+
+message AccountServiceGetCurrentAccountResponse {
+    AccountDescriptor account_descriptor = 1;
+}

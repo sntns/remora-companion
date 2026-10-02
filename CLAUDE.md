@@ -92,7 +92,7 @@ Mirrors remora-edge exactly:
 ## Dependency injection
 
 Manual constructor injection via [`busybody`](https://docs.rs/busybody),
-composed once in `containers/remora-etcher/src/bootstrap.rs` — the
+composed once per binary in `containers/<binary>/src/bootstrap.rs` — the
 composition root, same recipe as remora-edge's `daemon.rs`: construct an
 adapter, `container.set_type(XService::new(adapter)).await`, `get_type`
 it back out, hand it to the next constructor that needs it, repeat. Skip the
@@ -108,6 +108,37 @@ all — `bootstrap::wire()` runs inside a throwaway `tokio::runtime::Runtime`
 in `main()`, and every use case downstream stays plain synchronous Rust.
 Don't let async leak past `wire()`.
 
+`rmra` is the exception, by nature rather than by habit: everything it does
+is network I/O (gRPC to sntns-platform, a bidirectional channel relayed to
+stdio, an ssh child whose signals it relays), so its ports, use cases and
+transports are async end to end on one `#[tokio::main]` runtime. Its
+blocking local-file adapters (`context-adapter-file`) stay synchronous, as
+everywhere else.
+
+## rmra specifics
+
+- **stdout is output, stderr is everything else.** Tables, JSON and a
+  channel's bytes go to stdout; status lines, spinners, prompts and errors
+  go to stderr through `remora-tui` (clack-style, via cliclack, degrading
+  to plain lines when stderr isn't a terminal). `rmra channel open` is an
+  ssh ProxyCommand: one stray byte on its stdout corrupts the session.
+  Transports never `println!` decoration and never draw with cliclack
+  directly — add what's missing to `remora-tui` so every command looks alike.
+- **Secrets never reach a `Debug`.** `Credentials` and `remora-platform-
+  grpc`'s connection types redact or don't implement `Debug`, because
+  error-stack reports print with `{:?}`. Keep it that way for any new type
+  holding a token, a password or a private key.
+- **Vendored protos.** `components/platform-grpc/proto` holds client-side
+  subsets of sntns-platform's gateway APIs (see its README for what was
+  stripped and why it's wire-safe). Re-copy from upstream rather than
+  editing; package, service, message names and field numbers must stay
+  upstream's.
+- **The platform contract is upstream's.** The remora channel's behavior
+  (half-close as `eof_response`, the 5 s hangup grace, refused ssh options,
+  the ssh pinning options) mirrors sntns-platform's Go client
+  (`sntns-service-remora-channel-go`, `sntns-service-remora-go`) on
+  purpose; change it there first, then here.
+
 ## Errors
 
 [`error-stack`](https://docs.rs/error-stack) end to end. Each port/
@@ -121,7 +152,10 @@ a raw `std::io::Error` whose value you don't want to keep). At the very top,
 `containers/remora-etcher/src/main.rs` prints the error via `{:?}` (Debug),
 not `{}` (Display) — Display only shows the outermost context's message,
 while Debug walks the whole `error-stack` chain with a file:line per hop,
-which is almost always what you actually want to see.
+which is almost always what you actually want to see. `rmra` renders the
+same chain for an operator instead (`remora_tui::render_report`: each
+context and printable attachment on its own line, outermost first), and
+the full `{:?}` with `--verbose`.
 
 ## Testing
 
@@ -134,3 +168,13 @@ larger integration tests ported from the pre-DDD codebase (real `sgdisk`/
 `sfdisk`/`mke2fs`/`mkfs.vfat`/`fsck.*`/`unsquashfs`/a real `bmaptool`-derived
 `.bmap` fixture). These dev-only tools are never shelled out to by the
 shipped binary — only by tests exercising it.
+
+The one network port is the exception to "real adapters": the platform.
+gRPC adapters are tested against an in-process fake gateway built from the
+generated tonic servers (`remora-platform-grpc` generates them for exactly
+this), and `containers/rmra/tests/` runs the shipped `rmra` binary against
+one — `fake_gateway.rs` for login/whoami/`channel open` over stdio,
+`real_sshd.rs` for `rmra ssh` end to end against a real user-mode `sshd`
+with real host and user CAs (Linux only). An application crate that needs
+the platform port but isn't about it may use a small hand-written stub of
+that one trait (see `context-application`'s tests).

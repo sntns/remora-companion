@@ -42,7 +42,20 @@ members = [
     "components/factory-adapter-gateway",
     "components/factory-application",
     "components/factory-application-transport-cli",
+    "components/platform-grpc",
+    "components/tui",
+    "components/context",
+    "components/context-application",
+    "components/context-adapter-file",
+    "components/context-adapter-grpc",
+    "components/context-application-transport-cli",
+    "components/channel",
+    "components/channel-application",
+    "components/channel-adapter-grpc",
+    "components/channel-adapter-openssh",
+    "components/channel-application-transport-cli",
     "containers/remora-etcher",
+    "containers/rmra",
 ]
 
 [workspace.package]
@@ -107,6 +120,25 @@ rcgen = "0.14"
 # PKCS8->SEC1 format conversion of a key rcgen already generated.
 p256 = { version = "0.14", features = ["pkcs8", "std"] }
 pem = "4.0"
+
+# rmra's gRPC client to sntns-platform's public gateways (remora channel,
+# iam). The .proto files are vendored under components/platform-grpc/proto
+# and compiled with protox, a pure-Rust protobuf compiler, so no protoc is
+# needed on any CI runner (Windows/macOS included).
+tonic = { version = "0.14", default-features = false, features = ["codegen", "transport", "tls-ring", "tls-native-roots", "tls-webpki-roots"] }
+tonic-prost = "0.14"
+prost = "0.14"
+tonic-prost-build = "0.14"
+protox = "0.9"
+# rmra's terminal output: clack-style prompts/spinners/log lines (all on
+# stderr, which keeps stdout clean for `channel open`'s tunnel) and tables.
+cliclack = "0.5"
+console = "0.16"
+comfy-table = "7"
+# rmra ssh: a throwaway ed25519 key, certified by the platform per session.
+ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+tempfile = "3"
 
 # am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
 # aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes

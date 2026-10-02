@@ -1,0 +1,22 @@
+[package]
+name = "remora-channel-application"
+description = "Channel use case: open a device channel, and ssh into a device through it with a throwaway platform-certified key"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-channel = { path = "../channel" }
+remora-context = { path = "../context" }
+async-trait.workspace = true
+error-stack.workspace = true
+ssh-key.workspace = true
+rand_core.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+remora-channel-adapter-openssh = { path = "../channel-adapter-openssh" }
+tokio.workspace = true

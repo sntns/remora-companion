@@ -1,13 +1,20 @@
-# remora-etcher
+# remora-companion
 
 [![CI](https://github.com/sntns/remora-companion/actions/workflows/ci.yml/badge.svg)](https://github.com/sntns/remora-companion/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A standalone, cross-platform (Linux/Windows/macOS) provisioning and flashing
-tool for Remora devices — a bit like balena-etcher, but for Remora. No
-dependency on separately-installed third-party utilities (no `mksquashfs`,
-`mkfs.ext4`, `dd`, `bmaptool`, `parted`, `e2fsprogs`...): everything is
-implemented in Rust.
+The operator's toolbox for Remora devices, cross-platform
+(Linux/Windows/macOS). Two binaries, built from one workspace of shared
+components:
+
+- **[`rmra`](#rmra)** — reach your devices through
+  [sntns-platform](https://github.com/sntns/sntns-platform): log in,
+  switch between accounts docker-context style, and `rmra ssh <device>`
+  through the device's remora channel.
+- **[`remora-etcher`](#remora-etcher)** — provision and flash images, a bit
+  like balena-etcher but for Remora. No dependency on separately-installed
+  third-party utilities (no `mksquashfs`, `mkfs.ext4`, `dd`, `bmaptool`,
+  `parted`, `e2fsprogs`...): everything is implemented in Rust.
 
 ## Installation
 
@@ -28,7 +35,76 @@ On Windows, or if you'd rather not pipe a script into `bash`, grab the
 matching archive/`.deb` directly from the
 [releases page](https://github.com/sntns/remora-companion/releases) instead.
 
-## Features
+## rmra
+
+### Log in
+
+```
+rmra login
+```
+
+Guided on a terminal: on a first run it creates a context (a named gateway
+endpoint, `api.eu2.sntns.io:50051` by default), then asks how to log in —
+an access key's token, or a login profile (user URN and password). The
+credentials are checked against the platform before anything is stored.
+For scripts: `rmra login --token-stdin`, or `--identity <urn>
+--password-stdin`. `rmra whoami` shows who you are logged in as, `rmra
+logout` forgets it.
+
+### Switch between accounts
+
+Like `docker context`: one context per platform account or environment,
+each with its own login.
+
+```
+rmra context create staging --address api.staging.example:50051
+rmra context ls
+rmra context use staging
+rmra --context eu2 whoami          # just this once; or RMRA_CONTEXT=eu2
+```
+
+Contexts live in `~/.config/rmra` (`%APPDATA%\rmra` on Windows; override
+with `RMRA_CONFIG`): `contexts/<name>/meta.json` for the endpoint,
+`contexts/<name>/credentials.json` (mode 0600) for the login, kept apart so
+`context inspect`/`ls` never print a secret. Credentials are stored in the
+clear for now, like the `sntns` CLI's own configuration; an OS-keyring
+store is planned.
+
+### ssh into a device
+
+```
+rmra ssh 525400C0FFEE
+rmra ssh 525400C0FFEE --role admin -- journalctl -fu remora-accessd
+rmra ssh 525400C0FFEE -L 8080:127.0.0.1:80
+```
+
+Each session generates a throwaway ed25519 key, has the platform certify it
+for 15 minutes for one role on that device (`user` or `admin`, each its own
+IAM action), and runs your `ssh` with `rmra channel open` as its
+ProxyCommand and a known_hosts that trusts only the account's host
+authority. Nothing is written to `~/.ssh`, nothing listens on your machine,
+and the key material is removed when ssh exits. Arguments after the device
+go to ssh; `-J`, `-W`, `-F` and `-o ProxyCommand`/`ProxyJump` are refused
+since they would bypass the channel or the host pinning. Port forwarding,
+`scp` and `sftp` all work through ssh itself.
+
+### Copy files to or from a device
+
+```
+rmra scp ./bundle.raucb 525400C0FFEE:/data/
+rmra scp -r root@525400C0FFEE:/var/log ./logs
+```
+
+`rmra ssh`'s setup for scp: the same throwaway certified key, channel and
+host pinning, with the device side written `[user@]DEVICE:path` (one device
+per copy). scp's options pass through, except those that would bypass the
+channel or the pinning (`-J`, `-F`, `-S`, `-o ProxyCommand`/`ProxyJump`);
+`-c`/`-v` are rmra's own, so pass scp's after `--`.
+
+`rmra channel open <device>` is the raw channel on stdin/stdout, for use as
+a ProxyCommand of your own.
+
+## remora-etcher
 
 ### Flash an image to a USB stick or SD card
 
@@ -130,8 +206,11 @@ wic image, and Windows/macOS disk support.
 
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
-bounded context (`disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
-`convert`), each split further into:
+bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
+`config`, `convert`, `batch` and `factory` for remora-etcher, `context` and
+`channel` for rmra. Components are generic, not owned by a binary: the
+directory is `components/<vertical>`, the package `remora-<vertical>`. Each
+is split further into:
 
 - `components/<vertical>` — the domain crate: pure model types and the
   `*Adapter`/`*ServiceInterface` port traits (no I/O, no third-party
@@ -150,11 +229,13 @@ filesystem adapter of their own — they inject the already-wired `image`
 vertical's `ImageService` instead (see `containers/remora-etcher/src/bootstrap.rs`),
 since writing into a partition is `image`'s job either way.
 
-Three small shared utility crates with no vertical prefix
-(`remora-fs-walk`, `remora-scratch`, `remora-format`)
-mirror remora-edge's own `components/store`/`config` convention.
-`containers/remora-etcher` is the single binary: a composition root that
-wires every adapter and use case together via
+Small shared utility crates with no vertical prefix (`remora-fs-walk`,
+`remora-scratch`, `remora-format`, `remora-progress`, and for rmra
+`remora-platform-grpc` — the vendored sntns-platform protos, compiled with
+the pure-Rust [protox](https://docs.rs/protox) so no `protoc` is needed —
+and `remora-tui`) mirror remora-edge's own `components/store`/`config`
+convention. Each binary in `containers/` (`remora-etcher`, `rmra`) is a
+composition root that wires its adapters and use cases together via
 [`busybody`](https://docs.rs/busybody) (the same DI crate remora-edge uses),
 then dispatches CLI subcommands into them. Errors propagate as
 [`error-stack`](https://docs.rs/error-stack) `Report`s end to end, so a

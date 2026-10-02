@@ -1,0 +1,117 @@
+mod bootstrap;
+
+use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser};
+use remora_context::model::{ContextOverride, Selection};
+
+#[derive(Parser)]
+#[command(
+    name = "rmra",
+    version,
+    about = "Remora operator CLI: reach your devices through sntns-platform",
+    after_help = "Start with `rmra login`, then `rmra ssh <device>`."
+)]
+struct Options {
+    #[command(subcommand)]
+    command: Commands,
+
+    /// The context to use for this command, overriding `rmra context use`.
+    #[arg(short = 'c', long, global = true, env = "RMRA_CONTEXT")]
+    context: Option<String>,
+
+    /// Show errors in full, with where each cause was raised, and debug
+    /// detail (e.g. how `rmra ssh` set the session up).
+    #[arg(short, long, global = true)]
+    verbose: bool,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Log in to the selected context's platform.
+    Login(remora_context_application_transport_cli::LoginArgs),
+
+    /// Forget the selected context's credentials.
+    Logout(remora_context_application_transport_cli::LogoutArgs),
+
+    /// Show whom the selected context is logged in as.
+    Whoami(remora_context_application_transport_cli::WhoamiArgs),
+
+    /// Manage contexts: named platform endpoints, docker-context style.
+    #[command(subcommand)]
+    Context(remora_context_application_transport_cli::Command),
+
+    /// Open channels to devices.
+    #[command(subcommand)]
+    Channel(remora_channel_application_transport_cli::Command),
+
+    /// Log into a device over ssh, through its remora channel.
+    Ssh(remora_channel_application_transport_cli::SshArgs),
+
+    /// Copy files to or from a device over scp, through its remora channel.
+    Scp(remora_channel_application_transport_cli::ScpArgs),
+}
+
+#[tokio::main]
+async fn main() {
+    let matches = Options::command().get_matches();
+    let source = match matches.value_source("context") {
+        Some(ValueSource::EnvVariable) => Selection::Environment,
+        _ => Selection::Flag,
+    };
+    let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let over = options
+        .context
+        .clone()
+        .filter(|name| !name.is_empty())
+        .map(|name| ContextOverride { name, source });
+    let over = over.as_ref();
+    let verbose = options.verbose;
+
+    let services = bootstrap::wire().await;
+
+    use remora_channel_application_transport_cli as channel;
+    use remora_context_application_transport_cli as context;
+    let code = match options.command {
+        Commands::Login(args) => exit_on_error(
+            context::run_login(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Logout(args) => exit_on_error(
+            context::run_logout(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Whoami(args) => exit_on_error(
+            context::run_whoami(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Context(command) => exit_on_error(
+            context::run(command, &services.context, over).await,
+            verbose,
+        ),
+        // ssh's own convention: 255 when the connection itself failed.
+        Commands::Channel(command) => channel::run(command, &services.channel, over, verbose)
+            .await
+            .unwrap_or_else(|report| fail(&report, verbose, 255)),
+        Commands::Ssh(args) => channel::run_ssh(args, &services.channel, over, verbose)
+            .await
+            .unwrap_or_else(|report| fail(&report, verbose, 255)),
+        // scp's own convention: 1 for any failure.
+        Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
+            .await
+            .unwrap_or_else(|report| fail(&report, verbose, 1)),
+    };
+    // Exit now rather than return: `channel open` may still have a thread
+    // blocked reading stdin, which would otherwise keep the runtime alive.
+    std::process::exit(code);
+}
+
+fn exit_on_error<C>(result: Result<(), error_stack::Report<C>>, verbose: bool) -> i32 {
+    match result {
+        Ok(()) => 0,
+        Err(report) => fail(&report, verbose, 1),
+    }
+}
+
+fn fail<C>(report: &error_stack::Report<C>, verbose: bool, code: i32) -> i32 {
+    remora_tui::render_report(report, verbose);
+    code
+}

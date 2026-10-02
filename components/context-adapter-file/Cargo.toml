@@ -1,0 +1,16 @@
+[package]
+name = "remora-context-adapter-file"
+description = "File-backed context and credential stores, laid out like ~/.docker/contexts: one directory per context, credentials in their own 0600 file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+error-stack.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

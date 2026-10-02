@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package sntns.service.iam.v1;
+
+import "sntns/service/v1/model.proto";
+
+service UserService {
+    // GetCurrentUser describes the authenticated principal.
+    rpc GetCurrentUser(UserServiceGetCurrentUserRequest) returns (UserServiceGetCurrentUserResponse);
+}
+
+message UserDescriptor {
+    .sntns.service.v1.ResourceReference resource = 1;
+    map<string, string> labels = 2;
+    bool has_login_profile = 3;
+}
+
+message UserServiceGetCurrentUserRequest {
+}
+
+message UserServiceGetCurrentUserResponse {
+    UserDescriptor user_descriptor = 1;
+}
