@@ -44,6 +44,7 @@ members = [
     "components/factory-application-transport-cli",
     "components/platform-grpc",
     "components/tui",
+    "components/completion",
     "components/context",
     "components/context-application",
     "components/context-adapter-file",
@@ -155,6 +156,9 @@ protox = "0.9"
 # rmra's terminal output: clack-style prompts/spinners/log lines (all on
 # stderr, which keeps stdout clean for `channel open`'s tunnel) and tables.
 cliclack = "0.5"
+# rmra's dynamic shell completion (contexts, devices, releases...):
+# `COMPLETE=$SHELL rmra`, see remora-completion.
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
 console = "0.16"
 comfy-table = "7"
 # rmra ssh: a throwaway ed25519 key, certified by the platform per session.

@@ -50,6 +50,21 @@ updated with `brew upgrade sntns/tap/rmra` instead.
 
 ## rmra
 
+### Shell completion
+
+```
+rmra completion            # shows the line to add for your shell, e.g. for zsh:
+echo 'source <(COMPLETE=zsh rmra)' >> ~/.zshrc
+```
+
+Bash, zsh, fish, elvish and PowerShell. Beyond commands and options, Tab
+completes real values: context names (`rmra -c <Tab>`, `rmra context use
+<Tab>`), device serials (`rmra ssh <Tab>`, `rmra deploy --device <Tab>`,
+`rmra scp ./file <Tab>` → `DEVICE:`), releases and deployments. Remote
+values come from the selected context's platform (the `-c` on the line
+being completed counts), cached for a minute; the completion is generated
+on shell start, so it always matches the installed rmra.
+
 ### Log in
 
 ```
