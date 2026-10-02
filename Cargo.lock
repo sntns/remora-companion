@@ -3373,11 +3373,76 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-ota"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "busybody",
+ "error-stack",
+ "remora-context",
+ "remora-progress",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-ota-adapter-grpc"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "prost-types",
+ "remora-context",
+ "remora-ota",
+ "remora-ota-adapter-grpc",
+ "remora-platform-grpc",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
+name = "remora-ota-application"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "rand_core 0.6.4",
+ "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-application",
+ "remora-ota",
+ "remora-ota-adapter-grpc",
+ "remora-progress",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "remora-ota-application-transport-cli"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-context",
+ "remora-ota",
+ "remora-progress",
+ "remora-tui",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+]
+
+[[package]]
 name = "remora-platform-grpc"
 version = "0.3.0"
 dependencies = [
  "error-stack",
  "prost",
+ "prost-types",
  "protox",
  "remora-context",
  "thiserror 1.0.69",
@@ -3547,6 +3612,10 @@ dependencies = [
  "remora-context-adapter-grpc",
  "remora-context-application",
  "remora-context-application-transport-cli",
+ "remora-ota",
+ "remora-ota-adapter-grpc",
+ "remora-ota-application",
+ "remora-ota-application-transport-cli",
  "remora-platform-grpc",
  "remora-tui",
  "serde_json",

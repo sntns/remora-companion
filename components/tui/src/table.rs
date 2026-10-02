@@ -44,6 +44,26 @@ impl Table {
         self
     }
 
+    /// A row whose cells each carry their own tone (`None` is plain).
+    pub fn row_toned<I, S>(&mut self, cells: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (S, Option<crate::Tone>)>,
+        S: Into<String>,
+    {
+        self.0.add_row(cells.into_iter().map(|(cell, tone)| {
+            let cell = Cell::new(cell.into());
+            match tone {
+                None => cell,
+                Some(crate::Tone::Good) => cell.fg(Color::Green).add_attribute(Attribute::Bold),
+                Some(crate::Tone::Bad) => cell.fg(Color::Red).add_attribute(Attribute::Bold),
+                Some(crate::Tone::Active) => cell.fg(Color::Cyan),
+                Some(crate::Tone::Idle) => cell.fg(Color::DarkGrey),
+                Some(crate::Tone::Warn) => cell.fg(Color::Yellow),
+            }
+        }));
+        self
+    }
+
     /// Prints the table to stdout. Colors are dropped when stdout is not a
     /// terminal, so piping it through `grep`/`awk` sees plain text.
     pub fn print(&mut self) {

@@ -10,13 +10,17 @@
 //! Not a port: how a line is drawn is not a business decision any test
 //! needs to substitute (same reasoning as `remora-scratch`).
 
+mod progress;
 mod report;
 mod spinner;
 mod table;
+mod time;
 
+pub use progress::{Progress, Watch, WatchLine};
 pub use report::render_report;
 pub use spinner::Spinner;
 pub use table::Table;
+pub use time::{ago, timestamp};
 
 pub use cliclack::{confirm, input, password, select};
 use console::style;
@@ -101,4 +105,49 @@ pub fn accent(text: impl std::fmt::Display) -> String {
 /// De-emphasis for secondary detail inside a message.
 pub fn dim(text: impl std::fmt::Display) -> String {
     style(text).dim().to_string()
+}
+
+/// What a status means, for its color: the same word reads the same
+/// everywhere (a table cell, a watch line, a summary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// Done, as asked (green).
+    Good,
+    /// Failed or refused (red).
+    Bad,
+    /// In progress (cyan).
+    Active,
+    /// Waiting, or a draft (dim).
+    Idle,
+    /// Being undone, or needs attention (yellow).
+    Warn,
+}
+
+/// `text` in its tone's color.
+pub fn toned(text: impl std::fmt::Display, tone: Tone) -> String {
+    let styled = style(text.to_string());
+    match tone {
+        Tone::Good => styled.green().bold(),
+        Tone::Bad => styled.red().bold(),
+        Tone::Active => styled.cyan(),
+        Tone::Idle => styled.dim(),
+        Tone::Warn => styled.yellow(),
+    }
+    .to_string()
+}
+
+/// A byte count for a human: 1.5 GiB, 340 KiB.
+pub fn bytes(count: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = count as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{count} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }

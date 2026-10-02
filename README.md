@@ -7,10 +7,11 @@ The operator's toolbox for Remora devices, cross-platform
 (Linux/Windows/macOS). Two binaries, built from one workspace of shared
 components:
 
-- **[`rmra`](#rmra)** — reach your devices through
+- **[`rmra`](#rmra)** — operate your devices through
   [sntns-platform](https://github.com/sntns/sntns-platform): log in,
-  switch between accounts docker-context style, and `rmra ssh <device>`
-  through the device's remora channel.
+  switch between accounts docker-context style, `rmra ssh <device>`
+  through the device's remora channel, and publish over-the-air updates
+  and roll them out (`rmra release`, `rmra deploy`).
 - **[`remora-etcher`](#remora-etcher)** — provision and flash images, a bit
   like balena-etcher but for Remora. No dependency on separately-installed
   third-party utilities (no `mksquashfs`, `mkfs.ext4`, `dd`, `bmaptool`,
@@ -103,6 +104,43 @@ channel or the pinning (`-J`, `-F`, `-S`, `-o ProxyCommand`/`ProxyJump`);
 
 `rmra channel open <device>` is the raw channel on stdin/stdout, for use as
 a ProxyCommand of your own.
+
+### Publish an update
+
+```
+rmra release create 2026.10.0 --version 2026.10.0 --label channel=beta \
+  --artifact remora-rp5.raucb --tag-condition "board:rp5"
+rmra release upload 2026.10.0 remora-hdc.raucb --tag-condition "board:hdc"
+rmra release ls
+rmra release show 2026.10.0
+```
+
+A release is a version and its artifacts (RAUC bundles); each artifact's
+`--tag-condition` says which devices it is for, as a boolean expression
+over device tags (`type:rauc && (board:hdc || board:rp5)`). Uploads show a
+live byte bar and resume on their own after a dropped connection; if a run
+is interrupted, it prints a token to continue with `--resume <token>`.
+
+### Roll it out and follow it
+
+```
+rmra deploy 2026.10.0 --device 525400C0FFEE --watch
+rmra deploy 2026.10.0 --selector site=lyon --watch      # lists the devices and asks first
+rmra deploy 2026.10.0 --selector site=lyon --draft --yes
+rmra deployment start 2026.10.0-525400c0ffee --watch
+rmra deployment ls --release 2026.10.0
+rmra deployment show 2026.10.0-525400c0ffee
+rmra deployment logs 2026.10.0-525400c0ffee --follow
+rmra deployment cancel 2026.10.0-525400c0ffee
+```
+
+One deployment per device, named `<release>-<serial>`, started right away
+unless `--draft`. A device that can't take it (one already has an update in
+flight) is reported without stopping the others. `--watch` (or `rmra
+deployment watch <names...>`) draws one live line per deployment — status,
+progress, the device's latest report — and exits non-zero if any of them
+doesn't succeed; Ctrl-C stops watching, not the deployments. Every listing
+takes `--format json` for scripts.
 
 ## remora-etcher
 
@@ -207,8 +245,8 @@ wic image, and Windows/macOS disk support.
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
-`config`, `convert`, `batch` and `factory` for remora-etcher, `context` and
-`channel` for rmra. Components are generic, not owned by a binary: the
+`config`, `convert`, `batch` and `factory` for remora-etcher, `context`,
+`channel` and `ota` for rmra. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each
 is split further into:
 

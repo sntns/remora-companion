@@ -1,0 +1,32 @@
+[package]
+name = "remora-ota-adapter-grpc"
+description = "OtaGatewayAdapter over sntns-platform's remora gateway: ReleaseService (with the client-streaming, resumable artifact upload), DeploymentService and DeviceService"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-ota = { path = "../ota" }
+remora-context = { path = "../context" }
+remora-platform-grpc = { path = "../platform-grpc" }
+async-trait.workspace = true
+error-stack.workspace = true
+tonic.workspace = true
+prost-types.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+
+[features]
+# An in-process fake remora gateway (releases, uploads, devices,
+# deployments that progress as they're polled) for this crate's tests and
+# its dependents' -- enabled from [dev-dependencies] only.
+test-gateway = ["tonic/server", "tonic/router", "tokio/net", "tokio-stream/net"]
+
+[dev-dependencies]
+remora-ota-adapter-grpc = { path = ".", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["signal"] }
+
+[[example]]
+name = "fake-gateway"
+required-features = ["test-gateway"]

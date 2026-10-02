@@ -6,6 +6,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "sntns/service/remorachannel/v1/channel_service.proto",
         "sntns/service/iam/v1/user_service.proto",
         "sntns/service/iam/v1/account_service.proto",
+        "sntns/service/remora/v1/release_service.proto",
+        "sntns/service/remora/v1/deployment_service.proto",
+        "sntns/service/remora/v1/device_service.proto",
     ];
     let descriptors = protox::compile(files, ["proto"])?;
     tonic_prost_build::configure()

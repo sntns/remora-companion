@@ -54,6 +54,10 @@ members = [
     "components/channel-adapter-grpc",
     "components/channel-adapter-openssh",
     "components/channel-application-transport-cli",
+    "components/ota",
+    "components/ota-application",
+    "components/ota-adapter-grpc",
+    "components/ota-application-transport-cli",
     "containers/remora-etcher",
     "containers/rmra",
 ]
@@ -127,6 +131,7 @@ pem = "4.0"
 # needed on any CI runner (Windows/macOS included).
 tonic = { version = "0.14", default-features = false, features = ["codegen", "transport", "tls-ring", "tls-native-roots", "tls-webpki-roots"] }
 tonic-prost = "0.14"
+prost-types = "0.14"
 prost = "0.14"
 tonic-prost-build = "0.14"
 protox = "0.9"

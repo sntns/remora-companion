@@ -15,10 +15,14 @@ use remora_context::{
 use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCredentialStoreImpl};
 use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
+use remora_ota::{adapter::gateway::OtaGatewayAdapterService, application::OtaService};
+use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
+use remora_ota_application::OtaControllerImpl;
 
 pub struct Services {
     pub context: ContextService,
     pub channel: ChannelService,
+    pub ota: OtaService,
 }
 
 /// The composition root, same recipe as remora-etcher's: construct each
@@ -97,5 +101,28 @@ pub async fn wire() -> Services {
         .await
         .expect("ChannelService was just registered");
 
-    Services { context, channel }
+    container
+        .set_type(OtaGatewayAdapterService::new(OtaGatewayAdapterImpl))
+        .await;
+    let ota_gateway = container
+        .get_type::<OtaGatewayAdapterService>()
+        .await
+        .expect("OtaGatewayAdapterService was just registered");
+
+    container
+        .set_type(OtaService::new(OtaControllerImpl::new(
+            context.clone(),
+            ota_gateway,
+        )))
+        .await;
+    let ota = container
+        .get_type::<OtaService>()
+        .await
+        .expect("OtaService was just registered");
+
+    Services {
+        context,
+        channel,
+        ota,
+    }
 }

@@ -175,6 +175,12 @@ generated tonic servers (`remora-platform-grpc` generates them for exactly
 this), and `containers/rmra/tests/` runs the shipped `rmra` binary against
 one — `fake_gateway.rs` for login/whoami/`channel open` over stdio,
 `real_sshd.rs` for `rmra ssh` end to end against a real user-mode `sshd`
-with real host and user CAs (Linux only). An application crate that needs
+with real host and user CAs (Linux only), `ota.rs` for a release published
+(its upload dropped and resumed), rolled out and followed. The OTA fake
+lives in `remora-ota-adapter-grpc`'s `test_gateway` module behind the
+`test-gateway` feature, enabled from `[dev-dependencies]` only, so the
+adapter's, the use case's and the binary's tests share one fake (`cargo run
+-p remora-ota-adapter-grpc --features test-gateway --example fake-gateway`
+serves it for trying the commands by hand). An application crate that needs
 the platform port but isn't about it may use a small hand-written stub of
 that one trait (see `context-application`'s tests).

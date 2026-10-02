@@ -8,6 +8,9 @@ public gateway APIs, copied from `main` at `6c6af2f`:
 | `sntns/service/v1/model.proto` | `components/sntns-service-api-proto/sntns/service/v1/model.proto` |
 | `sntns/service/remorachannel/v1/channel_service.proto` | `components/sntns-service-remora-channel-gateway-api-proto/sntns/service/remorachannel/v1/channel_service.proto` |
 | `sntns/service/iam/v1/user_service.proto` | `components/sntns-service-iam-gateway-api-proto/sntns/service/iam/v1/{user_service,user_model}.proto` |
+| `sntns/service/remora/v1/release_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{release_service,release_model}.proto` |
+| `sntns/service/remora/v1/deployment_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{deployment_service,deployment_model}.proto` |
+| `sntns/service/remora/v1/device_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{device_service,device_model}.proto` (GetDevice, ListDevices only) |
 | `sntns/service/iam/v1/account_service.proto` | `components/sntns-service-iam-gateway-api-proto/sntns/service/iam/v1/{account_service,account_model}.proto` |
 
 What was changed, and why it is safe:

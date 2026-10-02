@@ -23,6 +23,11 @@ pub mod sntns {
                 tonic::include_proto!("sntns.service.remorachannel.v1");
             }
         }
+        pub mod remora {
+            pub mod v1 {
+                tonic::include_proto!("sntns.service.remora.v1");
+            }
+        }
         pub mod iam {
             pub mod v1 {
                 tonic::include_proto!("sntns.service.iam.v1");

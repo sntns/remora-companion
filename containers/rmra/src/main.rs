@@ -8,7 +8,8 @@ use remora_context::model::{ContextOverride, Selection};
     name = "rmra",
     version,
     about = "Remora operator CLI: reach your devices through sntns-platform",
-    after_help = "Start with `rmra login`, then `rmra ssh <device>`."
+    after_help = "Start with `rmra login`, then `rmra ssh <device>`, or publish an update with \
+                  `rmra release create` and roll it out with `rmra deploy`."
 )]
 struct Options {
     #[command(subcommand)]
@@ -48,6 +49,17 @@ enum Commands {
 
     /// Copy files to or from a device over scp, through its remora channel.
     Scp(remora_channel_application_transport_cli::ScpArgs),
+
+    /// Manage over-the-air releases: versions and their artifacts.
+    #[command(subcommand)]
+    Release(remora_ota_application_transport_cli::ReleaseCommand),
+
+    /// Manage over-the-air deployments: a release being installed on devices.
+    #[command(subcommand)]
+    Deployment(remora_ota_application_transport_cli::DeploymentCommand),
+
+    /// Deploy a release to devices (same as `rmra deployment create`).
+    Deploy(remora_ota_application_transport_cli::DeployArgs),
 }
 
 #[tokio::main]
@@ -70,6 +82,7 @@ async fn main() {
 
     use remora_channel_application_transport_cli as channel;
     use remora_context_application_transport_cli as context;
+    use remora_ota_application_transport_cli as ota;
     let code = match options.command {
         Commands::Login(args) => exit_on_error(
             context::run_login(args, &services.context, over).await,
@@ -98,6 +111,17 @@ async fn main() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(&report, verbose, 1)),
+        Commands::Release(command) => exit_on_error(
+            ota::run_release(command, &services.ota, over).await,
+            verbose,
+        ),
+        Commands::Deployment(command) => exit_on_error(
+            ota::run_deployment(command, &services.ota, over).await,
+            verbose,
+        ),
+        Commands::Deploy(args) => {
+            exit_on_error(ota::run_deploy(args, &services.ota, over).await, verbose)
+        }
     };
     // Exit now rather than return: `channel open` may still have a thread
     // blocked reading stdin, which would otherwise keep the runtime alive.
