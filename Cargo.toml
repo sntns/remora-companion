@@ -75,11 +75,10 @@ version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
-# The public releases repo, not this private source repo: dist derives every
-# download URL (installers, Homebrew formulas, `rmra update`) from this
-# field, and those must be reachable without access to the sources.
-repository = "https://github.com/sntns/remora-companion-releases"
-homepage = "https://github.com/sntns/remora-companion-releases"
+# dist derives every download URL (installers, Homebrew formulas, `rmra
+# update`) from this field.
+repository = "https://github.com/sntns/remora-companion"
+homepage = "https://github.com/sntns/remora-companion"
 
 # Drives `cargo release` (see .github/workflows/cut-release.yml): every
 # crate inherits `version.workspace = true`, so bumping this one field

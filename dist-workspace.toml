@@ -4,8 +4,7 @@ members = ["cargo:."]
 # Release packaging with dist (https://opensource.axo.dev/cargo-dist/):
 # `dist generate` writes .github/workflows/release.yml from this; edit here,
 # never that file. Pushing a vX.Y.Z tag (see cut-release.yml) builds every
-# target, then publishes to the public releases repo below -- the source
-# repo stays private, the binaries don't.
+# target, then publishes it as a GitHub release of this repository.
 [dist]
 cargo-dist-version = "0.32.0"
 ci = "github"
@@ -19,9 +18,6 @@ targets = [
     "aarch64-unknown-linux-musl",
     "x86_64-pc-windows-msvc",
 ]
-# Where releases are published (public), instead of this private repo.
-# Needs a GH_RELEASES_TOKEN secret with contents:write on it.
-github-releases-repo = "sntns/remora-companion-releases"
 # Homebrew formulas (`brew install sntns/tap/rmra`), pushed on each release.
 # Needs a HOMEBREW_TAP_TOKEN secret with contents:write on it.
 tap = "sntns/homebrew-tap"
@@ -30,6 +26,6 @@ publish-jobs = ["homebrew"]
 install-path = "~/.local/bin"
 # Build a plan on PRs (cheap), everything on tags.
 pr-run-mode = "plan"
+# Build provenance attestations: GitHub only offers them to public repos on
+# this organization's plan.
 github-attestations = true
-# Never publish the sources: this repo is private, only its binaries are public.
-source-tarball = false

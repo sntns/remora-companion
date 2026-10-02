@@ -19,20 +19,18 @@ components:
 
 ## Installation
 
-Releases are public, in
-[sntns/remora-companion-releases](https://github.com/sntns/remora-companion-releases)
-(this source repository stays private).
+From the [latest release](https://github.com/sntns/remora-companion/releases/latest):
 
 macOS / Linux:
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion-releases/releases/latest/download/rmra-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion-releases/releases/latest/download/rmra-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.ps1 | iex"
 ```
 
 Homebrew:
@@ -326,13 +324,10 @@ cargo test --workspace
   `vX.Y.Z` tag it builds both binaries for `x86_64`/`aarch64` Linux (musl),
   `x86_64` Windows and `x86_64`/`aarch64` macOS on native runners, and
   publishes them with shell/PowerShell installers, checksums and GitHub
-  build attestations to the public
-  [releases repo](https://github.com/sntns/remora-companion-releases), then
-  pushes Homebrew formulas to [sntns/homebrew-tap](https://github.com/sntns/homebrew-tap).
-  On pull requests it only plans. Sources are never published
-  (`source-tarball = false`).
-- Repo secrets it needs: `GH_RELEASES_TOKEN` (contents: write on the
-  releases repo) and `HOMEBREW_TAP_TOKEN` (contents: write on the tap).
+  build attestations as a GitHub release of this repository, then pushes
+  Homebrew formulas to [sntns/homebrew-tap](https://github.com/sntns/homebrew-tap).
+  On pull requests it only plans.
+- Repo secret it needs: `HOMEBREW_TAP_TOKEN` (contents: write on the tap).
 - `dist plan` shows locally what a release would contain; `dist build`
   builds it for the host.
 
