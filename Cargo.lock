@@ -3625,6 +3625,7 @@ dependencies = [
  "console",
  "error-stack",
  "remora-progress",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
 ]

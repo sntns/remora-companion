@@ -4,8 +4,8 @@ pub enum Error {
     Channel(String),
     #[error("the {0:?} profile is a datagram channel, which this version cannot relay yet")]
     Datagram(String),
-    #[error("the channel failed")]
-    Relay,
+    #[error("the connection to {0} was lost")]
+    Relay(String),
     #[error("the channel did not finish within {0} s of a hangup")]
     HangupGrace(u64),
     #[error("cannot tell where this program is, to use it as ssh's ProxyCommand")]

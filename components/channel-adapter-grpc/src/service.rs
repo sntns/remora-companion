@@ -147,7 +147,7 @@ struct GrpcSender(Option<mpsc::Sender<pb::ChannelServiceOpenDeviceChannelRequest
 impl ChannelSender for GrpcSender {
     async fn send(&mut self, chunk: Vec<u8>) -> Result<()> {
         let Some(requests) = &self.0 else {
-            return Err(Report::new(Error::Channel).attach("write after close_write"));
+            return Err(Report::new(Error::Ended).attach("write after close_write"));
         };
         requests
             .send(pb::ChannelServiceOpenDeviceChannelRequest {
@@ -160,7 +160,7 @@ impl ChannelSender for GrpcSender {
                 ),
             })
             .await
-            .map_err(|_| Report::new(Error::Channel).attach("the channel has ended"))
+            .map_err(|_| Report::new(Error::Ended))
     }
 
     async fn close_write(&mut self) -> Result<()> {
@@ -179,7 +179,15 @@ impl ChannelReceiver for GrpcReceiver {
     async fn recv(&mut self) -> Result<Option<Vec<u8>>> {
         use pb::channel_service_open_device_channel_response::Response;
         while !self.ended {
-            match self.responses.message().await.map_err(classify)? {
+            // Mid-channel, any failure is the gateway ending it: an
+            // `Unavailable` here is a device or replica going away, not a
+            // gateway out of reach as it would be when opening.
+            let message = self
+                .responses
+                .message()
+                .await
+                .map_err(|status| Report::new(Error::Ended).attach(status_summary(&status)))?;
+            match message {
                 None => self.ended = true,
                 Some(message) => match message.response {
                     Some(Response::ChunkResponse(chunk)) => return Ok(Some(chunk.channel_chunk)),

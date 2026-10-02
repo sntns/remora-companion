@@ -101,6 +101,25 @@ impl pb::channel_service_server::ChannelService for Channels {
         if initial.channel_profile != "ssh" {
             return Err(Status::invalid_argument("unknown profile"));
         }
+        if initial.channel_device_name == "DROP" {
+            // Opens, then goes away mid-channel, as a device rebooting does.
+            let (tx, rx) = mpsc::channel(4);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(message(Out::OpenedResponse(
+                        pb::ChannelServiceOpenDeviceChannelOpenedResponse {
+                            channel_device_reference: None,
+                            channel_kind: "stream".into(),
+                        },
+                    )))
+                    .await;
+                let _ = incoming.next().await;
+                let _ = tx
+                    .send(Err(Status::unavailable("the device went away")))
+                    .await;
+            });
+            return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
+        }
         let (tx, rx) = mpsc::channel(4);
         tokio::spawn(async move {
             let _ = tx
@@ -254,6 +273,20 @@ async fn login_whoami_and_a_channel_on_stdio() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "ecived olleh");
     assert!(stderr.is_empty(), "--quiet printed: {stderr}");
+
+    // A channel lost mid-session, as ssh's ProxyCommand sees it: one plain
+    // line saying why, with carriage returns for ssh's raw-mode terminal --
+    // no decoration, no repeated causes.
+    let (code, stdout, stderr) = rmra
+        .run(&["channel", "open", "DROP", "--quiet"], b"keystrokes")
+        .await;
+    assert_eq!(code, 255);
+    assert!(stdout.is_empty());
+    assert_eq!(
+        stderr,
+        "\r\nrmra: the connection to DROP was lost: the gateway ended the channel: \
+         Unavailable: the device went away\r\n"
+    );
 
     let (code, _, _) = rmra.run(&["logout"], b"").await;
     assert_eq!(code, 0);

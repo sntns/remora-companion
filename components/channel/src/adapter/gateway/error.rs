@@ -14,6 +14,8 @@ pub enum Error {
     Protocol,
     #[error("the channel failed")]
     Channel,
+    #[error("the gateway ended the channel")]
+    Ended,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;
