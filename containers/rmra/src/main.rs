@@ -64,6 +64,9 @@ enum Commands {
 
     /// Deploy a release to devices (same as `rmra deployment create`).
     Deploy(remora_ota_application_transport_cli::DeployArgs),
+
+    /// Update rmra itself to its latest release.
+    Update(remora_update_application_transport_cli::Args),
 }
 
 #[tokio::main]
@@ -115,6 +118,18 @@ async fn main() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(&report, verbose, 1)),
+        Commands::Update(args) => {
+            let app = remora_update::model::App {
+                name: "rmra".into(),
+                version: remora_update::model::Version::parse(env!("CARGO_PKG_VERSION"))
+                    .expect("the package version is semver"),
+                executable: std::env::current_exe().unwrap_or_else(|_| "rmra".into()),
+            };
+            exit_on_error(
+                remora_update_application_transport_cli::run(args, &services.update, &app).await,
+                verbose,
+            )
+        }
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
             verbose,

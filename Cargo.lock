@@ -3573,6 +3573,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-update"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "busybody",
+ "error-stack",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-update-adapter-github"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-update",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "remora-update-application"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-update",
+ "tokio",
+]
+
+[[package]]
+name = "remora-update-application-transport-cli"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-tui",
+ "remora-update",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3671,6 +3716,10 @@ dependencies = [
  "remora-ota-application-transport-cli",
  "remora-platform-grpc",
  "remora-tui",
+ "remora-update",
+ "remora-update-adapter-github",
+ "remora-update-application",
+ "remora-update-application-transport-cli",
  "serde_json",
  "tempfile",
  "tokio",

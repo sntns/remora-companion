@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "remora-etcher"
@@ -58,6 +60,11 @@ tracing = "0.1"
 [dependencies.tracing-subscriber]
 version = "0.3"
 features = ["env-filter"]
+
+# Shipped by dist (dist-workspace.toml), although the workspace is
+# publish = false (that only means "not on crates.io").
+[package.metadata.dist]
+dist = true
 
 [package.metadata.deb]
 maintainer = "Lionel Molinier <lionel.molinier@sentiens.fr>"

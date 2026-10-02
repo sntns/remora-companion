@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "rmra"
@@ -29,11 +31,20 @@ remora-device = { path = "../../components/device" }
 remora-device-application = { path = "../../components/device-application" }
 remora-device-adapter-grpc = { path = "../../components/device-adapter-grpc" }
 remora-device-application-transport-cli = { path = "../../components/device-application-transport-cli" }
+remora-update = { path = "../../components/update" }
+remora-update-application = { path = "../../components/update-application" }
+remora-update-adapter-github = { path = "../../components/update-adapter-github" }
+remora-update-application-transport-cli = { path = "../../components/update-application-transport-cli" }
 remora-tui = { path = "../../components/tui" }
 busybody.workspace = true
 error-stack.workspace = true
 tokio.workspace = true
 clap.workspace = true
+
+# Shipped by dist (dist-workspace.toml), although the workspace is
+# publish = false (that only means "not on crates.io").
+[package.metadata.dist]
+dist = true
 
 [package.metadata.deb]
 maintainer = "Lionel Molinier <lionel.molinier@sentiens.fr>"

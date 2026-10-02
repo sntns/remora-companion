@@ -62,6 +62,10 @@ members = [
     "components/device-application",
     "components/device-adapter-grpc",
     "components/device-application-transport-cli",
+    "components/update",
+    "components/update-application",
+    "components/update-adapter-github",
+    "components/update-application-transport-cli",
     "containers/remora-etcher",
     "containers/rmra",
 ]
@@ -71,6 +75,11 @@ version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
+# The public releases repo, not this private source repo: dist derives every
+# download URL (installers, Homebrew formulas, `rmra update`) from this
+# field, and those must be reachable without access to the sources.
+repository = "https://github.com/sntns/remora-companion-releases"
+homepage = "https://github.com/sntns/remora-companion-releases"
 
 # Drives `cargo release` (see .github/workflows/cut-release.yml): every
 # crate inherits `version.workspace = true`, so bumping this one field
@@ -88,6 +97,11 @@ tag-message = "v{{version}}"
 # Control binary size, matching remora-disk's profile.
 [profile.release]
 lto = true
+
+# What dist builds releases with (dist-workspace.toml).
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 # Shared across every components/*-application and containers/* crate, so the
 # DI convention (port + newtype wrapper, manual composition root) and error

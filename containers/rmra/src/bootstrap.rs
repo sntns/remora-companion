@@ -21,12 +21,19 @@ use remora_device_application::DeviceControllerImpl;
 use remora_ota::{adapter::gateway::OtaGatewayAdapterService, application::OtaService};
 use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
+use remora_update::{
+    adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},
+    application::UpdateService,
+};
+use remora_update_adapter_github::{DistInstallerImpl, GithubReleaseFeedImpl, RELEASES_REPO};
+use remora_update_application::UpdateControllerImpl;
 
 pub struct Services {
     pub context: ContextService,
     pub channel: ChannelService,
     pub ota: OtaService,
     pub device: DeviceService,
+    pub update: UpdateService,
 }
 
 /// The composition root, same recipe as remora-etcher's: construct each
@@ -143,10 +150,41 @@ pub async fn wire() -> Services {
         .await
         .expect("DeviceService was just registered");
 
+    container
+        .set_type(ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(
+            RELEASES_REPO,
+        )))
+        .await;
+    let feed = container
+        .get_type::<ReleaseFeedAdapterService>()
+        .await
+        .expect("ReleaseFeedAdapterService was just registered");
+
+    container
+        .set_type(InstallerAdapterService::new(DistInstallerImpl::new(
+            RELEASES_REPO,
+        )))
+        .await;
+    let installer = container
+        .get_type::<InstallerAdapterService>()
+        .await
+        .expect("InstallerAdapterService was just registered");
+
+    container
+        .set_type(UpdateService::new(UpdateControllerImpl::new(
+            feed, installer,
+        )))
+        .await;
+    let update = container
+        .get_type::<UpdateService>()
+        .await
+        .expect("UpdateService was just registered");
+
     Services {
         context,
         channel,
         ota,
         device,
+        update,
     }
 }
