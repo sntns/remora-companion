@@ -58,6 +58,10 @@ members = [
     "components/ota-application",
     "components/ota-adapter-grpc",
     "components/ota-application-transport-cli",
+    "components/device",
+    "components/device-application",
+    "components/device-adapter-grpc",
+    "components/device-application-transport-cli",
     "containers/remora-etcher",
     "containers/rmra",
 ]

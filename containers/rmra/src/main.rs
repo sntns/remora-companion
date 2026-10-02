@@ -44,6 +44,10 @@ enum Commands {
     #[command(subcommand)]
     Channel(remora_channel_application_transport_cli::Command),
 
+    /// List the account's devices.
+    #[command(subcommand)]
+    Device(remora_device_application_transport_cli::Command),
+
     /// Log into a device over ssh, through its remora channel.
     Ssh(remora_channel_application_transport_cli::SshArgs),
 
@@ -111,6 +115,10 @@ async fn main() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(&report, verbose, 1)),
+        Commands::Device(command) => exit_on_error(
+            remora_device_application_transport_cli::run(command, &services.device, over).await,
+            verbose,
+        ),
         Commands::Release(command) => exit_on_error(
             ota::run_release(command, &services.ota, over).await,
             verbose,

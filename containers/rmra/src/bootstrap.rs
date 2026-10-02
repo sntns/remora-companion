@@ -15,6 +15,9 @@ use remora_context::{
 use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCredentialStoreImpl};
 use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
+use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
+use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
+use remora_device_application::DeviceControllerImpl;
 use remora_ota::{adapter::gateway::OtaGatewayAdapterService, application::OtaService};
 use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
@@ -23,6 +26,7 @@ pub struct Services {
     pub context: ContextService,
     pub channel: ChannelService,
     pub ota: OtaService,
+    pub device: DeviceService,
 }
 
 /// The composition root, same recipe as remora-etcher's: construct each
@@ -120,9 +124,29 @@ pub async fn wire() -> Services {
         .await
         .expect("OtaService was just registered");
 
+    container
+        .set_type(DeviceGatewayAdapterService::new(DeviceGatewayAdapterImpl))
+        .await;
+    let device_gateway = container
+        .get_type::<DeviceGatewayAdapterService>()
+        .await
+        .expect("DeviceGatewayAdapterService was just registered");
+
+    container
+        .set_type(DeviceService::new(DeviceControllerImpl::new(
+            context.clone(),
+            device_gateway,
+        )))
+        .await;
+    let device = container
+        .get_type::<DeviceService>()
+        .await
+        .expect("DeviceService was just registered");
+
     Services {
         context,
         channel,
         ota,
+        device,
     }
 }

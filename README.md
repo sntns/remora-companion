@@ -71,6 +71,17 @@ with `RMRA_CONFIG`): `contexts/<name>/meta.json` for the endpoint,
 clear for now, like the `sntns` CLI's own configuration; an OS-keyring
 store is planned.
 
+### List devices
+
+```
+rmra device ls
+rmra device ls --label site=lyon
+rmra device ls -q                 # names only, one per line
+```
+
+The account's devices and their labels (`--format json` for scripts). The
+same `--label key=value` pairs pick the targets of `rmra deploy --selector`.
+
 ### ssh into a device
 
 ```
@@ -246,7 +257,7 @@ DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
 `config`, `convert`, `batch` and `factory` for remora-etcher, `context`,
-`channel` and `ota` for rmra. Components are generic, not owned by a binary: the
+`channel`, `ota` and `device` for rmra. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each
 is split further into:
 
