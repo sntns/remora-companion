@@ -5,7 +5,7 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use remora_factory::{
     adapter::FactoryProvisioningAdapterService,
     application::{Error, FactoryServiceInterface, Result},
-    model::FactoryCredential,
+    model::{DeviceSerial, FactoryCredential, ProvisionedDevice},
 };
 use remora_progress::OperationContext;
 
@@ -34,27 +34,13 @@ impl FactoryControllerImpl {
 impl FactoryServiceInterface for FactoryControllerImpl {
     async fn provision(
         &self,
-        device_name: &str,
+        serial: &DeviceSerial,
         api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
-        force: bool,
         output: &Path,
         ctx: &OperationContext,
-    ) -> Result<()> {
-        if ctx.cancel.is_cancelled() {
-            return Err(Report::new(Error::Cancelled));
-        }
-
-        if force {
-            ctx.sink
-                .phase("deleting existing factory device credential");
-            self.provisioning
-                .delete(api_url, api_key, device_name)
-                .await
-                .change_context(Error::Delete)?;
-        }
-
+    ) -> Result<ProvisionedDevice> {
         if ctx.cancel.is_cancelled() {
             return Err(Report::new(Error::Cancelled));
         }
@@ -63,13 +49,16 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         let private_key_der = key_pair.serialize_der();
 
         // The CSR's subject is ignored server-side (identity comes from
-        // `device_name` alone), but matching CN to the serial keeps the
-        // artifacts readable later.
+        // `serial` alone), but matching CN to the serial keeps the
+        // artifacts readable later -- when it's known up front, that is: a
+        // policy-allocated serial only exists once the platform answers.
         let mut csr_params = CertificateParams::default();
         csr_params.distinguished_name = DistinguishedName::new();
-        csr_params
-            .distinguished_name
-            .push(DnType::CommonName, device_name);
+        if let DeviceSerial::Explicit { device_name, .. } = serial {
+            csr_params
+                .distinguished_name
+                .push(DnType::CommonName, device_name.as_str());
+        }
         let csr = csr_params
             .serialize_request(&key_pair)
             .change_context(Error::Csr)?;
@@ -81,7 +70,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         ctx.sink.phase("requesting factory device credential");
         let identity = self
             .provisioning
-            .provision(api_url, api_key, device_name, &csr_der)
+            .provision(api_url, api_key, serial, &csr_der)
             .await
             .change_context(Error::Provision)?;
 
@@ -97,6 +86,10 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             return Err(Report::new(Error::MissingAccessUrl));
         };
 
+        let device = ProvisionedDevice {
+            serial_number: identity.serial_number,
+            factory_device_name: identity.factory_device_name,
+        };
         let credential = FactoryCredential {
             private_key_der,
             certificate_der: identity.certificate_der,
@@ -113,6 +106,6 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             .change_context_lazy(|| Error::WriteOutput(output.to_path_buf()))?;
 
         ctx.sink.phase("done");
-        Ok(())
+        Ok(device)
     }
 }

@@ -35,3 +35,56 @@ pub struct FactoryCredential {
     /// field there with no serde default -- get the spelling right).
     pub key_id: String,
 }
+
+/// Which serial a device is manufactured under -- exactly one of the two
+/// shapes `POST /remora/v1/factory-device` accepts (`serialNumberPolicyName`
+/// xor `deviceName`). `force` lives on the explicit arm only because the
+/// platform refuses it alongside a policy: a policy always allocates a
+/// fresh serial, so there is never an existing IDevID to replace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceSerial {
+    /// Let the platform allocate a new serial from this policy (e.g.
+    /// `hubs`). The only way to be sure the serial has never been used.
+    FromPolicy(String),
+    /// A serial chosen outside the platform. Refused (409) if it was
+    /// already manufactured, unless `force` -- which re-signs it and
+    /// revokes the old IDevID (a mis-flashed board, a reused test unit).
+    Explicit { device_name: String, force: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DeviceSerialError {
+    #[error("give either a device name or a serial number policy, not both")]
+    Both,
+    #[error("give a device name or a serial number policy")]
+    Neither,
+    #[error("force only applies to an explicit device name, not a serial number policy")]
+    ForceWithPolicy,
+}
+
+impl DeviceSerial {
+    /// Builds a `DeviceSerial` from the flat optional fields a CLI or a
+    /// batch recipe carries, rejecting the combinations the platform would.
+    pub fn from_parts(
+        device_name: Option<String>,
+        serial_number_policy: Option<String>,
+        force: bool,
+    ) -> Result<Self, DeviceSerialError> {
+        match (device_name, serial_number_policy) {
+            (Some(_), Some(_)) => Err(DeviceSerialError::Both),
+            (None, None) => Err(DeviceSerialError::Neither),
+            (None, Some(_)) if force => Err(DeviceSerialError::ForceWithPolicy),
+            (None, Some(policy)) => Ok(Self::FromPolicy(policy)),
+            (Some(device_name), None) => Ok(Self::Explicit { device_name, force }),
+        }
+    }
+}
+
+/// What a successful `provision` reports back to its caller: the serial
+/// actually issued (to print on the label -- also the certificate's CN) and
+/// the device's URN (the certificate's URI SAN).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisionedDevice {
+    pub serial_number: String,
+    pub factory_device_name: String,
+}

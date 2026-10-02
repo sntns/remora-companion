@@ -3,6 +3,7 @@ use std::path::Path;
 use remora_progress::OperationContext;
 
 use super::error::Result;
+use crate::model::{DeviceSerial, ProvisionedDevice};
 
 /// The factory vertical's application-facing port: manufacture a device --
 /// generate a local keypair + CSR, request a factory-device credential
@@ -26,9 +27,12 @@ use super::error::Result;
 /// *step* of a recipe (see `remora-batch`).
 #[async_trait::async_trait]
 pub trait FactoryServiceInterface: Send + Sync {
-    /// `device_name` is the durable hardware serial -- the identity that
+    /// `serial` is the durable hardware serial -- the identity that
     /// matters here, since it survives a change of owner, unlike any
-    /// resource name scoped to whoever currently owns the device.
+    /// resource name scoped to whoever currently owns the device. Either
+    /// allocated by the platform from a policy, or chosen by the caller
+    /// (see `DeviceSerial`); the returned `ProvisionedDevice` carries the
+    /// serial actually issued, which is what goes on the label.
     ///
     /// `access_url_override` is an escape hatch, not the normal path: the
     /// platform's response always carries the access-tier URL the device
@@ -39,23 +43,15 @@ pub trait FactoryServiceInterface: Send + Sync {
     /// empty URL into the credential would produce a device that can
     /// never phone home, discovered at the worst possible moment, so this
     /// call fails instead unless an override is given for that case.
-    ///
-    /// `force`: delete `device_name`'s existing factory-device credential
-    /// first (a no-op if there isn't one), rather than let the platform
-    /// reject a duplicate create -- for re-manufacturing a device serial
-    /// that was already provisioned once (a botched run, a reused test
-    /// unit, ...).
-    #[allow(clippy::too_many_arguments)]
     async fn provision(
         &self,
-        device_name: &str,
+        serial: &DeviceSerial,
         api_url: &str,
         api_key: &str,
         access_url_override: Option<&str>,
-        force: bool,
         output: &Path,
         ctx: &OperationContext,
-    ) -> Result<()>;
+    ) -> Result<ProvisionedDevice>;
 }
 
 /// Injectable handle to whatever `FactoryServiceInterface` implementation

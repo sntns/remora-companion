@@ -1,10 +1,17 @@
 use super::error::Result;
+use crate::model::DeviceSerial;
 
 /// What the platform's factory-device call hands back, before the
 /// locally-generated private key is added at the application layer (see
 /// `crate::model::FactoryCredential`).
 #[derive(Debug, Clone)]
 pub struct ProvisionedIdentity {
+    /// The serial actually issued -- allocated by the platform for
+    /// `DeviceSerial::FromPolicy`, echoed back for `Explicit`. Also the
+    /// certificate's CN.
+    pub serial_number: String,
+    /// The device's URN, carried in the certificate's URI SAN.
+    pub factory_device_name: String,
     pub certificate_der: Vec<u8>,
     pub certificate_authority_der: Vec<u8>,
     pub server_certificate_authority_der: Vec<u8>,
@@ -36,23 +43,20 @@ pub struct ProvisionedIdentity {
 /// reused HTTP client) avoids coupling wiring order to that.
 #[async_trait::async_trait]
 pub trait FactoryProvisioningAdapter: Send + Sync {
-    /// Request a factory device credential for `device_name` (the durable
-    /// hardware serial), presenting `csr_der` -- a DER-encoded PKCS#10 CSR
-    /// whose subject is ignored server-side; identity comes from
-    /// `device_name` alone.
+    /// Request a factory device credential under `serial`, presenting
+    /// `csr_der` -- a DER-encoded PKCS#10 CSR whose subject is ignored
+    /// server-side; identity comes from `serial` alone.
+    ///
+    /// An explicit device name that was already manufactured is refused
+    /// with `Error::AlreadyExists` unless its `force` is set, in which case
+    /// the platform re-signs it and revokes the previous IDevID.
     async fn provision(
         &self,
         api_url: &str,
         api_key: &str,
-        device_name: &str,
+        serial: &DeviceSerial,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity>;
-
-    /// Delete `device_name`'s existing factory-device credential, if any --
-    /// used by `provision`'s `--force` to clear the way for a fresh create
-    /// rather than let the platform reject a duplicate. A device that
-    /// doesn't exist yet is not an error: this is idempotent.
-    async fn delete(&self, api_url: &str, api_key: &str, device_name: &str) -> Result<()>;
 }
 
 /// Injectable handle to whatever `FactoryProvisioningAdapter` was wired at

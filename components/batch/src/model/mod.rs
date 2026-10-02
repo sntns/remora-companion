@@ -57,8 +57,14 @@ pub enum BatchStep {
     /// at `output`, same as running `factory provision` directly -- pair it
     /// with a later `IdentityCreate` step (`inputs` including this file) to
     /// bundle it into an image.
+    ///
+    /// Exactly one of `device_name`/`serial_number_policy` must be set;
+    /// `force` only with `device_name` (see `remora_factory::model::DeviceSerial`).
     FactoryProvision {
-        device_name: String,
+        #[serde(default)]
+        device_name: Option<String>,
+        #[serde(default)]
+        serial_number_policy: Option<String>,
         api_url: String,
         api_key: String,
         /// Escape hatch for a deployment that hasn't configured an
