@@ -36,6 +36,8 @@ remora-update-application = { path = "../../components/update-application" }
 remora-update-adapter-github = { path = "../../components/update-adapter-github" }
 remora-update-application-transport-cli = { path = "../../components/update-application-transport-cli" }
 remora-tui = { path = "../../components/tui" }
+remora-completion = { path = "../../components/completion" }
+clap_complete.workspace = true
 busybody.workspace = true
 error-stack.workspace = true
 tokio.workspace = true

@@ -1,4 +1,5 @@
 mod bootstrap;
+mod completion;
 
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser};
 use remora_context::model::{ContextOverride, Selection};
@@ -17,6 +18,7 @@ struct Options {
 
     /// The context to use for this command, overriding `rmra context use`.
     #[arg(short = 'c', long, global = true, env = "RMRA_CONTEXT")]
+    #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
     context: Option<String>,
 
     /// Show errors in full, with where each cause was raised, and debug
@@ -67,10 +69,26 @@ enum Commands {
 
     /// Update rmra itself to its latest release.
     Update(remora_update_application_transport_cli::Args),
+
+    /// Enable shell completion (contexts, devices, releases... with Tab).
+    Completion(completion::CompletionArgs),
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Shell completion: when the shell calls back with COMPLETE set, answer
+    // and exit before anything else. Outside the async runtime on purpose:
+    // providers run their own, and a runtime can't nest in another.
+    remora_completion::install(completion::provide);
+    clap_complete::CompleteEnv::with_factory(Options::command).complete();
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("the tokio runtime builds");
+    runtime.block_on(run());
+}
+
+async fn run() {
     let matches = Options::command().get_matches();
     let source = match matches.value_source("context") {
         Some(ValueSource::EnvVariable) => Selection::Environment,
@@ -118,6 +136,7 @@ async fn main() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(&report, verbose, 1)),
+        Commands::Completion(args) => completion::instructions(args),
         Commands::Update(args) => {
             let app = remora_update::model::App {
                 name: "rmra".into(),

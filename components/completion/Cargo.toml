@@ -1,0 +1,10 @@
+[package]
+name = "remora-completion"
+description = "Dynamic shell completion shared by the CLI transports: the kinds of values worth completing, a provider registry the binary fills, and completers for clap arguments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap_complete.workspace = true

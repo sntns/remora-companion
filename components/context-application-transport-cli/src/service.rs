@@ -40,6 +40,7 @@ pub enum Command {
         /// A PEM certificate authority to trust for this gateway, on top of
         /// the system's; repeatable.
         #[arg(long = "ca-file", value_name = "PEM")]
+        #[arg(value_hint = clap::ValueHint::FilePath)]
         ca_files: Vec<PathBuf>,
         /// Verify the gateway's certificate against this name instead of
         /// the address's host.
@@ -54,15 +55,22 @@ pub enum Command {
     },
 
     /// Show contexts' settings as JSON (default: the selected context).
-    Inspect { names: Vec<String> },
+    Inspect {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
+        names: Vec<String>,
+    },
 
     /// Make a context the current one.
-    Use { name: String },
+    Use {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
+        name: String,
+    },
 
     /// Remove contexts and their stored credentials.
     #[command(visible_alias = "rm")]
     Remove {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]

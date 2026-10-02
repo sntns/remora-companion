@@ -10,6 +10,7 @@ publish.workspace = true
 remora-channel = { path = "../channel" }
 remora-context = { path = "../context" }
 remora-tui = { path = "../tui" }
+remora-completion = { path = "../completion" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

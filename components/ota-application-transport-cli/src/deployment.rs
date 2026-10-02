@@ -24,9 +24,11 @@ pub enum Command {
     List {
         /// Only deployments to this device.
         #[arg(long)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
         device: Option<String>,
         /// Only deployments of this release.
         #[arg(long)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
         release: Option<String>,
         /// Only deployments carrying this label (key=value); repeatable.
         #[arg(long = "label", value_name = "KEY=VALUE")]
@@ -40,6 +42,7 @@ pub enum Command {
 
     /// Show a deployment: its status and the device's latest reports.
     Show {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         name: String,
         #[arg(long, default_value = "table")]
         format: Format,
@@ -48,6 +51,7 @@ pub enum Command {
     /// Start draft deployments, making them visible to their devices.
     Start {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         names: Vec<String>,
         /// Follow them until they finish.
         #[arg(short, long)]
@@ -57,6 +61,7 @@ pub enum Command {
     /// Cancel deployments that are still pending or running.
     Cancel {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         names: Vec<String>,
     },
 
@@ -64,6 +69,7 @@ pub enum Command {
     #[command(visible_alias = "rm")]
     Remove {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
@@ -72,6 +78,7 @@ pub enum Command {
 
     /// Print what the device reported while updating.
     Logs {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         name: String,
         /// Keep printing new reports until the deployment finishes.
         #[arg(short, long)]
@@ -82,6 +89,7 @@ pub enum Command {
     /// succeed. Ctrl-C stops watching, not the deployments.
     Watch {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         names: Vec<String>,
         /// Seconds between polls.
         #[arg(long, default_value_t = 2)]
@@ -93,9 +101,11 @@ pub enum Command {
 #[command(group(clap::ArgGroup::new("targets").required(true).args(["devices", "selector"])))]
 pub struct DeployArgs {
     /// The release to install.
+    #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
     release: String,
     /// A device (serial) to update; repeatable.
     #[arg(long = "device", value_name = "SERIAL")]
+    #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
     devices: Vec<String>,
     /// Every device carrying this label (key=value); repeatable, all must match.
     #[arg(long, value_name = "KEY=VALUE")]

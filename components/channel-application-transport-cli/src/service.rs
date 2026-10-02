@@ -22,6 +22,7 @@ pub enum Command {
     /// written to stdout.
     Open {
         /// The device's name (its serial).
+        #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
         device: String,
         /// What to open: the profile a policy grants, never a host and port.
         #[arg(long, default_value = SSH_PROFILE)]
@@ -43,6 +44,7 @@ pub enum Command {
 #[derive(clap::Args)]
 pub struct SshArgs {
     /// The device's name (its serial).
+    #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
     device: String,
     /// The role to be on the device; each is its own IAM action.
     #[arg(long, value_enum, default_value = "user")]
@@ -57,6 +59,7 @@ pub struct SshArgs {
     ssh_options: Vec<String>,
     /// The ssh client to run.
     #[arg(long = "ssh", default_value = "ssh", value_name = "PATH")]
+    #[arg(value_hint = clap::ValueHint::ExecutablePath)]
     binary: PathBuf,
     /// ssh's own arguments: options (-t, -L ...), then the remote command.
     /// `-v` is rmra's own --verbose; for ssh's, pass it after `--`. -J, -W,
@@ -87,6 +90,7 @@ pub struct ScpArgs {
     ssh_options: Vec<String>,
     /// The scp client to run.
     #[arg(long = "scp", default_value = "scp", value_name = "PATH")]
+    #[arg(value_hint = clap::ValueHint::ExecutablePath)]
     binary: PathBuf,
     /// scp's own arguments: options (-r, -p, -l ...), then the files, the
     /// device side written [user@]DEVICE:path. One device per copy. `-c` and
@@ -100,6 +104,7 @@ pub struct ScpArgs {
         allow_hyphen_values = true,
         value_name = "SCP ARGS"
     )]
+    #[arg(add = remora_completion::scp_operand())]
     arguments: Vec<String>,
 }
 

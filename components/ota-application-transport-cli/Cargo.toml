@@ -11,6 +11,7 @@ remora-ota = { path = "../ota" }
 remora-context = { path = "../context" }
 remora-progress = { path = "../progress" }
 remora-tui = { path = "../tui" }
+remora-completion = { path = "../completion" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

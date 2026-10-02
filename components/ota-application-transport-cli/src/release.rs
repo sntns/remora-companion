@@ -41,6 +41,7 @@ pub enum Command {
         labels: Vec<String>,
         /// A file to upload as an artifact (e.g. a RAUC bundle); repeatable.
         #[arg(long = "artifact", value_name = "PATH")]
+        #[arg(value_hint = clap::ValueHint::FilePath)]
         artifacts: Vec<PathBuf>,
         /// Which devices the --artifact files are for, as a boolean
         /// expression over device tags, e.g. "type:rauc && board:rp5".
@@ -50,6 +51,7 @@ pub enum Command {
 
     /// Show a release and its artifacts.
     Show {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
         name: String,
         #[arg(long, default_value = "table")]
         format: Format,
@@ -58,7 +60,9 @@ pub enum Command {
     /// Upload a file as an artifact of a release. Resumes on its own after
     /// a dropped connection; resume an interrupted run with --resume.
     Upload {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
         release: String,
+        #[arg(value_hint = clap::ValueHint::FilePath)]
         path: PathBuf,
         /// The name update clients see (default: the file's name).
         #[arg(long)]
@@ -76,6 +80,7 @@ pub enum Command {
 
     /// Set or remove a release's labels.
     Label {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
         name: String,
         /// key=value to set; repeatable.
         #[arg(value_name = "KEY=VALUE")]
@@ -89,6 +94,7 @@ pub enum Command {
     #[command(visible_alias = "rm")]
     Remove {
         #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
