@@ -1,0 +1,16 @@
+[package]
+name = "remora-channel-adapter-openssh"
+description = "SshClientAdapter running the operator's OpenSSH client as a child process, relaying signals to it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-channel = { path = "../channel" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio = { workspace = true, features = ["process", "signal"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

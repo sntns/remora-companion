@@ -1,48 +1,73 @@
 [workspace]
 resolver = "2"
 members = [
-    "components/remora-etcher-format",
-    "components/remora-etcher-disk",
-    "components/remora-etcher-disk-application",
-    "components/remora-etcher-disk-adapter-native",
-    "components/remora-etcher-disk-application-transport-cli",
-    "components/remora-etcher-flash",
-    "components/remora-etcher-flash-application",
-    "components/remora-etcher-flash-adapter-bmap",
-    "components/remora-etcher-flash-application-transport-cli",
-    "components/remora-etcher-image",
-    "components/remora-etcher-image-application",
-    "components/remora-etcher-image-adapter-partition-table",
-    "components/remora-etcher-image-adapter-ext4",
-    "components/remora-etcher-image-adapter-vfat",
-    "components/remora-etcher-image-application-transport-cli",
-    "components/remora-etcher-fs-walk",
-    "components/remora-etcher-squashfs",
-    "components/remora-etcher-squashfs-application",
-    "components/remora-etcher-squashfs-adapter-backhand",
-    "components/remora-etcher-squashfs-application-transport-cli",
-    "components/remora-etcher-scratch",
-    "components/remora-etcher-identity",
-    "components/remora-etcher-identity-application",
-    "components/remora-etcher-identity-adapter-keygen",
-    "components/remora-etcher-identity-application-transport-cli",
-    "components/remora-etcher-config",
-    "components/remora-etcher-config-application",
-    "components/remora-etcher-config-application-transport-cli",
-    "components/remora-etcher-convert",
-    "components/remora-etcher-convert-application",
-    "components/remora-etcher-convert-adapter-gzip",
-    "components/remora-etcher-convert-adapter-qcow2",
-    "components/remora-etcher-convert-application-transport-cli",
-    "components/remora-etcher-progress",
-    "components/remora-etcher-batch",
-    "components/remora-etcher-batch-application",
-    "components/remora-etcher-batch-application-transport-cli",
-    "components/remora-etcher-factory",
-    "components/remora-etcher-factory-adapter-gateway",
-    "components/remora-etcher-factory-application",
-    "components/remora-etcher-factory-application-transport-cli",
+    "components/format",
+    "components/disk",
+    "components/disk-application",
+    "components/disk-adapter-native",
+    "components/disk-application-transport-cli",
+    "components/flash",
+    "components/flash-application",
+    "components/flash-adapter-bmap",
+    "components/flash-application-transport-cli",
+    "components/image",
+    "components/image-application",
+    "components/image-adapter-partition-table",
+    "components/image-adapter-ext4",
+    "components/image-adapter-vfat",
+    "components/image-application-transport-cli",
+    "components/fs-walk",
+    "components/squashfs",
+    "components/squashfs-application",
+    "components/squashfs-adapter-backhand",
+    "components/squashfs-application-transport-cli",
+    "components/scratch",
+    "components/identity",
+    "components/identity-application",
+    "components/identity-adapter-keygen",
+    "components/identity-application-transport-cli",
+    "components/config",
+    "components/config-application",
+    "components/config-application-transport-cli",
+    "components/convert",
+    "components/convert-application",
+    "components/convert-adapter-gzip",
+    "components/convert-adapter-qcow2",
+    "components/convert-application-transport-cli",
+    "components/progress",
+    "components/batch",
+    "components/batch-application",
+    "components/batch-application-transport-cli",
+    "components/factory",
+    "components/factory-adapter-gateway",
+    "components/factory-application",
+    "components/factory-application-transport-cli",
+    "components/platform-grpc",
+    "components/tui",
+    "components/context",
+    "components/context-application",
+    "components/context-adapter-file",
+    "components/context-adapter-grpc",
+    "components/context-application-transport-cli",
+    "components/channel",
+    "components/channel-application",
+    "components/channel-adapter-grpc",
+    "components/channel-adapter-openssh",
+    "components/channel-application-transport-cli",
+    "components/ota",
+    "components/ota-application",
+    "components/ota-adapter-grpc",
+    "components/ota-application-transport-cli",
+    "components/device",
+    "components/device-application",
+    "components/device-adapter-grpc",
+    "components/device-application-transport-cli",
+    "components/update",
+    "components/update-application",
+    "components/update-adapter-github",
+    "components/update-application-transport-cli",
     "containers/remora-etcher",
+    "containers/rmra",
 ]
 
 [workspace.package]
@@ -50,6 +75,11 @@ version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
+# The public releases repo, not this private source repo: dist derives every
+# download URL (installers, Homebrew formulas, `rmra update`) from this
+# field, and those must be reachable without access to the sources.
+repository = "https://github.com/sntns/remora-companion-releases"
+homepage = "https://github.com/sntns/remora-companion-releases"
 
 # Drives `cargo release` (see .github/workflows/cut-release.yml): every
 # crate inherits `version.workspace = true`, so bumping this one field
@@ -68,6 +98,11 @@ tag-message = "v{{version}}"
 [profile.release]
 lto = true
 
+# What dist builds releases with (dist-workspace.toml).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 # Shared across every components/*-application and containers/* crate, so the
 # DI convention (port + newtype wrapper, manual composition root) and error
 # convention (thiserror leaf + error-stack context at boundaries) stay
@@ -79,7 +114,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 clap = { version = "4.5", features = ["derive", "cargo", "env"] }
 
-# Async port traits (see remora-etcher-progress and the async-trait
+# Async port traits (see remora-progress and the async-trait
 # convention in CLAUDE.md) -- matches remora-edge's own choice, needed
 # because every *ServiceInterface is used as a `Box<dyn ...>` through
 # busybody, so native async-fn-in-trait (not dyn-safe) doesn't apply.
@@ -89,7 +124,7 @@ tokio-util = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# remora-etcher-factory-adapter-gateway: the one adapter in this workspace
+# remora-factory-adapter-gateway: the one adapter in this workspace
 # that's a real network call (a factory-device credential request against
 # sntns-platform's gateway) rather than blocking local file I/O -- see its
 # own doc comment for why it's async-native instead of sync-wrapped like
@@ -107,6 +142,26 @@ rcgen = "0.14"
 # PKCS8->SEC1 format conversion of a key rcgen already generated.
 p256 = { version = "0.14", features = ["pkcs8", "std"] }
 pem = "4.0"
+
+# rmra's gRPC client to sntns-platform's public gateways (remora channel,
+# iam). The .proto files are vendored under components/platform-grpc/proto
+# and compiled with protox, a pure-Rust protobuf compiler, so no protoc is
+# needed on any CI runner (Windows/macOS included).
+tonic = { version = "0.14", default-features = false, features = ["codegen", "transport", "tls-ring", "tls-native-roots", "tls-webpki-roots"] }
+tonic-prost = "0.14"
+prost-types = "0.14"
+prost = "0.14"
+tonic-prost-build = "0.14"
+protox = "0.9"
+# rmra's terminal output: clack-style prompts/spinners/log lines (all on
+# stderr, which keeps stdout clean for `channel open`'s tunnel) and tables.
+cliclack = "0.5"
+console = "0.16"
+comfy-table = "7"
+# rmra ssh: a throwaway ed25519 key, certified by the platform per session.
+ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+tempfile = "3"
 
 # am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
 # aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes

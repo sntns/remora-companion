@@ -1,0 +1,12 @@
+[package]
+name = "remora-flash-adapter-bmap"
+description = "Concrete BmapAdapter: wraps bmap-parser's checksum-verified sparse copy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-flash = { path = "../flash" }
+error-stack.workspace = true
+bmap-parser = "0.2"

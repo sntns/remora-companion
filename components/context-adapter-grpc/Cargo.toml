@@ -1,0 +1,19 @@
+[package]
+name = "remora-context-adapter-grpc"
+description = "PlatformSessionAdapter over sntns-platform's IAM gateway (GetCurrentUser/GetCurrentAccount)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+remora-platform-grpc = { path = "../platform-grpc" }
+async-trait.workspace = true
+error-stack.workspace = true
+tonic.workspace = true
+
+[dev-dependencies]
+tonic = { workspace = true, features = ["server", "router"] }
+tokio = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["net"] }

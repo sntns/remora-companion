@@ -1,0 +1,15 @@
+[package]
+name = "remora-factory-adapter-gateway"
+description = "FactoryProvisioningAdapter implementation calling sntns-platform's gateway (POST /remora/v1/factory-device)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-factory = { path = "../factory" }
+async-trait.workspace = true
+error-stack.workspace = true
+serde.workspace = true
+reqwest.workspace = true
+base64.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "remora-convert-application-transport-cli"
+description = "clap subcommands exposing the convert application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-convert = { path = "../convert" }
+remora-progress = { path = "../progress" }
+clap.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true

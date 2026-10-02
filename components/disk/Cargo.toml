@@ -1,0 +1,13 @@
+[package]
+name = "remora-disk"
+description = "Domain crate for the disk vertical: DiskInfo model, disk enumeration port, and the disk application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

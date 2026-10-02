@@ -1,0 +1,15 @@
+[package]
+name = "remora-ota"
+description = "Domain crate for the ota vertical: over-the-air updates managed from sntns-platform -- releases and their artifacts, deployments of a release to devices and their progress -- the gateway port and the ota application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+remora-progress = { path = "../progress" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "remora-config-application"
+description = "Use-case implementation for the config vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-config = { path = "../config" }
+remora-squashfs = { path = "../squashfs" }
+remora-image = { path = "../image" }
+remora-fs-walk = { path = "../fs-walk" }
+remora-scratch = { path = "../scratch" }
+error-stack.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Real (not mocked) adapters, for an integration-style test of the use case
+# end to end — same posture as the other application crates' tests.
+remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
+remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
+remora-image-adapter-partition-table = { path = "../image-adapter-partition-table" }
+remora-image-application = { path = "../image-application" }
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,0 +1,12 @@
+[package]
+name = "remora-image-adapter-ext4"
+description = "Concrete Ext4Adapter (and PartitionFilesystem impl): wraps am-fs-ext4"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-image = { path = "../image" }
+error-stack.workspace = true
+am-fs-ext4 = "0.4"

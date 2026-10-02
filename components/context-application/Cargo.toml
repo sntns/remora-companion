@@ -1,0 +1,17 @@
+[package]
+name = "remora-context-application"
+description = "Context use case: docker-context-style endpoint selection, login (verified with the platform first) and logout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+async-trait.workspace = true
+error-stack.workspace = true
+
+[dev-dependencies]
+remora-context-adapter-file = { path = "../context-adapter-file" }
+tempfile.workspace = true
+tokio.workspace = true

@@ -1,0 +1,268 @@
+use std::io::Read;
+
+use error_stack::{Report, ResultExt};
+use remora_context::{
+    application::ContextService,
+    model::{Context, ContextOverride, Credentials, Endpoint, Principal, Secret, Tls},
+};
+use remora_tui as tui;
+
+use crate::{
+    error::{context_error, prompt_error, Error, Result},
+    service::{describe_selection, DEFAULT_ADDRESS},
+};
+
+#[derive(clap::Args)]
+pub struct LoginArgs {
+    /// Log in with a login profile: the user's URN. The password is asked
+    /// for, or read with --password-stdin.
+    #[arg(long, conflicts_with = "token_stdin")]
+    identity: Option<String>,
+    /// Read the login profile's password from stdin.
+    #[arg(long, requires = "identity")]
+    password_stdin: bool,
+    /// Log in with an access key, reading its token from stdin.
+    #[arg(long)]
+    token_stdin: bool,
+    /// Assume this IAM role on every call.
+    #[arg(long)]
+    assume_role: Option<String>,
+}
+
+#[derive(clap::Args)]
+pub struct LogoutArgs {}
+
+#[derive(clap::Args)]
+pub struct WhoamiArgs {}
+
+/// `rmra login`: verify credentials with the selected context's platform,
+/// then store them. With no flags it is a guided prompt -- including, on a
+/// first run, creating the context to log in to.
+pub async fn run_login(
+    args: LoginArgs,
+    service: &ContextService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
+    let interactive = args.identity.is_none() && !args.token_stdin;
+    if interactive && !tui::interactive() {
+        return Err(Report::new(Error::Usage(
+            "not a terminal: pass --token-stdin, or --identity with --password-stdin".into(),
+        )));
+    }
+    if interactive {
+        tui::intro("rmra login");
+    }
+
+    let name = match service.selected(over).await.map_err(context_error)? {
+        Some((name, selection)) => {
+            let context = service.inspect(&name).await.map_err(context_error)?.context;
+            tui::step(format!(
+                "Context {} {}",
+                tui::accent(&name),
+                tui::dim(format!(
+                    "{} · {}",
+                    context.endpoint.address,
+                    describe_selection(selection)
+                ))
+            ));
+            name
+        }
+        None if interactive => first_context(service).await?,
+        None => {
+            return Err(Report::new(Error::Context(
+                remora_context::application::Error::NoContext.to_string(),
+            )))
+        }
+    };
+    // From here on, address the context by name: a first-run context was
+    // just created, and an override already named it.
+    let target = ContextOverride {
+        name: name.clone(),
+        source: over.map_or(remora_context::model::Selection::Current, |o| o.source),
+    };
+
+    let secret = if let Some(identity) = args.identity {
+        let password = if args.password_stdin {
+            read_stdin()?
+        } else {
+            prompt_password("Password")?
+        };
+        Secret::LoginProfile { identity, password }
+    } else if args.token_stdin {
+        Secret::AccessKey {
+            token: read_stdin()?,
+        }
+    } else {
+        prompt_secret()?
+    };
+    let credentials = Credentials {
+        secret,
+        assume_role: args.assume_role,
+    };
+
+    let spinner = tui::Spinner::start("Verifying with the platform");
+    match service.login(Some(&target), credentials).await {
+        Ok((name, principal)) => {
+            spinner.done(format!("Logged in as {}", describe_principal(&principal)));
+            if interactive {
+                tui::outro(format!(
+                    "Credentials stored for context {}",
+                    tui::accent(&name)
+                ));
+            }
+            Ok(())
+        }
+        Err(report) => {
+            spinner.fail("The platform did not accept these credentials");
+            Err(context_error(report))
+        }
+    }
+}
+
+pub async fn run_logout(
+    _args: LogoutArgs,
+    service: &ContextService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
+    let (name, removed) = service.logout(over).await.map_err(context_error)?;
+    if removed {
+        tui::success(format!("Logged out of {}", tui::accent(&name)));
+    } else {
+        tui::info(format!("Not logged in to {}", tui::accent(&name)));
+    }
+    Ok(())
+}
+
+pub async fn run_whoami(
+    _args: WhoamiArgs,
+    service: &ContextService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
+    let spinner = tui::Spinner::start("Asking the platform");
+    let (resolved, principal) = match service.whoami(over).await {
+        Ok(found) => found,
+        Err(report) => {
+            spinner.fail("Could not identify the current login");
+            return Err(context_error(report));
+        }
+    };
+    spinner.done(describe_principal(&principal));
+    let mut body = format!(
+        "context   {} ({})\ngateway   {}\nlogin     {}\nuser      {}",
+        resolved.context.name,
+        describe_selection(resolved.selection),
+        resolved.context.endpoint.address,
+        resolved.credentials.kind(),
+        principal.user_urn,
+    );
+    if let Some(role) = &resolved.credentials.assume_role {
+        body.push_str(&format!("\nrole      {role}"));
+    }
+    tui::note("Session", body);
+    Ok(())
+}
+
+/// The first-run path of `rmra login`: no context exists, so create one.
+async fn first_context(service: &ContextService) -> Result<String> {
+    tui::info("No context yet — let's create one.");
+    let name: String = tui::input("Context name")
+        .default_input("eu2")
+        .interact()
+        .map_err(prompt_error)?;
+    let address: String = tui::input("Gateway address")
+        .default_input(DEFAULT_ADDRESS)
+        .interact()
+        .map_err(prompt_error)?;
+    service
+        .create(
+            Context {
+                name: name.clone(),
+                description: None,
+                endpoint: Endpoint {
+                    address,
+                    tls: Tls::default(),
+                },
+            },
+            false,
+        )
+        .await
+        .map_err(context_error)?;
+    service.use_context(&name).await.map_err(context_error)?;
+    tui::success(format!("Created context {}", tui::accent(&name)));
+    Ok(name)
+}
+
+fn prompt_secret() -> Result<Secret> {
+    #[derive(Clone, PartialEq, Eq)]
+    enum Method {
+        AccessKey,
+        LoginProfile,
+    }
+    let method = tui::select("How do you want to log in?")
+        .item(
+            Method::AccessKey,
+            "Access key",
+            "a token, for automation or an operator key",
+        )
+        .item(
+            Method::LoginProfile,
+            "Login profile",
+            "your user URN and password",
+        )
+        .interact()
+        .map_err(prompt_error)?;
+    Ok(match method {
+        Method::AccessKey => Secret::AccessKey {
+            token: prompt_password("Access key token")?,
+        },
+        Method::LoginProfile => {
+            let identity: String = tui::input("User URN")
+                .placeholder("urn:sntns:iam:…:user:…")
+                .interact()
+                .map_err(prompt_error)?;
+            Secret::LoginProfile {
+                identity,
+                password: prompt_password("Password")?,
+            }
+        }
+    })
+}
+
+fn prompt_password(prompt: &str) -> Result<String> {
+    if !tui::interactive() {
+        return Err(Report::new(Error::Usage(format!(
+            "not a terminal: cannot ask for the {}",
+            prompt.to_lowercase()
+        ))));
+    }
+    tui::password(prompt)
+        .mask('•')
+        .interact()
+        .map_err(prompt_error)
+}
+
+/// One secret from stdin, `docker login --password-stdin` style: the whole
+/// input, minus the trailing newline an `echo` or a file adds.
+fn read_stdin() -> Result<String> {
+    let mut secret = String::new();
+    std::io::stdin()
+        .read_to_string(&mut secret)
+        .change_context(Error::Stdin)?;
+    let secret = secret.trim_end_matches(['\r', '\n']).to_owned();
+    if secret.is_empty() {
+        return Err(Report::new(Error::Usage("stdin was empty".into())));
+    }
+    Ok(secret)
+}
+
+fn describe_principal(principal: &Principal) -> String {
+    let user = if principal.user_name.is_empty() {
+        principal.user_urn.clone()
+    } else {
+        principal.user_name.clone()
+    };
+    match &principal.account_name {
+        Some(account) => format!("{} {}", tui::accent(user), tui::dim(format!("@ {account}"))),
+        None => tui::accent(user),
+    }
+}

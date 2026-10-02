@@ -1,0 +1,22 @@
+[package]
+name = "remora-channel-adapter-grpc"
+description = "ChannelGatewayAdapter over sntns-platform's remora-channel gateway: the OpenDeviceChannel bidi stream and SignDeviceSshCertificate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-channel = { path = "../channel" }
+remora-context = { path = "../context" }
+remora-platform-grpc = { path = "../platform-grpc" }
+async-trait.workspace = true
+error-stack.workspace = true
+tonic.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+
+[dev-dependencies]
+tonic = { workspace = true, features = ["server", "router"] }
+tokio = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["net"] }

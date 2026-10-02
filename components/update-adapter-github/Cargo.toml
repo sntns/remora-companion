@@ -1,0 +1,20 @@
+[package]
+name = "remora-update-adapter-github"
+description = "Release feed and installer adapters over GitHub Releases: the latest release of a public releases repo, and dist's own installers to install it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-update = { path = "../update" }
+async-trait.workspace = true
+error-stack.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["process", "fs"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "io-util"] }

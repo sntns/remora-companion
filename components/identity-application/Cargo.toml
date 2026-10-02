@@ -1,0 +1,30 @@
+[package]
+name = "remora-identity-application"
+description = "Use-case implementation for the identity vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-identity = { path = "../identity" }
+remora-squashfs = { path = "../squashfs" }
+remora-image = { path = "../image" }
+remora-scratch = { path = "../scratch" }
+remora-progress = { path = "../progress" }
+error-stack.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Real (not mocked) adapters, for an integration-style test of the use case
+# end to end — same posture as remora-squashfs-application's test.
+remora-identity-adapter-keygen = { path = "../identity-adapter-keygen" }
+remora-squashfs-application = { path = "../squashfs-application" }
+remora-squashfs-adapter-backhand = { path = "../squashfs-adapter-backhand" }
+remora-fs-walk = { path = "../fs-walk" }
+remora-image-application = { path = "../image-application" }
+remora-image-adapter-partition-table = { path = "../image-adapter-partition-table" }
+remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
+remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
+ssh-key = { version = "0.6", features = ["ed25519", "rand_core", "getrandom"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

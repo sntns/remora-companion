@@ -2,14 +2,14 @@
 
 ## Reporting a vulnerability
 
-If you believe you've found a security vulnerability in remora-etcher
+If you believe you've found a security vulnerability in remora-companion (remora-etcher or rmra)
 (for example, something that could let a crafted image or disk lead to
 memory corruption, arbitrary write outside the intended target, or
 privilege escalation during flashing/provisioning), please **do not**
 open a public GitHub issue.
 
 Instead, report it privately using
-[GitHub's private vulnerability reporting](https://github.com/sntns/remora-etcher/security/advisories/new)
+[GitHub's private vulnerability reporting](https://github.com/sntns/remora-companion/security/advisories/new)
 for this repository, or email **security@sentiens.fr** with:
 
 - A description of the issue and its potential impact.

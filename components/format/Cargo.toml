@@ -1,0 +1,9 @@
+[package]
+name = "remora-format"
+description = "Shared human-readable formatting helpers for remora-etcher's CLI transports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

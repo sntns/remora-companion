@@ -1,0 +1,19 @@
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("failed to reach the gateway")]
+    Unreachable,
+    #[error("the platform refused these credentials")]
+    Unauthenticated,
+    #[error("not allowed")]
+    PermissionDenied,
+    #[error("device not found")]
+    NotFound,
+    #[error("the device is not connected to the platform")]
+    NotConnected,
+    #[error("the gateway answered something this client does not understand")]
+    Protocol,
+    #[error("the channel failed")]
+    Channel,
+}
+
+pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

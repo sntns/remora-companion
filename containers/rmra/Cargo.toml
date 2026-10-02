@@ -1,0 +1,74 @@
+[package]
+name = "rmra"
+description = "Remora operator CLI: log in to sntns-platform and reach your devices through the remora channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "rmra"
+path = "src/main.rs"
+
+[dependencies]
+remora-context = { path = "../../components/context" }
+remora-context-application = { path = "../../components/context-application" }
+remora-context-adapter-file = { path = "../../components/context-adapter-file" }
+remora-context-adapter-grpc = { path = "../../components/context-adapter-grpc" }
+remora-context-application-transport-cli = { path = "../../components/context-application-transport-cli" }
+remora-channel = { path = "../../components/channel" }
+remora-channel-application = { path = "../../components/channel-application" }
+remora-channel-adapter-grpc = { path = "../../components/channel-adapter-grpc" }
+remora-channel-adapter-openssh = { path = "../../components/channel-adapter-openssh" }
+remora-channel-application-transport-cli = { path = "../../components/channel-application-transport-cli" }
+remora-ota = { path = "../../components/ota" }
+remora-ota-application = { path = "../../components/ota-application" }
+remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc" }
+remora-ota-application-transport-cli = { path = "../../components/ota-application-transport-cli" }
+remora-device = { path = "../../components/device" }
+remora-device-application = { path = "../../components/device-application" }
+remora-device-adapter-grpc = { path = "../../components/device-adapter-grpc" }
+remora-device-application-transport-cli = { path = "../../components/device-application-transport-cli" }
+remora-update = { path = "../../components/update" }
+remora-update-application = { path = "../../components/update-application" }
+remora-update-adapter-github = { path = "../../components/update-adapter-github" }
+remora-update-application-transport-cli = { path = "../../components/update-application-transport-cli" }
+remora-tui = { path = "../../components/tui" }
+busybody.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+clap.workspace = true
+
+# Shipped by dist (dist-workspace.toml), although the workspace is
+# publish = false (that only means "not on crates.io").
+[package.metadata.dist]
+dist = true
+
+[package.metadata.deb]
+maintainer = "Lionel Molinier <lionel.molinier@sentiens.fr>"
+copyright = "2026, Sentiens SAS <copyright@sentiens.fr>"
+license-file = ["../../LICENSE", "4"]
+extended-description = """\
+rmra is the Remora operator CLI. It logs in to sntns-platform, keeps \
+docker-context-style named endpoints, and opens remora channels to \
+devices -- notably ssh, with a throwaway key the platform certifies for \
+each session -- and manages over-the-air updates: releases, their \
+artifacts, and deployments to devices, followed live."""
+depends = "$auto, openssh-client"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/rmra", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/rmra/README", "644"],
+]
+
+[dev-dependencies]
+remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc", features = ["test-gateway"] }
+remora-platform-grpc = { path = "../../components/platform-grpc" }
+tonic = { workspace = true, features = ["server", "router"] }
+tokio = { workspace = true, features = ["net", "process", "io-util"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tempfile.workspace = true
+serde_json.workspace = true

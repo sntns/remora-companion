@@ -1,0 +1,23 @@
+[package]
+name = "remora-ota-application"
+description = "OTA use case: publish releases (resumable artifact uploads), deploy them to devices by name or label selector, follow deployments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-ota = { path = "../ota" }
+remora-context = { path = "../context" }
+remora-progress = { path = "../progress" }
+async-trait.workspace = true
+error-stack.workspace = true
+rand_core.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+
+[dev-dependencies]
+remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+tempfile.workspace = true
+tokio-util.workspace = true

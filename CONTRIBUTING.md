@@ -1,4 +1,4 @@
-# Contributing to remora-etcher
+# Contributing to remora-companion
 
 Thanks for considering a contribution. This project is developed
 DDD-style, one Cargo workspace with one `components/<vertical>` set of
@@ -29,7 +29,7 @@ these fail.
 
 Some integration tests shell out to real dev-only tools (`sgdisk`/`sfdisk`/
 `mke2fs`/`mkfs.vfat`/`fsck.*`/`unsquashfs`/`qemu-img`/a `bmaptool`-derived
-fixture) rather than mocking them — see [CLAUDE.md](CLAUDE.md#testing).
+fixture, and `sshd`/`ssh-keygen` for rmra) rather than mocking them — see [CLAUDE.md](CLAUDE.md#testing).
 Make sure the relevant tool is installed if a test in the crate you're
 touching needs it.
 
