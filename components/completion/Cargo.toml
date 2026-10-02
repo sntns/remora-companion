@@ -1,10 +1,12 @@
 [package]
 name = "remora-completion"
-description = "Dynamic shell completion shared by the CLI transports: the kinds of values worth completing, a provider registry the binary fills, and completers for clap arguments"
+description = "Dynamic shell completion shared by the CLI transports: the kinds of values worth completing, a provider registry the binary fills, completers for clap arguments, and the `completion` command printing how to enable it"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+remora-tui = { path = "../tui" }
+clap.workspace = true
 clap_complete.workspace = true

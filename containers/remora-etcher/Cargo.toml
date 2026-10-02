@@ -52,6 +52,15 @@ remora-factory = { path = "../../components/factory" }
 remora-factory-adapter-gateway = { path = "../../components/factory-adapter-gateway" }
 remora-factory-application = { path = "../../components/factory-application" }
 remora-factory-application-transport-cli = { path = "../../components/factory-application-transport-cli" }
+remora-update = { path = "../../components/update" }
+remora-update-application = { path = "../../components/update-application" }
+remora-update-adapter-github = { path = "../../components/update-adapter-github" }
+remora-update-application-transport-cli = { path = "../../components/update-application-transport-cli" }
+remora-tui = { path = "../../components/tui" }
+remora-format = { path = "../../components/format" }
+remora-completion = { path = "../../components/completion" }
+clap_complete.workspace = true
+error-stack.workspace = true
 busybody.workspace = true
 tokio.workspace = true
 clap.workspace = true

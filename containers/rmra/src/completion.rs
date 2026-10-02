@@ -31,6 +31,8 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
         let over = context_on_command_line();
         match kind {
             Kind::Context => contexts(&services).await,
+            // No rmra argument takes a local disk.
+            Kind::Disk => Vec::new(),
             remote => remote_values(&services, over.as_ref(), remote).await,
         }
     })
@@ -80,7 +82,7 @@ async fn fetch(
     kind: Kind,
 ) -> Option<Vec<Candidate>> {
     Some(match kind {
-        Kind::Context => return None,
+        Kind::Context | Kind::Disk => return None,
         Kind::Device => services
             .device
             .list(over, &Default::default(), false)
@@ -181,60 +183,4 @@ fn write_cache(path: &PathBuf, values: &[Candidate]) {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(path, text);
-}
-
-/// Shells `rmra completion` can set up.
-#[derive(Clone, Copy, clap::ValueEnum)]
-pub enum Shell {
-    Bash,
-    Zsh,
-    Fish,
-    Elvish,
-    Powershell,
-}
-
-#[derive(clap::Args)]
-pub struct CompletionArgs {
-    /// The shell to set up (default: from $SHELL).
-    #[arg(value_enum)]
-    shell: Option<Shell>,
-}
-
-/// `rmra completion`: says how to enable completion. Generated on shell
-/// start rather than written to a file, so it always matches the installed
-/// rmra (clap_complete's own advice, its protocol being unstable).
-pub fn instructions(args: CompletionArgs) -> i32 {
-    let shell = args.shell.or_else(|| {
-        let shell = std::env::var("SHELL").unwrap_or_default();
-        let name = shell.rsplit('/').next().unwrap_or_default();
-        match name {
-            "bash" => Some(Shell::Bash),
-            "zsh" => Some(Shell::Zsh),
-            "fish" => Some(Shell::Fish),
-            "elvish" => Some(Shell::Elvish),
-            _ if cfg!(windows) => Some(Shell::Powershell),
-            _ => None,
-        }
-    });
-    let Some(shell) = shell else {
-        remora_tui::warning("Can't tell your shell: pass it, e.g. `rmra completion zsh`");
-        return 1;
-    };
-    let (file, line) = match shell {
-        Shell::Bash => ("~/.bashrc", "source <(COMPLETE=bash rmra)"),
-        Shell::Zsh => ("~/.zshrc", "source <(COMPLETE=zsh rmra)"),
-        Shell::Fish => ("~/.config/fish/config.fish", "COMPLETE=fish rmra | source"),
-        Shell::Elvish => ("~/.config/elvish/rc.elv", "eval (E:COMPLETE=elvish rmra | slurp)"),
-        Shell::Powershell => (
-            "$PROFILE",
-            "$env:COMPLETE = \"powershell\"; rmra | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE",
-        ),
-    };
-    remora_tui::note(format!("Enable completion: add this line to {file}"), line);
-    remora_tui::step(
-        "Then open a new shell. Contexts, devices, releases and deployments complete with Tab.",
-    );
-    // The line itself on stdout, for `rmra completion zsh >> ~/.zshrc`.
-    println!("{line}");
-    0
 }

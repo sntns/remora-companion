@@ -29,17 +29,17 @@ pub async fn run(command: Command, service: &BatchService) -> Result<()> {
             let step_count = steps.len();
 
             let (sink, stream) = remora_progress::channel();
-            let printer = remora_progress::print_to_stderr(stream);
+            let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
             let result = service.run(steps, &ctx).await;
             drop(ctx);
-            let _ = printer.await;
+            follow.finish(&result).await;
             result.change_context(Error::Batch)?;
 
-            println!(
-                "batch recipe {} completed ({step_count} step(s))",
-                recipe.display()
-            );
+            remora_tui::success(format!(
+                "Ran {} ({step_count} step(s))",
+                remora_tui::accent(recipe.display())
+            ));
             Ok(())
         }
     }

@@ -44,9 +44,10 @@ put the binary in `~/.local/bin` (`RMRA_INSTALL_DIR=/path` to choose) and
 add it to your PATH. Linux binaries are static (musl): one binary for any
 distribution.
 
-`rmra update` installs the latest release over the running one, the way it
-was installed (`rmra update --check` only tells); a Homebrew install is
-updated with `brew upgrade sntns/tap/rmra` instead.
+`rmra update` (or `remora-etcher update`) installs the latest release over
+the running one, the way it was installed (`--check` only tells); a Homebrew
+install is updated with `brew upgrade sntns/tap/rmra` (or
+`sntns/tap/remora-etcher`) instead.
 
 ## rmra
 
@@ -182,6 +183,17 @@ takes `--format json` for scripts.
 
 ## remora-etcher
 
+### Shell completion
+
+```
+remora-etcher completion   # shows the line to add for your shell, e.g. for zsh:
+echo 'source <(COMPLETE=zsh remora-etcher)' >> ~/.zshrc
+```
+
+Same shells and mechanism as rmra's. Beyond commands, options and paths,
+Tab completes disks (`remora-etcher flash --device <Tab>`, `disk info
+<Tab>`), removable ones first, never the system disk.
+
 ### Flash an image to a USB stick or SD card
 
 ```
@@ -192,7 +204,8 @@ Sparse-aware and checksum-verified whenever a `.bmap` file sits next to the
 image (auto-discovered as `<image>.bmap`, same convention as `bmaptool`;
 skip it with `--no-bmap`). Refuses to overwrite what looks like the system
 disk, refuses a non-removable disk unless you pass `--force`, and makes you
-type the device path back to confirm — unless `--yes`, for scripted use.
+type the device path back to confirm — unless `--yes`, which a run with
+nobody at the terminal (a script, CI) needs.
 
 ### List and inspect disks
 

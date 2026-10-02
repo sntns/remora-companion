@@ -31,6 +31,12 @@ use remora_image_application::ImageControllerImpl;
 use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
 use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
 use remora_squashfs_application::SquashfsControllerImpl;
+use remora_update::{
+    adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},
+    application::UpdateService,
+};
+use remora_update_adapter_github::{DistInstallerImpl, GithubReleaseFeedImpl, RELEASES_REPO};
+use remora_update_application::UpdateControllerImpl;
 
 /// Every service the CLI can dispatch into, wired once at startup. All
 /// fields deref all the way down to `dyn ...ServiceInterface` (`DiskService`
@@ -46,6 +52,7 @@ pub struct Services {
     pub convert: ConvertService,
     pub batch: BatchService,
     pub factory: FactoryService,
+    pub update: UpdateService,
 }
 
 /// The composition root: construct each adapter, register it, pull it back
@@ -239,6 +246,12 @@ pub async fn wire() -> Services {
         factory.clone(),
     ));
 
+    // Same releases repo and installers as rmra's own `update`.
+    let update = UpdateService::new(UpdateControllerImpl::new(
+        ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(RELEASES_REPO)),
+        InstallerAdapterService::new(DistInstallerImpl::new(RELEASES_REPO)),
+    ));
+
     Services {
         disk,
         flash,
@@ -249,5 +262,6 @@ pub async fn wire() -> Services {
         convert,
         batch,
         factory,
+        update,
     }
 }
