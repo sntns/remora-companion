@@ -7,7 +7,7 @@ assignees: ""
 ---
 
 **What problem does this solve?**
-What are you trying to do that remora-etcher doesn't support today?
+What are you trying to do that remora-etcher or rmra don't support today?
 
 **Proposed solution**
 What you'd like to see (a new subcommand, a new adapter for an existing

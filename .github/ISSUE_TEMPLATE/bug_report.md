@@ -12,7 +12,7 @@ A clear description of what went wrong.
 **Command run**
 
 ```
-remora-etcher ...
+remora-etcher ...   # or: rmra ...
 ```
 
 **Full output**
@@ -29,7 +29,7 @@ What you expected to happen instead.
 
 **Environment**
 - OS/architecture:
-- `remora-etcher --version` (or commit hash if built from source):
+- `remora-etcher --version` or `rmra --version` (or commit hash if built from source):
 - Install method (release binary / `.deb` / built from source):
 
 **Image/disk context (if relevant)**

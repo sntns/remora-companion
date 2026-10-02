@@ -1,4 +1,4 @@
-# Contributing to remora-etcher
+# Contributing to remora-companion
 
 Thanks for considering a contribution. This project is developed
 DDD-style, one Cargo workspace with one `components/<vertical>` set of
