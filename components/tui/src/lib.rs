@@ -19,7 +19,7 @@ mod time;
 
 pub use operation::{follow, Follow, Phase};
 pub use progress::{Progress, Watch, WatchLine};
-pub use report::render_report;
+pub use report::{one_line, render_report};
 pub use spinner::Spinner;
 pub use table::Table;
 pub use time::{ago, timestamp};

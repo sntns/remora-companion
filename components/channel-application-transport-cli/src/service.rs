@@ -138,26 +138,47 @@ pub async fn run(
             profile,
             quiet,
         } => {
-            let channel = service
-                .open(over, &device, &profile)
-                .await
-                .map_err(channel_error)?;
-            if channel.opened.kind == ChannelKind::Datagram {
-                return Err(Report::new(Error::Datagram(profile)));
+            let opened = open(service, over, &device, &profile, quiet).await;
+            match opened {
+                Ok(()) => Ok(0),
+                // As a ProxyCommand, this process shares the terminal with
+                // ssh, which has put it in raw mode: decorated multi-line
+                // output would stair-step across the screen. One plain line,
+                // with explicit carriage returns, reads right either way.
+                Err(report) if quiet => {
+                    eprint!("\r\nrmra: {}\r\n", tui::one_line(&report, verbose));
+                    Ok(255)
+                }
+                Err(report) => Err(report),
             }
-            if !quiet {
-                tui::success(format!(
-                    "Channel open to {} {}",
-                    tui::accent(&device),
-                    tui::dim(&channel.opened.device_urn)
-                ));
-            }
-            relay::stdio(channel).await?;
-            Ok(0)
         }
         Command::Ssh(args) => run_ssh(args, service, over, verbose).await,
         Command::Scp(args) => run_scp(args, service, over, verbose).await,
     }
+}
+
+async fn open(
+    service: &ChannelService,
+    over: Option<&ContextOverride>,
+    device: &str,
+    profile: &str,
+    quiet: bool,
+) -> Result<()> {
+    let channel = service
+        .open(over, device, profile)
+        .await
+        .map_err(channel_error)?;
+    if channel.opened.kind == ChannelKind::Datagram {
+        return Err(Report::new(Error::Datagram(profile.to_owned())));
+    }
+    if !quiet {
+        tui::success(format!(
+            "Channel open to {} {}",
+            tui::accent(device),
+            tui::dim(&channel.opened.device_urn)
+        ));
+    }
+    relay::stdio(channel, device).await
 }
 
 /// `rmra ssh`: certify a throwaway key, then hand the terminal to ssh with
