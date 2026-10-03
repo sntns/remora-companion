@@ -1,6 +1,7 @@
 use super::error::Result;
 use crate::model::{
-    Context, ContextOverride, ContextSummary, Credentials, Principal, ResolvedContext, Selection,
+    AssumedRole, Context, ContextOverride, ContextSummary, Credentials, Principal, ResolvedContext,
+    RoleSummary, Selection,
 };
 
 /// The context vertical's application-facing port: docker-context-style
@@ -37,8 +38,30 @@ pub trait ContextServiceInterface: Send + Sync {
     /// Forgets the selected context's credentials; returns the context's
     /// name and whether it was logged in at all.
     async fn logout(&self, over: Option<&ContextOverride>) -> Result<(String, bool)>;
-    /// Whom the selected context's stored credentials authenticate as.
-    async fn whoami(&self, over: Option<&ContextOverride>) -> Result<(ResolvedContext, Principal)>;
+    /// Whom the selected context's stored credentials authenticate as, and,
+    /// when a role is assumed, the account acting as it lands in (`None`
+    /// inside when the role may not read its account).
+    async fn whoami(
+        &self,
+        over: Option<&ContextOverride>,
+    ) -> Result<(ResolvedContext, Principal, Option<Option<String>>)>;
+
+    /// The selected context's name and its roles, sorted by alias.
+    async fn roles(&self, over: Option<&ContextOverride>) -> Result<(String, Vec<RoleSummary>)>;
+    /// Remembers `urn` under `alias` in the selected context.
+    async fn add_role(&self, over: Option<&ContextOverride>, alias: &str, urn: &str) -> Result<()>;
+    /// Forgets a role alias (and stops assuming it if it was).
+    async fn remove_role(&self, over: Option<&ContextOverride>, alias: &str) -> Result<()>;
+    /// Assumes `role` (an alias, or a role URN) for every later call of the
+    /// selected context, once the platform has confirmed it may be; returns
+    /// it with the account it acts in.
+    async fn assume_role(
+        &self,
+        over: Option<&ContextOverride>,
+        role: &str,
+    ) -> Result<(String, AssumedRole, Option<String>)>;
+    /// Stops assuming a role; returns the context and the role dropped.
+    async fn drop_role(&self, over: Option<&ContextOverride>) -> Result<(String, Option<String>)>;
 }
 
 #[derive(Clone)]

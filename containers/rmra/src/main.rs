@@ -2,7 +2,7 @@ mod bootstrap;
 mod completion;
 
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser};
-use remora_context::model::{ContextOverride, Selection};
+use remora_context::model::{ContextOverride, RoleOverride, Selection};
 
 #[derive(Parser)]
 #[command(
@@ -20,6 +20,18 @@ struct Options {
     #[arg(short = 'c', long, global = true, env = "RMRA_CONTEXT")]
     #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
     context: Option<String>,
+
+    /// Act as this IAM role for this command, overriding `rmra role
+    /// assume`: a role alias (`rmra role ls`) or a role URN, possibly of
+    /// another tenant.
+    #[arg(long, global = true, env = "RMRA_ASSUME_ROLE", value_name = "ROLE")]
+    #[arg(add = remora_completion::values(remora_completion::Kind::Role))]
+    assume_role: Option<String>,
+
+    /// Act as the login itself for this command, even if the context
+    /// assumes a role.
+    #[arg(long, global = true, conflicts_with = "assume_role")]
+    no_assume_role: bool,
 
     /// Show errors in full, with where each cause was raised, and debug
     /// detail (e.g. how `rmra ssh` set the session up).
@@ -41,6 +53,11 @@ enum Commands {
     /// Manage contexts: named platform endpoints, docker-context style.
     #[command(subcommand)]
     Context(remora_context_application_transport_cli::Command),
+
+    /// Manage the IAM roles a context's login may assume, e.g. in another
+    /// tenant, and which one it acts as.
+    #[command(subcommand)]
+    Role(remora_context_application_transport_cli::RoleCommand),
 
     /// Open channels to devices.
     #[command(subcommand)]
@@ -95,11 +112,20 @@ async fn run() {
         _ => Selection::Flag,
     };
     let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    let over = options
-        .context
-        .clone()
-        .filter(|name| !name.is_empty())
-        .map(|name| ContextOverride { name, source });
+    let name = options.context.clone().filter(|name| !name.is_empty());
+    let role = if options.no_assume_role {
+        RoleOverride::Drop
+    } else {
+        match options.assume_role.clone().filter(|role| !role.is_empty()) {
+            Some(role) => RoleOverride::Assume(role),
+            None => RoleOverride::Keep,
+        }
+    };
+    let over = (name.is_some() || role != RoleOverride::Keep).then_some(ContextOverride {
+        name,
+        source,
+        role,
+    });
     let over = over.as_ref();
     let verbose = options.verbose;
 
@@ -123,6 +149,10 @@ async fn run() {
         ),
         Commands::Context(command) => exit_on_error(
             context::run(command, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Role(command) => exit_on_error(
+            context::run_role(command, &services.context, over).await,
             verbose,
         ),
         // ssh's own convention: 255 when the connection itself failed.

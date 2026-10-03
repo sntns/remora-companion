@@ -14,12 +14,9 @@ type Devices = pb::device_service_client::DeviceServiceClient<GatewayChannel>;
 pub struct DeviceGatewayAdapterImpl;
 
 async fn client(context: &ResolvedContext) -> Result<Devices> {
-    let channel = connect(&Connection::for_context(
-        &context.context,
-        Some(&context.credentials),
-    ))
-    .await
-    .change_context(Error::Unreachable)?;
+    let channel = connect(&Connection::for_resolved(context))
+        .await
+        .change_context(Error::Unreachable)?;
     Ok(Devices::new(channel))
 }
 

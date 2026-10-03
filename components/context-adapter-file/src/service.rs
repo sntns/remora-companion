@@ -177,6 +177,8 @@ mod tests {
                 address: "api.example:50051".into(),
                 tls: Tls::default(),
             },
+            roles: Default::default(),
+            assumed_role: None,
         }
     }
 
@@ -214,7 +216,6 @@ mod tests {
             secret: Secret::AccessKey {
                 token: "s3cret".into(),
             },
-            assume_role: None,
         };
         assert!(store.get("eu2").unwrap().is_none());
         store.put("eu2", &credentials).unwrap();
@@ -241,7 +242,6 @@ mod tests {
                 "ghost",
                 &Credentials {
                     secret: Secret::AccessKey { token: "t".into() },
-                    assume_role: None,
                 },
             )
             .unwrap();

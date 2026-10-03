@@ -32,6 +32,8 @@ pub enum Kind {
     Deployment,
     /// A local disk's device path (`/dev/sdb`), e.g. a flash target.
     Disk,
+    /// A role alias of the selected context (local, instant).
+    Role,
 }
 
 /// One completion: the value, and a short description shells may show.

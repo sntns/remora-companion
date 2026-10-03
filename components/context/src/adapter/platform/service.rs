@@ -6,6 +6,18 @@ use crate::model::{Context, Credentials, Principal};
 #[async_trait::async_trait]
 pub trait PlatformSessionAdapter: Send + Sync {
     async fn whoami(&self, context: &Context, credentials: &Credentials) -> Result<Principal>;
+
+    /// Assumes `role` (a role URN) as the login, and says which account
+    /// that acts in: `Some(name)`, or `None` when the role may not read its
+    /// account -- assumed all the same. Fails with `RoleRefused` when the
+    /// login may not assume it (no `iam::assume-role` permission, or the
+    /// role's trust policy doesn't allow it).
+    async fn acting_account(
+        &self,
+        context: &Context,
+        credentials: &Credentials,
+        role: &str,
+    ) -> Result<Option<String>>;
 }
 
 #[derive(Clone)]

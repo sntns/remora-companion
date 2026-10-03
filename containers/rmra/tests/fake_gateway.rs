@@ -14,10 +14,25 @@ use tonic::{Request, Response, Status, Streaming};
 
 const TOKEN: &str = "operator-token";
 
-fn authorized<T>(request: &Request<T>) -> Result<(), Status> {
+/// The one role the login may assume: in another tenant, "other".
+const OPS_ROLE: &str = "urn:sntns:iam:local:other:role:ops";
+
+/// Authenticates the call and says which tenant it acts in: the login's
+/// own ("acme"), or, with an assume-role header, the role's -- as the
+/// platform does, refusing a role the login may not assume.
+fn authorized<T>(request: &Request<T>) -> Result<&'static str, Status> {
     match request.metadata().get("authentication-token") {
-        Some(token) if token == TOKEN => Ok(()),
-        _ => Err(Status::unauthenticated("invalid access key")),
+        Some(token) if token == TOKEN => {}
+        _ => return Err(Status::unauthenticated("invalid access key")),
+    }
+    match request
+        .metadata()
+        .get("assume-role")
+        .map(|v| v.to_str().unwrap_or_default())
+    {
+        None => Ok("acme"),
+        Some(OPS_ROLE) => Ok("other"),
+        Some(_) => Err(Status::permission_denied("role permission denied")),
     }
 }
 
@@ -29,7 +44,10 @@ impl iam::user_service_server::UserService for Iam {
         &self,
         request: Request<iam::UserServiceGetCurrentUserRequest>,
     ) -> Result<Response<iam::UserServiceGetCurrentUserResponse>, Status> {
-        authorized(&request)?;
+        // An assumed role's principal is no user.
+        if authorized(&request)? != "acme" {
+            return Err(Status::not_found("user not found"));
+        }
         Ok(Response::new(iam::UserServiceGetCurrentUserResponse {
             user_descriptor: Some(iam::UserDescriptor {
                 resource: Some(ResourceReference {
@@ -49,12 +67,12 @@ impl iam::account_service_server::AccountService for Iam {
         &self,
         request: Request<iam::AccountServiceGetCurrentAccountRequest>,
     ) -> Result<Response<iam::AccountServiceGetCurrentAccountResponse>, Status> {
-        authorized(&request)?;
+        let tenant = authorized(&request)?;
         Ok(Response::new(
             iam::AccountServiceGetCurrentAccountResponse {
                 account_descriptor: Some(iam::AccountDescriptor {
                     resource: Some(ResourceReference {
-                        name: "acme".into(),
+                        name: tenant.into(),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -90,7 +108,7 @@ impl pb::channel_service_server::ChannelService for Channels {
     ) -> Result<Response<Responses>, Status> {
         use pb::channel_service_open_device_channel_request::Request as In;
         use pb::channel_service_open_device_channel_response::Response as Out;
-        authorized(&request)?;
+        let tenant = authorized(&request)?;
         let mut incoming = request.into_inner();
         let Some(Ok(pb::ChannelServiceOpenDeviceChannelRequest {
             request: Some(In::InitialRequest(initial)),
@@ -119,6 +137,10 @@ impl pb::channel_service_server::ChannelService for Channels {
                     .await;
             });
             return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
+        }
+        // A device of the other tenant: only reachable as its role.
+        if initial.channel_device_name == "OTHERDEV" && tenant != "other" {
+            return Err(Status::not_found("device not found"));
         }
         let (tx, rx) = mpsc::channel(4);
         tokio::spawn(async move {
@@ -287,6 +309,66 @@ async fn login_whoami_and_a_channel_on_stdio() {
         "\r\nrmra: the connection to DROP was lost: the gateway ended the channel: \
          Unavailable: the device went away\r\n"
     );
+
+    // Roles: another tenant's role, remembered, verified, then assumed by
+    // every command -- the ssh ProxyCommand's channel open included.
+    let (code, _, stderr) = rmra
+        .run(
+            &["role", "add", "ops", "urn:sntns:iam:local:other:role:ops"],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let (code, _, stderr) = rmra
+        .run(
+            &["role", "assume", "urn:sntns:iam:local:other:role:admin"],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("role permission denied"), "{stderr}");
+    let (code, _, stderr) = rmra.run(&["role", "assume", "ops"], b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.contains("other"), "{stderr}");
+
+    let (code, _, stderr) = rmra.run(&["whoami"], b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("acting as") && stderr.contains("ops @ other"),
+        "{stderr}"
+    );
+    let (_, stdout, _) = rmra.run(&["context", "inspect"], b"").await;
+    assert!(stdout.contains("\"assumedRole\": \"ops\""), "{stdout}");
+
+    let (code, stdout, stderr) = rmra
+        .run(&["channel", "open", "OTHERDEV", "--quiet"], b"as the role")
+        .await;
+    assert_eq!((code, stdout.as_str()), (0, "elor eht sa"), "{stderr}");
+    let (code, _, stderr) = rmra
+        .run(
+            &["--no-assume-role", "channel", "open", "OTHERDEV", "--quiet"],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 255);
+    assert!(stderr.contains("device not found"), "{stderr}");
+
+    let (code, _, _) = rmra.run(&["role", "drop"], b"").await;
+    assert_eq!(code, 0);
+    let (code, _, _) = rmra
+        .run(
+            &[
+                "--assume-role",
+                "ops",
+                "channel",
+                "open",
+                "OTHERDEV",
+                "--quiet",
+            ],
+            b"x",
+        )
+        .await;
+    assert_eq!(code, 0);
 
     let (code, _, _) = rmra.run(&["logout"], b"").await;
     assert_eq!(code, 0);

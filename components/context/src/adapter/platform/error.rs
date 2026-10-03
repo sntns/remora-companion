@@ -4,6 +4,8 @@ pub enum Error {
     Unreachable,
     #[error("the platform refused these credentials")]
     Unauthenticated,
+    #[error("the platform refused to let this login assume the role")]
+    RoleRefused,
     #[error("the platform call failed")]
     Call,
 }

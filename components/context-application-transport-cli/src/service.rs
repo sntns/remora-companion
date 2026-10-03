@@ -120,6 +120,8 @@ pub async fn run(
                         server_name,
                     },
                 },
+                roles: Default::default(),
+                assumed_role: None,
             };
             let address = context.endpoint.address.clone();
             service
@@ -219,7 +221,7 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
             ));
         }
         Format::Table => {
-            let mut table = tui::Table::new(["name", "address", "login", "description"]);
+            let mut table = tui::Table::new(["name", "address", "login", "role", "description"]);
             for summary in &contexts {
                 let name = if summary.current {
                     format!("{} *", summary.context.name)
@@ -237,6 +239,11 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
                         summary
                             .credentials
                             .map_or_else(|| "—".to_owned(), |kind| kind.to_string()),
+                        summary
+                            .context
+                            .assumed_role
+                            .clone()
+                            .unwrap_or_else(|| "—".to_owned()),
                         summary.context.description.clone().unwrap_or_default(),
                     ],
                     summary.current,

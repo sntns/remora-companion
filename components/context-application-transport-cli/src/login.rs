@@ -24,9 +24,6 @@ pub struct LoginArgs {
     /// Log in with an access key, reading its token from stdin.
     #[arg(long)]
     token_stdin: bool,
-    /// Assume this IAM role on every call.
-    #[arg(long)]
-    assume_role: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -76,9 +73,11 @@ pub async fn run_login(
     };
     // From here on, address the context by name: a first-run context was
     // just created, and an override already named it.
+    // The login is verified as itself, whatever role is assumed later.
     let target = ContextOverride {
-        name: name.clone(),
+        name: Some(name.clone()),
         source: over.map_or(remora_context::model::Selection::Current, |o| o.source),
+        role: remora_context::model::RoleOverride::Drop,
     };
 
     let secret = if let Some(identity) = args.identity {
@@ -95,10 +94,7 @@ pub async fn run_login(
     } else {
         prompt_secret()?
     };
-    let credentials = Credentials {
-        secret,
-        assume_role: args.assume_role,
-    };
+    let credentials = Credentials { secret };
 
     let spinner = tui::Spinner::start("Verifying with the platform");
     match service.login(Some(&target), credentials).await {
@@ -139,14 +135,26 @@ pub async fn run_whoami(
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     let spinner = tui::Spinner::start("Asking the platform");
-    let (resolved, principal) = match service.whoami(over).await {
+    let (resolved, principal, acting) = match service.whoami(over).await {
         Ok(found) => found,
         Err(report) => {
             spinner.fail("Could not identify the current login");
             return Err(context_error(report));
         }
     };
-    spinner.done(describe_principal(&principal));
+    let headline = match (&resolved.role, &acting) {
+        (Some(role), Some(account)) => format!(
+            "{} {} {}",
+            describe_principal(&principal),
+            tui::dim("acting as"),
+            tui::accent(match account {
+                Some(account) => format!("{} @ {account}", role.display_name()),
+                None => role.display_name().to_owned(),
+            })
+        ),
+        _ => describe_principal(&principal),
+    };
+    spinner.done(headline);
     let mut body = format!(
         "context   {} ({})\ngateway   {}\nlogin     {}\nuser      {}",
         resolved.context.name,
@@ -155,8 +163,16 @@ pub async fn run_whoami(
         resolved.credentials.kind(),
         principal.user_urn,
     );
-    if let Some(role) = &resolved.credentials.assume_role {
-        body.push_str(&format!("\nrole      {role}"));
+    if let Some(account) = &principal.account_name {
+        body.push_str(&format!("\naccount   {account}"));
+    }
+    if let Some(role) = &resolved.role {
+        body.push_str(&format!("\nrole      {}", role.urn));
+        match &acting {
+            Some(Some(account)) => body.push_str(&format!("\nacting in {account}")),
+            Some(None) => body.push_str("\nacting in (this role may not read its account)"),
+            None => {}
+        }
     }
     tui::note("Session", body);
     Ok(())
@@ -182,6 +198,8 @@ async fn first_context(service: &ContextService) -> Result<String> {
                     address,
                     tls: Tls::default(),
                 },
+                roles: Default::default(),
+                assumed_role: None,
             },
             false,
         )

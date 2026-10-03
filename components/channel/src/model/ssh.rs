@@ -34,12 +34,20 @@ pub struct SshCertificate {
     pub known_hosts: String,
 }
 
-/// Builds the ProxyCommand that opens the device's ssh channel, given the
-/// name of the context the session resolved to (so the channel is opened as
-/// the same identity whose key was just certified) and the device (which,
-/// for scp, is only known once the operands are read). Supplied by the
-/// transport, which is what knows how this program is invoked.
-pub type ProxyCommandBuilder = Arc<dyn Fn(&str, &str) -> String + Send + Sync>;
+/// What a session's ProxyCommand must open the channel as and to: the
+/// context and role the session resolved to -- the same identity whose key
+/// was just certified -- and the device (which, for scp, is only known once
+/// the operands are read).
+pub struct ProxyTarget<'a> {
+    pub context: &'a str,
+    /// The assumed role's URN, `None` for the login itself.
+    pub role: Option<&'a str>,
+    pub device: &'a str,
+}
+
+/// Builds the ProxyCommand that opens the device's ssh channel. Supplied by
+/// the transport, which is what knows how this program is invoked.
+pub type ProxyCommandBuilder = Arc<dyn Fn(&ProxyTarget) -> String + Send + Sync>;
 
 /// Everything `ssh` needs from the operator.
 pub struct SshRequest {

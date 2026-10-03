@@ -4,7 +4,8 @@ use error_stack::{Report, ResultExt};
 use remora_channel::{
     application::ChannelService,
     model::{
-        ChannelKind, PreparedSsh, ProxyCommandBuilder, ScpRequest, SshRequest, SshRole, SSH_PROFILE,
+        ChannelKind, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshRequest,
+        SshRole, SSH_PROFILE,
     },
 };
 use remora_context::model::ContextOverride;
@@ -242,22 +243,31 @@ pub async fn run_scp(
 /// resolved to.
 fn proxy_command() -> Result<ProxyCommandBuilder> {
     let executable = std::env::current_exe().change_context(Error::SelfPath)?;
-    Ok(Arc::new(move |context: &str, device: &str| {
-        [
+    Ok(Arc::new(move |target: &ProxyTarget| {
+        let mut words = vec![
             executable.display().to_string(),
             "--context".into(),
-            context.into(),
+            target.context.into(),
+        ];
+        // Explicitly either way: the channel must be opened as the role the
+        // key was certified for, whatever the context assumes by default.
+        match target.role {
+            Some(role) => words.extend(["--assume-role".into(), role.into()]),
+            None => words.push("--no-assume-role".into()),
+        }
+        words.extend([
             "channel".into(),
             "open".into(),
-            device.into(),
+            target.device.into(),
             "--profile".into(),
             SSH_PROFILE.into(),
             "--quiet".into(),
-        ]
-        .iter()
-        .map(|word| quote(word))
-        .collect::<Vec<_>>()
-        .join(" ")
+        ]);
+        words
+            .iter()
+            .map(|word| quote(word))
+            .collect::<Vec<_>>()
+            .join(" ")
     }))
 }
 
