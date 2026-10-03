@@ -1,7 +1,7 @@
 use super::error::Result;
 use crate::model::{
     AssumedRole, Context, ContextOverride, ContextSummary, Credentials, Principal, ResolvedContext,
-    RoleSummary, Selection,
+    RoleOverride, RoleSummary, Selection,
 };
 
 /// The context vertical's application-facing port: docker-context-style
@@ -28,13 +28,18 @@ pub trait ContextServiceInterface: Send + Sync {
         -> Result<Option<(String, Selection)>>;
     /// The selected context with its credentials, ready for an adapter.
     async fn resolve(&self, over: Option<&ContextOverride>) -> Result<ResolvedContext>;
-    /// Verifies `credentials` against the selected context's platform and,
-    /// only if they work, stores them for it.
+    /// Logs the selected context in: verifies `credentials` against its
+    /// platform, then the role the context will act as -- `role` chosen now
+    /// (`Assume`, `Drop`), or the one it already has (`Keep`) -- and only
+    /// if both work, stores the credentials and the role in the context.
+    /// Returns the context, the login's principal, and the role assumed
+    /// with the account it acts in.
     async fn login(
         &self,
         over: Option<&ContextOverride>,
         credentials: Credentials,
-    ) -> Result<(String, Principal)>;
+        role: RoleOverride,
+    ) -> Result<(String, Principal, Option<(AssumedRole, Option<String>)>)>;
     /// Forgets the selected context's credentials; returns the context's
     /// name and whether it was logged in at all.
     async fn logout(&self, over: Option<&ContextOverride>) -> Result<(String, bool)>;
