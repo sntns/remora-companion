@@ -98,12 +98,14 @@ impl TestGateway {
                         ..Tls::default()
                     },
                 },
+                roles: Default::default(),
+                assumed_role: None,
             },
             credentials: Credentials {
                 secret: Secret::AccessKey { token: "t".into() },
-                assume_role: None,
             },
             selection: Selection::Flag,
+            role: None,
         };
         (gateway, context)
     }

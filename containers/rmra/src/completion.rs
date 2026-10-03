@@ -12,7 +12,7 @@ use std::{
 };
 
 use remora_completion::{Candidate, Kind};
-use remora_context::model::{ContextOverride, Selection};
+use remora_context::model::{ContextOverride, RoleOverride, Selection};
 
 use crate::bootstrap::{self, Services};
 
@@ -31,11 +31,28 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
         let over = context_on_command_line();
         match kind {
             Kind::Context => contexts(&services).await,
+            Kind::Role => roles(&services, over.as_ref()).await,
             // No rmra argument takes a local disk.
             Kind::Disk => Vec::new(),
             remote => remote_values(&services, over.as_ref(), remote).await,
         }
     })
+}
+
+async fn roles(services: &Services, over: Option<&ContextOverride>) -> Vec<Candidate> {
+    let Ok((_, roles)) = services.context.roles(over).await else {
+        return Vec::new();
+    };
+    roles
+        .into_iter()
+        .map(|role| {
+            let mut help = role.urn;
+            if role.assumed {
+                help.push_str(" (assumed)");
+            }
+            Candidate::new(role.alias).help(help)
+        })
+        .collect()
 }
 
 async fn contexts(services: &Services) -> Vec<Candidate> {
@@ -60,10 +77,22 @@ async fn remote_values(
     over: Option<&ContextOverride>,
     kind: Kind,
 ) -> Vec<Candidate> {
-    let Ok(Some((context, _))) = services.context.selected(over).await else {
+    // Per context and role: a role of another tenant has other devices.
+    let Ok(resolved) = services.context.resolve(over).await else {
         return Vec::new();
     };
-    let cache = cache_path(&context, kind);
+    let scope = match &resolved.role {
+        Some(role) => format!(
+            "{}.as-{}",
+            resolved.context.name,
+            role.urn
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect::<String>()
+        ),
+        None => resolved.context.name.clone(),
+    };
+    let cache = cache_path(&scope, kind);
     if let Some(cached) = read_cache(&cache, true) {
         return cached;
     }
@@ -82,7 +111,7 @@ async fn fetch(
     kind: Kind,
 ) -> Option<Vec<Candidate>> {
     Some(match kind {
-        Kind::Context | Kind::Disk => return None,
+        Kind::Context | Kind::Disk | Kind::Role => return None,
         Kind::Device => services
             .device
             .list(over, &Default::default(), false)
@@ -110,11 +139,15 @@ async fn fetch(
     })
 }
 
-/// `--context`/`-c` as typed on the line being completed (the shell hands
-/// the whole line to rmra), else RMRA_CONTEXT, else the current context.
+/// `--context`/`-c` and `--assume-role`/`--no-assume-role` as typed on the
+/// line being completed (the shell hands the whole line to rmra), else
+/// RMRA_CONTEXT/RMRA_ASSUME_ROLE, else the context's own: a role of another
+/// tenant completes that tenant's devices.
 fn context_on_command_line() -> Option<ContextOverride> {
     let args: Vec<String> = std::env::args().collect();
     let mut found = None;
+    let mut role = None;
+    let mut drop_role = false;
     for (index, arg) in args.iter().enumerate() {
         if let Some(value) = arg.strip_prefix("--context=") {
             found = Some(value.to_owned());
@@ -122,18 +155,33 @@ fn context_on_command_line() -> Option<ContextOverride> {
             found = args.get(index + 1).cloned();
         } else if let Some(value) = arg.strip_prefix("-c").filter(|v| !v.is_empty()) {
             found = Some(value.to_owned());
+        } else if let Some(value) = arg.strip_prefix("--assume-role=") {
+            role = Some(value.to_owned());
+        } else if arg == "--assume-role" {
+            role = args.get(index + 1).cloned();
+        } else if arg == "--no-assume-role" {
+            drop_role = true;
         }
     }
     let (name, source) = match found.filter(|name| !name.is_empty()) {
-        Some(name) => (name, Selection::Flag),
-        None => (
-            std::env::var("RMRA_CONTEXT")
-                .ok()
-                .filter(|name| !name.is_empty())?,
-            Selection::Environment,
-        ),
+        Some(name) => (Some(name), Selection::Flag),
+        None => match std::env::var("RMRA_CONTEXT").ok().filter(|n| !n.is_empty()) {
+            Some(name) => (Some(name), Selection::Environment),
+            None => (None, Selection::Current),
+        },
     };
-    Some(ContextOverride { name, source })
+    let role = if drop_role {
+        RoleOverride::Drop
+    } else {
+        match role
+            .or_else(|| std::env::var("RMRA_ASSUME_ROLE").ok())
+            .filter(|role| !role.is_empty())
+        {
+            Some(role) => RoleOverride::Assume(role),
+            None => RoleOverride::Keep,
+        }
+    };
+    (name.is_some() || role != RoleOverride::Keep).then_some(ContextOverride { name, source, role })
 }
 
 fn cache_path(context: &str, kind: Kind) -> PathBuf {

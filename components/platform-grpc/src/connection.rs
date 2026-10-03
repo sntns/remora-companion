@@ -30,10 +30,23 @@ pub struct Tls {
 }
 
 impl Connection {
-    /// How to reach `context`'s gateway, authenticated as `credentials`.
+    /// How to reach a resolved context's gateway, as its login, assuming
+    /// the role the invocation resolved to (if any): what every adapter
+    /// acting for the operator uses.
+    pub fn for_resolved(resolved: &remora_context::model::ResolvedContext) -> Self {
+        Self::for_context(
+            &resolved.context,
+            Some(&resolved.credentials),
+            resolved.role.as_ref().map(|role| role.urn.as_str()),
+        )
+    }
+
+    /// How to reach `context`'s gateway, authenticated as `credentials`,
+    /// assuming `role` (a role URN) when given.
     pub fn for_context(
         context: &remora_context::model::Context,
         credentials: Option<&remora_context::model::Credentials>,
+        role: Option<&str>,
     ) -> Self {
         use remora_context::model::Secret;
         let tls = &context.endpoint.tls;
@@ -45,7 +58,7 @@ impl Connection {
                 server_name: tls.server_name.clone(),
             },
             credentials: credentials.map(|credentials| {
-                let assume_role = credentials.assume_role.clone();
+                let assume_role = role.map(str::to_owned);
                 match &credentials.secret {
                     Secret::LoginProfile { identity, password } => Credentials::LoginProfile {
                         identity: identity.clone(),

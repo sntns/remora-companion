@@ -23,12 +23,9 @@ type Devices = pb::device_service_client::DeviceServiceClient<GatewayChannel>;
 pub struct OtaGatewayAdapterImpl;
 
 async fn channel(context: &ResolvedContext) -> Result<GatewayChannel> {
-    connect(&Connection::for_context(
-        &context.context,
-        Some(&context.credentials),
-    ))
-    .await
-    .change_context(Error::Unreachable)
+    connect(&Connection::for_resolved(context))
+        .await
+        .change_context(Error::Unreachable)
 }
 
 /// Turns a gRPC status into this port's error, keeping the server's own

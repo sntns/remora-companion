@@ -423,6 +423,15 @@ mod tests {
                 account_name: None,
             })
         }
+
+        async fn acting_account(
+            &self,
+            _: &Context,
+            _: &Credentials,
+            _: &str,
+        ) -> platform::Result<Option<String>> {
+            Ok(None)
+        }
     }
 
     /// The real gRPC adapter against the in-process fake gateway, logged in

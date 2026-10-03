@@ -6,9 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct Credentials {
     #[serde(flatten)]
     pub secret: Secret,
-    /// An IAM role to assume on every call, when the principal is allowed to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assume_role: Option<String>,
 }
 
 /// The platform's two kinds of credentials -- the same two sntns-service-go
@@ -42,7 +39,7 @@ impl std::fmt::Debug for Credentials {
                 .field("password", &"<redacted>"),
             Secret::AccessKey { .. } => debug.field("token", &"<redacted>"),
         };
-        debug.field("assume_role", &self.assume_role).finish()
+        debug.finish()
     }
 }
 

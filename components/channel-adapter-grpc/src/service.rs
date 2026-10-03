@@ -24,12 +24,9 @@ pub struct GatewayAdapterImpl;
 
 impl GatewayAdapterImpl {
     async fn client(context: &ResolvedContext) -> Result<Client> {
-        let channel = connect(&Connection::for_context(
-            &context.context,
-            Some(&context.credentials),
-        ))
-        .await
-        .change_context(Error::Unreachable)?;
+        let channel = connect(&Connection::for_resolved(context))
+            .await
+            .change_context(Error::Unreachable)?;
         // A channel can carry a whole file: lift the 4 MiB default decode
         // cap off single messages rather than fail a big chunk mid-transfer.
         Ok(Client::new(channel).max_decoding_message_size(usize::MAX))
@@ -359,12 +356,14 @@ mod tests {
                         ..Tls::default()
                     },
                 },
+                roles: Default::default(),
+                assumed_role: None,
             },
             credentials: Credentials {
                 secret: Secret::AccessKey { token: "t".into() },
-                assume_role: None,
             },
             selection: Selection::Flag,
+            role: None,
         }
     }
 

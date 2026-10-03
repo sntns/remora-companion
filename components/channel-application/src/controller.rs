@@ -8,8 +8,8 @@ use remora_channel::{
     },
     application::{ChannelServiceInterface, Error, Result},
     model::{
-        PreparedSsh, ProxyCommandBuilder, ScpRequest, SshCertificate, SshCommand, SshRequest,
-        SshRole,
+        PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate, SshCommand,
+        SshRequest, SshRole,
     },
 };
 use remora_context::{
@@ -98,7 +98,11 @@ impl ChannelControllerImpl {
             format!("{}\n", certified.known_hosts.trim_end()).as_bytes(),
         )?;
 
-        let proxy_command = proxy_command(&context.context.name, device);
+        let proxy_command = proxy_command(&ProxyTarget {
+            context: &context.context.name,
+            role: context.role.as_ref().map(|role| role.urn.as_str()),
+            device,
+        });
         let mut pinning = vec![
             "-o".to_owned(),
             format!("ProxyCommand={proxy_command}"),
@@ -334,7 +338,10 @@ mod tests {
             platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
             store::ContextStoreAdapterService,
         },
-        model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
+        model::{
+            Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride, Secret,
+            Selection, Tls,
+        },
     };
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
@@ -351,6 +358,15 @@ mod tests {
                 user_name: "ada".into(),
                 account_name: None,
             })
+        }
+
+        async fn acting_account(
+            &self,
+            _: &Context,
+            _: &Credentials,
+            _: &str,
+        ) -> platform::Result<Option<String>> {
+            Ok(None)
         }
     }
 
@@ -397,6 +413,8 @@ mod tests {
                         address: "gateway:50051".into(),
                         tls: Tls::default(),
                     },
+                    roles: Default::default(),
+                    assumed_role: None,
                 },
                 false,
             )
@@ -407,7 +425,6 @@ mod tests {
                 None,
                 Credentials {
                     secret: Secret::AccessKey { token: "t".into() },
-                    assume_role: None,
                 },
             )
             .await
@@ -428,8 +445,11 @@ mod tests {
             options: vec!["ServerAliveInterval=5".into()],
             arguments: arguments.iter().map(|s| s.to_string()).collect(),
             binary: binary.into(),
-            proxy_command: Arc::new(|context, device| {
-                format!("rmra --context {context} channel open {device}")
+            proxy_command: Arc::new(|target| {
+                format!(
+                    "rmra --context {} channel open {}",
+                    target.context, target.device
+                )
             }),
         }
     }
@@ -515,8 +535,11 @@ mod tests {
             options: vec![],
             arguments: arguments.iter().map(|s| s.to_string()).collect(),
             binary: "scp".into(),
-            proxy_command: Arc::new(|context, device| {
-                format!("rmra --context {context} channel open {device}")
+            proxy_command: Arc::new(|target| {
+                format!(
+                    "rmra --context {} channel open {}",
+                    target.context, target.device
+                )
             }),
         }
     }
@@ -605,5 +628,28 @@ mod tests {
         let workdir = prepared.workdir().to_path_buf();
         assert_eq!(channel.run_ssh(prepared).await.unwrap(), 7);
         assert!(!workdir.exists());
+    }
+
+    #[tokio::test]
+    async fn the_proxy_command_opens_the_channel_as_the_certified_role() {
+        let root = tempfile::tempdir().unwrap();
+        let channel = controller(root.path(), Gateway::default()).await;
+        let mut ssh = request(&[], "ssh");
+        ssh.over = Some(ContextOverride {
+            name: None,
+            source: Selection::Flag,
+            role: RoleOverride::Assume("urn:sntns:iam:eu2:other:role:ops".into()),
+        });
+        ssh.proxy_command = Arc::new(|target| format!("role={:?}", target.role));
+        let prepared = channel.prepare_ssh(ssh).await.unwrap();
+        assert_eq!(
+            prepared.command.arguments[1],
+            "ProxyCommand=role=Some(\"urn:sntns:iam:eu2:other:role:ops\")"
+        );
+
+        let mut ssh = request(&[], "ssh");
+        ssh.proxy_command = Arc::new(|target| format!("role={:?}", target.role));
+        let prepared = channel.prepare_ssh(ssh).await.unwrap();
+        assert_eq!(prepared.command.arguments[1], "ProxyCommand=role=None");
     }
 }

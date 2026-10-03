@@ -51,6 +51,24 @@ install is updated with `brew upgrade sntns/tap/rmra` (or
 
 ## rmra
 
+### Act as a role, e.g. in another tenant
+
+```
+rmra role add acme-ops urn:sntns:iam:eu2:<tenant>:role:ops
+rmra role assume acme-ops        # every later command acts as it
+rmra whoami                      # ada acting as acme-ops @ acme
+rmra --no-assume-role device ls  # just this once, as yourself
+rmra --assume-role acme-ops ssh 525400C0FFEE   # or RMRA_ASSUME_ROLE
+rmra role drop
+```
+
+A login may assume an IAM role -- possibly in another tenant -- when it has
+the `iam::assume-role` permission on it and the role's trust policy allows
+it. `rmra role assume` checks that with the platform before remembering the
+role for the context; from then on every call (devices, OTA, `ssh`/`scp`,
+whose channel is opened as the very role the key was certified for) acts in
+the role's account. Roles are remembered per context, by alias.
+
 ### Shell completion
 
 ```

@@ -14,6 +14,15 @@ pub struct Context {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub endpoint: Endpoint,
+    /// IAM roles this context's login may assume, by alias -> role URN.
+    /// A role may live in another tenant: assuming it is how one login
+    /// operates another account's devices.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub roles: std::collections::BTreeMap<String, String>,
+    /// The role every call assumes (`rmra role assume`): an alias of
+    /// `roles`, or a role URN. None acts as the login itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assumed_role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,8 +81,46 @@ pub enum Selection {
 /// A context named for one invocation, overriding the stored current one.
 #[derive(Debug, Clone)]
 pub struct ContextOverride {
-    pub name: String,
+    /// The context to use instead of the stored current one.
+    pub name: Option<String>,
     pub source: Selection,
+    /// The role to act as instead of the context's own choice.
+    pub role: RoleOverride,
+}
+
+/// A role chosen for one invocation (`--assume-role`, `--no-assume-role`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RoleOverride {
+    /// Whatever the context assumes, if anything.
+    #[default]
+    Keep,
+    /// This role: an alias of the context's roles, or a role URN.
+    Assume(String),
+    /// None: act as the login itself.
+    Drop,
+}
+
+/// A role being assumed: its URN, and the alias it was chosen by, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssumedRole {
+    pub alias: Option<String>,
+    pub urn: String,
+}
+
+impl AssumedRole {
+    /// The alias when there is one, else the URN.
+    pub fn display_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.urn)
+    }
+}
+
+/// One of a context's roles, for `rmra role ls`.
+#[derive(Debug, Clone)]
+pub struct RoleSummary {
+    pub alias: String,
+    pub urn: String,
+    /// Whether the context currently assumes it.
+    pub assumed: bool,
 }
 
 /// A context together with the credentials to use it: everything an
@@ -83,4 +130,6 @@ pub struct ResolvedContext {
     pub context: Context,
     pub credentials: Credentials,
     pub selection: Selection,
+    /// The role every call of this invocation assumes, if any.
+    pub role: Option<AssumedRole>,
 }
