@@ -121,9 +121,15 @@ pub async fn run(
                     },
                 },
                 roles: Default::default(),
-                assumed_role: None,
+                // `--assume-role <urn>`: the context acts as that role,
+                // verified when it logs in.
+                assumed_role: match over.map(|o| &o.role) {
+                    Some(remora_context::model::RoleOverride::Assume(role)) => Some(role.clone()),
+                    _ => None,
+                },
             };
             let address = context.endpoint.address.clone();
+            let role = context.assumed_role.clone();
             service
                 .create(context, force)
                 .await
@@ -136,6 +142,9 @@ pub async fn run(
                 tui::accent(&name),
                 tui::dim(format!("→ {address}"))
             ));
+            if let Some(role) = role {
+                tui::info(format!("It acts as role {}", tui::accent(role)));
+            }
             if make_current {
                 tui::info(format!("Now using {}", tui::accent(&name)));
             }

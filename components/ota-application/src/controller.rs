@@ -448,7 +448,11 @@ mod tests {
             .await
             .unwrap();
         contexts
-            .login(None, resolved.credentials.clone())
+            .login(
+                None,
+                resolved.credentials.clone(),
+                remora_context::model::RoleOverride::Keep,
+            )
             .await
             .unwrap();
         (

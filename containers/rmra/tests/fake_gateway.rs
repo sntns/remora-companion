@@ -370,6 +370,77 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .await;
     assert_eq!(code, 0);
 
+    // The role as part of the context, decided at login: a context created
+    // to act as another tenant's role, verified when it logs in; a refused
+    // role refuses the whole login and changes nothing.
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "context",
+                "create",
+                "other-ops",
+                "--address",
+                &address,
+                "--plaintext",
+                "--assume-role",
+                OPS_ROLE,
+            ],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let login = format!("{TOKEN}\n");
+    let (code, _, stderr) = rmra
+        .run(
+            &["-c", "other-ops", "login", "--token-stdin"],
+            login.as_bytes(),
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("acting as") && stderr.contains("@ other"),
+        "{stderr}"
+    );
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "-c",
+                "other-ops",
+                "--assume-role",
+                "urn:sntns:iam:local:other:role:admin",
+                "login",
+                "--token-stdin",
+            ],
+            login.as_bytes(),
+        )
+        .await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("role permission denied"), "{stderr}");
+    let (_, stdout, _) = rmra
+        .run(&["-c", "other-ops", "context", "inspect"], b"")
+        .await;
+    assert!(
+        stdout.contains(OPS_ROLE),
+        "a refused login changed the role: {stdout}"
+    );
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "-c",
+                "other-ops",
+                "--no-assume-role",
+                "login",
+                "--token-stdin",
+            ],
+            login.as_bytes(),
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let (_, stdout, _) = rmra
+        .run(&["-c", "other-ops", "context", "inspect"], b"")
+        .await;
+    assert!(!stdout.contains("assumedRole"), "{stdout}");
+
     let (code, _, _) = rmra.run(&["logout"], b"").await;
     assert_eq!(code, 0);
     let (code, _, stderr) = rmra.run(&["channel", "open", "525400C0FFEE"], b"").await;

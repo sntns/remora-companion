@@ -3,7 +3,9 @@ use std::io::Read;
 use error_stack::{Report, ResultExt};
 use remora_context::{
     application::ContextService,
-    model::{Context, ContextOverride, Credentials, Endpoint, Principal, Secret, Tls},
+    model::{
+        Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride, Secret, Tls,
+    },
 };
 use remora_tui as tui;
 
@@ -72,12 +74,12 @@ pub async fn run_login(
         }
     };
     // From here on, address the context by name: a first-run context was
-    // just created, and an override already named it.
-    // The login is verified as itself, whatever role is assumed later.
+    // just created, and an override already named it. The role travels
+    // separately: logging in decides it for the context.
     let target = ContextOverride {
         name: Some(name.clone()),
         source: over.map_or(remora_context::model::Selection::Current, |o| o.source),
-        role: remora_context::model::RoleOverride::Drop,
+        role: RoleOverride::Keep,
     };
 
     let secret = if let Some(identity) = args.identity {
@@ -96,23 +98,97 @@ pub async fn run_login(
     };
     let credentials = Credentials { secret };
 
+    // Which role the context acts as: --assume-role / --no-assume-role, else
+    // asked when a human is there, else whatever the context already says.
+    let role = match over.map(|o| o.role.clone()).unwrap_or_default() {
+        RoleOverride::Keep if interactive => prompt_role(service, &target).await?,
+        role => role,
+    };
+
     let spinner = tui::Spinner::start("Verifying with the platform");
-    match service.login(Some(&target), credentials).await {
-        Ok((name, principal)) => {
-            spinner.done(format!("Logged in as {}", describe_principal(&principal)));
+    match service.login(Some(&target), credentials, role).await {
+        Ok((name, principal, assumed)) => {
+            let acting = match &assumed {
+                Some((role, account)) => format!(
+                    " {} {}",
+                    tui::dim("acting as"),
+                    tui::accent(match account {
+                        Some(account) => format!("{} @ {account}", role.display_name()),
+                        None => role.display_name().to_owned(),
+                    })
+                ),
+                None => String::new(),
+            };
+            spinner.done(format!(
+                "Logged in as {}{acting}",
+                describe_principal(&principal)
+            ));
+            if let Some((_, None)) = &assumed {
+                tui::warning("This role may not read its account: assumed all the same.");
+            }
             if interactive {
                 tui::outro(format!(
-                    "Credentials stored for context {}",
+                    "Credentials{} stored for context {}",
+                    if assumed.is_some() { " and role" } else { "" },
                     tui::accent(&name)
                 ));
             }
             Ok(())
         }
         Err(report) => {
-            spinner.fail("The platform did not accept these credentials");
+            spinner.fail("The platform did not accept this login");
             Err(context_error(report))
         }
     }
+}
+
+/// Asks which role the context should act as: the login itself, one of the
+/// context's roles, or another role by URN. Defaults to what the context
+/// already does.
+async fn prompt_role(service: &ContextService, target: &ContextOverride) -> Result<RoleOverride> {
+    #[derive(Clone, PartialEq, Eq)]
+    enum Choice {
+        Myself,
+        Alias(String),
+        Other,
+    }
+    let (_, roles) = service.roles(Some(target)).await.map_err(context_error)?;
+    let assumed = roles
+        .iter()
+        .find(|role| role.assumed)
+        .map(|role| role.alias.clone());
+    let mut select = tui::select("Act as")
+        .item(Choice::Myself, "Myself", "the login's own account, no role")
+        .initial_value(match &assumed {
+            Some(alias) => Choice::Alias(alias.clone()),
+            None => Choice::Myself,
+        });
+    for role in &roles {
+        select = select.item(Choice::Alias(role.alias.clone()), &role.alias, &role.urn);
+    }
+    select = select.item(
+        Choice::Other,
+        "Another role…",
+        "by its URN, e.g. a role of another tenant",
+    );
+    Ok(match select.interact().map_err(prompt_error)? {
+        Choice::Myself => RoleOverride::Drop,
+        Choice::Alias(alias) => RoleOverride::Assume(alias),
+        Choice::Other => {
+            let urn: String = tui::input("Role URN")
+                .placeholder("urn:sntns:iam:…:role:…")
+                .validate(|urn: &String| {
+                    if urn.starts_with("urn:") && urn.contains(":role:") {
+                        Ok(())
+                    } else {
+                        Err("a role URN looks like urn:…:role:…")
+                    }
+                })
+                .interact()
+                .map_err(prompt_error)?;
+            RoleOverride::Assume(urn)
+        }
+    })
 }
 
 pub async fn run_logout(

@@ -426,6 +426,7 @@ mod tests {
                 Credentials {
                     secret: Secret::AccessKey { token: "t".into() },
                 },
+                remora_context::model::RoleOverride::Keep,
             )
             .await
             .unwrap();

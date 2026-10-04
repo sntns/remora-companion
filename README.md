@@ -53,21 +53,29 @@ install is updated with `brew upgrade sntns/tap/rmra` (or
 
 ### Act as a role, e.g. in another tenant
 
+A context is a login *and* the IAM role it acts as -- possibly a role of
+another tenant, which a login may assume when it has the
+`iam::assume-role` permission on it and the role's trust policy allows it.
+The role is decided when logging in, and verified with the platform
+together with the credentials: a refused role refuses the login.
+
 ```
-rmra role add acme-ops urn:sntns:iam:eu2:<tenant>:role:ops
-rmra role assume acme-ops        # every later command acts as it
-rmra whoami                      # ada acting as acme-ops @ acme
-rmra --no-assume-role device ls  # just this once, as yourself
-rmra --assume-role acme-ops ssh 525400C0FFEE   # or RMRA_ASSUME_ROLE
-rmra role drop
+rmra login                                    # interactive: also asks "Act as"
+rmra login --assume-role urn:sntns:iam:eu2:<tenant>:role:ops --token-stdin
+rmra login --no-assume-role --token-stdin     # back to the login's own account
+
+# a context per tenant, all with the same login:
+rmra context create acme --assume-role urn:sntns:iam:eu2:<tenant>:role:ops
+rmra -c acme login
+rmra whoami                                   # ada acting as ops @ acme
 ```
 
-A login may assume an IAM role -- possibly in another tenant -- when it has
-the `iam::assume-role` permission on it and the role's trust policy allows
-it. `rmra role assume` checks that with the platform before remembering the
-role for the context; from then on every call (devices, OTA, `ssh`/`scp`,
-whose channel is opened as the very role the key was certified for) acts in
-the role's account. Roles are remembered per context, by alias.
+From then on every call of the context (devices, OTA, `ssh`/`scp`, whose
+channel is opened as the very role the key was certified for) acts in the
+role's account. Roles can also be named and switched without logging in
+again (`rmra role add <alias> <urn>`, `rmra role assume <alias>`,
+`rmra role drop`), or chosen for one command (`--assume-role <alias|urn>`,
+RMRA_ASSUME_ROLE, `--no-assume-role`).
 
 ### Shell completion
 
