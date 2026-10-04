@@ -441,6 +441,58 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .await;
     assert!(!stdout.contains("assumedRole"), "{stdout}");
 
+    // A base context declined per role: `context create --from`, sharing
+    // the base's single login; a refused role creates nothing.
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "context",
+                "create",
+                "as-admin",
+                "--from",
+                "local",
+                "--assume-role",
+                "urn:sntns:iam:local:other:role:admin",
+            ],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("role permission denied"), "{stderr}");
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "context",
+                "create",
+                "as-ops",
+                "--from",
+                "local",
+                "--assume-role",
+                "ops",
+            ],
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("acting as") && stderr.contains("@ other"),
+        "{stderr}"
+    );
+    let (code, stdout, stderr) = rmra
+        .run(
+            &["-c", "as-ops", "channel", "open", "OTHERDEV", "--quiet"],
+            b"declined",
+        )
+        .await;
+    assert_eq!((code, stdout.as_str()), (0, "denilced"), "{stderr}");
+    let (_, stdout, _) = rmra.run(&["context", "ls"], b"").await;
+    assert!(stdout.contains("via local"), "{stdout}");
+    let (code, _, stderr) = rmra.run(&["context", "rm", "-f", "local"], b"").await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("as-ops"), "{stderr}");
+    let (code, _, _) = rmra.run(&["context", "rm", "-f", "as-ops"], b"").await;
+    assert_eq!(code, 0);
+
     let (code, _, _) = rmra.run(&["logout"], b"").await;
     assert_eq!(code, 0);
     let (code, _, stderr) = rmra.run(&["channel", "open", "525400C0FFEE"], b"").await;

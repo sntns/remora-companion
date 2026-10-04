@@ -18,6 +18,20 @@ pub trait ContextServiceInterface: Send + Sync {
     /// Creates `context`; `replace` overwrites an existing one of that name
     /// (keeping its credentials, since the endpoint may just have moved).
     async fn create(&self, context: Context, replace: bool) -> Result<()>;
+    /// Creates context `name` from context `source`: its endpoint, role
+    /// aliases and login, acting as `role` (`Keep` takes the source's role,
+    /// `Drop` none). The role is verified with the platform under the
+    /// source's login before anything is created; `replace` overwrites an
+    /// existing `name`. Returns the login's principal and the role assumed
+    /// with the account it acts in.
+    async fn derive(
+        &self,
+        source: &str,
+        name: &str,
+        description: Option<String>,
+        role: RoleOverride,
+        replace: bool,
+    ) -> Result<(Principal, Option<(AssumedRole, Option<String>)>)>;
     /// Removes a context and its credentials, and stops it being current.
     async fn remove(&self, name: &str) -> Result<()>;
     /// Makes `name` the stored current context.

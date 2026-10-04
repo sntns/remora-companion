@@ -64,11 +64,17 @@ rmra login                                    # interactive: also asks "Act as"
 rmra login --assume-role urn:sntns:iam:eu2:<tenant>:role:ops --token-stdin
 rmra login --no-assume-role --token-stdin     # back to the login's own account
 
-# a context per tenant, all with the same login:
-rmra context create acme --assume-role urn:sntns:iam:eu2:<tenant>:role:ops
-rmra -c acme login
-rmra whoami                                   # ada acting as ops @ acme
+# a base context, declined per role -- e.g. one context per tenant:
+rmra context create eu2 --use && rmra login
+rmra context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops
+rmra context create beta --from eu2 --assume-role urn:sntns:iam:eu2:<other>:role:ops
+rmra -c acme whoami                           # ada acting as ops @ acme
 ```
+
+A declined context (`--from`) takes its base's endpoint and role aliases,
+and shares its login: logging in or out of any context of the group does it
+for all (`context ls` shows `via eu2`), and the base can't be removed while
+declined contexts use it. Its role is verified when it's created.
 
 From then on every call of the context (devices, OTA, `ssh`/`scp`, whose
 channel is opened as the very role the key was certified for) acts in the

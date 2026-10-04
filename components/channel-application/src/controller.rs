@@ -415,6 +415,7 @@ mod tests {
                     },
                     roles: Default::default(),
                     assumed_role: None,
+                    login: None,
                 },
                 false,
             )
