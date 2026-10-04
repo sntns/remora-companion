@@ -23,6 +23,18 @@ pub struct Context {
     /// `roles`, or a role URN. None acts as the login itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assumed_role: Option<String>,
+    /// The context whose login this one uses, for a context declined from a
+    /// base one (`rmra context create --from`): one login, shared -- logging
+    /// in or out of any of them does it for all. None: its own login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+}
+
+impl Context {
+    /// The name its login is stored under: its base's, or its own.
+    pub fn login_name(&self) -> &str {
+        self.login.as_deref().unwrap_or(&self.name)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -129,7 +129,7 @@ impl ContextServiceInterface for ContextControllerImpl {
             .map(|context| {
                 let credentials = self
                     .credentials
-                    .get(&context.name)
+                    .get(context.login_name())
                     .change_context(Error::Credentials)?;
                 Ok(ContextSummary {
                     current: only || current.as_deref() == Some(context.name.as_str()),
@@ -145,7 +145,7 @@ impl ContextServiceInterface for ContextControllerImpl {
         let current = self.store.current().change_context(Error::Store)?;
         let credentials = self
             .credentials
-            .get(name)
+            .get(context.login_name())
             .change_context(Error::Credentials)?;
         Ok(ContextSummary {
             current: current.as_deref() == Some(name),
@@ -176,11 +176,82 @@ impl ContextServiceInterface for ContextControllerImpl {
         self.store.put(&context).change_context(Error::Store)
     }
 
+    async fn derive(
+        &self,
+        source: &str,
+        name: &str,
+        description: Option<String>,
+        role: RoleOverride,
+        replace: bool,
+    ) -> Result<(Principal, Option<(AssumedRole, Option<String>)>)> {
+        Self::validate(name)?;
+        let from = self.existing(source)?;
+        if !replace && self.store.get(name).change_context(Error::Store)?.is_some() {
+            return Err(Report::new(Error::AlreadyExists(name.to_owned())));
+        }
+        // Linked to the root of the group: a context declined from a
+        // declined one shares the same single login.
+        let base = from.login_name().to_owned();
+        let credentials = self
+            .credentials
+            .get(&base)
+            .change_context(Error::Credentials)?
+            .ok_or_else(|| Report::new(Error::NotLoggedIn(base.clone())))?;
+        let choice = match role {
+            RoleOverride::Keep => from.assumed_role.clone(),
+            RoleOverride::Assume(choice) => Some(choice),
+            RoleOverride::Drop => None,
+        };
+        let context = Context {
+            name: name.to_owned(),
+            description: description.or_else(|| from.description.clone()),
+            endpoint: from.endpoint.clone(),
+            roles: from.roles.clone(),
+            assumed_role: choice,
+            login: Some(base),
+        };
+        // Verified like a login before anything is written: the source's
+        // login still works, and may assume the role.
+        let principal = self
+            .platform
+            .whoami(&context, &credentials)
+            .await
+            .change_context(Error::Verify)?;
+        let assumed = match &context.assumed_role {
+            None => None,
+            Some(choice) => {
+                let role = Self::role_named(&context, choice)?;
+                let account = self
+                    .platform
+                    .acting_account(&context, &credentials, &role.urn)
+                    .await
+                    .change_context_lazy(|| Error::Assume(role.display_name().to_owned()))?;
+                Some((role, account))
+            }
+        };
+        self.store.put(&context).change_context(Error::Store)?;
+        Ok((principal, assumed))
+    }
+
     async fn remove(&self, name: &str) -> Result<()> {
-        self.existing(name)?;
-        self.credentials
-            .delete(name)
-            .change_context(Error::Credentials)?;
+        let context = self.existing(name)?;
+        let users: Vec<_> = self
+            .store
+            .list()
+            .change_context(Error::Store)?
+            .into_iter()
+            .filter(|other| other.login.as_deref() == Some(name))
+            .map(|other| other.name)
+            .collect();
+        if !users.is_empty() {
+            return Err(Report::new(Error::InUse(name.to_owned(), users.join(", "))));
+        }
+        // A declined context shares its base's login: that one stays.
+        if context.login.is_none() {
+            self.credentials
+                .delete(name)
+                .change_context(Error::Credentials)?;
+        }
         self.store.delete(name).change_context(Error::Store)?;
         if self
             .store
@@ -216,9 +287,9 @@ impl ContextServiceInterface for ContextControllerImpl {
         let (context, selection) = self.select(over)?;
         let credentials = self
             .credentials
-            .get(&context.name)
+            .get(context.login_name())
             .change_context(Error::Credentials)?
-            .ok_or_else(|| Report::new(Error::NotLoggedIn(context.name.clone())))?;
+            .ok_or_else(|| Report::new(Error::NotLoggedIn(context.login_name().to_owned())))?;
         let role = Self::role_for(&context, over)?;
         Ok(ResolvedContext {
             context,
@@ -261,8 +332,9 @@ impl ContextServiceInterface for ContextControllerImpl {
                 Some((role, account))
             }
         };
+        // A declined context logs its base in, i.e. all of the group.
         self.credentials
-            .put(&context.name, &credentials)
+            .put(context.login_name(), &credentials)
             .change_context(Error::Credentials)?;
         if context.assumed_role != choice {
             context.assumed_role = choice;
@@ -273,11 +345,12 @@ impl ContextServiceInterface for ContextControllerImpl {
 
     async fn logout(&self, over: Option<&ContextOverride>) -> Result<(String, bool)> {
         let (context, _) = self.select(over)?;
+        // The shared login: out of a base and every context declined from it.
         let removed = self
             .credentials
-            .delete(&context.name)
+            .delete(context.login_name())
             .change_context(Error::Credentials)?;
-        Ok((context.name, removed))
+        Ok((context.login_name().to_owned(), removed))
     }
 
     async fn whoami(
@@ -435,6 +508,7 @@ mod tests {
             },
             roles: Default::default(),
             assumed_role: None,
+            login: None,
         }
     }
 
@@ -733,5 +807,120 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(assumed.unwrap().1.as_deref(), Some("other"));
+    }
+
+    #[tokio::test]
+    async fn a_context_derives_from_another_with_a_role() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts.create(context("eu2"), false).await.unwrap();
+        contexts.add_role(None, "ops", OPS).await.unwrap();
+
+        // The source must be logged in: its login is what's reused.
+        let report = contexts
+            .derive(
+                "eu2",
+                "acme",
+                None,
+                RoleOverride::Assume("ops".into()),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::NotLoggedIn(_)));
+        contexts
+            .login(None, token("good"), RoleOverride::Keep)
+            .await
+            .unwrap();
+
+        // A refused role creates nothing.
+        let report = contexts
+            .derive(
+                "eu2",
+                "acme",
+                None,
+                RoleOverride::Assume(FORBIDDEN.into()),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::Assume(_)));
+        assert!(contexts.inspect("acme").await.is_err());
+
+        let (principal, assumed) = contexts
+            .derive(
+                "eu2",
+                "acme",
+                None,
+                RoleOverride::Assume("ops".into()),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(principal.user_name, "ada");
+        assert_eq!(assumed.unwrap().1.as_deref(), Some("other"));
+
+        // Same endpoint, its own role, the base's login; the base untouched.
+        let acme = flag("acme");
+        let resolved = contexts.resolve(Some(&acme)).await.unwrap();
+        assert_eq!(resolved.context.endpoint.address, "eu2.example:50051");
+        assert_eq!(resolved.role.unwrap().urn, OPS);
+        assert_eq!(
+            contexts.resolve(Some(&flag("eu2"))).await.unwrap().role,
+            None
+        );
+        assert!(contexts
+            .inspect("acme")
+            .await
+            .unwrap()
+            .credentials
+            .is_some());
+
+        // Declined again from the declined one: same single login.
+        contexts
+            .derive("acme", "acme-admin", None, RoleOverride::Drop, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            contexts
+                .inspect("acme-admin")
+                .await
+                .unwrap()
+                .context
+                .login
+                .as_deref(),
+            Some("eu2")
+        );
+
+        // One login for the group: out of any is out of all, in again too.
+        assert_eq!(
+            contexts.logout(Some(&acme)).await.unwrap(),
+            ("eu2".into(), true)
+        );
+        let report = contexts.resolve(Some(&flag("eu2"))).await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::NotLoggedIn(base) if base == "eu2"));
+        contexts
+            .login(Some(&acme), token("good"), RoleOverride::Keep)
+            .await
+            .unwrap();
+        assert!(contexts.resolve(Some(&flag("eu2"))).await.is_ok());
+        assert_eq!(
+            contexts
+                .resolve(Some(&acme))
+                .await
+                .unwrap()
+                .role
+                .unwrap()
+                .urn,
+            OPS
+        );
+
+        // The base can't go while declined contexts use its login.
+        let report = contexts.remove("eu2").await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::InUse(..)));
+        contexts.remove("acme-admin").await.unwrap();
+        contexts.remove("acme").await.unwrap();
+        assert!(contexts.resolve(Some(&flag("eu2"))).await.is_ok());
+        contexts.remove("eu2").await.unwrap();
     }
 }

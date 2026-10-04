@@ -24,6 +24,8 @@ pub enum Error {
     RoleExists(String),
     #[error("failed to assume role {0}")]
     Assume(String),
+    #[error("contexts {1} use the login of {0:?}: remove them first")]
+    InUse(String, String),
     #[error("failed to access the context store")]
     Store,
     #[error("failed to access the credential store")]

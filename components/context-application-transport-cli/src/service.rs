@@ -27,11 +27,21 @@ pub enum Command {
     },
 
     /// Create a context: a named gateway endpoint to log in to.
+    #[command(after_help = "Examples:\n  \
+        rmra context create eu2 --use && rmra login\n  \
+        rmra context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops")]
     Create {
         name: String,
-        /// The gateway, `host:port`.
-        #[arg(long, default_value = DEFAULT_ADDRESS)]
-        address: String,
+        /// Decline an existing, logged-in context: its endpoint and role
+        /// aliases, and its login itself -- shared, so logging in or out of
+        /// either does it for both. With --assume-role, one context per role
+        /// (e.g. per tenant) from one login; the role is verified now.
+        #[arg(long, value_name = "CONTEXT", conflicts_with_all = ["address", "plaintext", "ca_files", "server_name"])]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
+        from: Option<String>,
+        /// The gateway, `host:port` (default: api.eu2.sntns.io:50051).
+        #[arg(long)]
+        address: Option<String>,
         #[arg(long)]
         description: Option<String>,
         /// Talk plaintext h2c (local development stacks only).
@@ -96,6 +106,58 @@ pub async fn run(
         Command::List { format, quiet } => list(service, format, quiet).await,
         Command::Create {
             name,
+            from: Some(base),
+            description,
+            force,
+            make_current,
+            ..
+        } => {
+            let role = over.map(|o| o.role.clone()).unwrap_or_default();
+            let spinner = tui::Spinner::start(format!(
+                "Declining {} into {}",
+                tui::accent(&base),
+                tui::accent(&name)
+            ));
+            let (principal, assumed) =
+                match service.derive(&base, &name, description, role, force).await {
+                    Ok(done) => done,
+                    Err(report) => {
+                        spinner.fail(format!("Could not create {}", tui::accent(&name)));
+                        return Err(context_error(report));
+                    }
+                };
+            let acting = match &assumed {
+                Some((role, account)) => format!(
+                    "acting as {}",
+                    tui::accent(match account {
+                        Some(account) => format!("{} @ {account}", role.display_name()),
+                        None => role.display_name().to_owned(),
+                    })
+                ),
+                None => "as the login itself".to_owned(),
+            };
+            spinner.done(format!(
+                "Created context {} from {} {}",
+                tui::accent(&name),
+                tui::accent(&base),
+                tui::dim(format!(
+                    "· {} {acting}",
+                    if principal.user_name.is_empty() {
+                        principal.user_urn.clone()
+                    } else {
+                        principal.user_name.clone()
+                    }
+                ))
+            ));
+            if make_current {
+                service.use_context(&name).await.map_err(context_error)?;
+                tui::info(format!("Now using {}", tui::accent(&name)));
+            }
+            Ok(())
+        }
+        Command::Create {
+            name,
+            from: None,
             address,
             description,
             plaintext,
@@ -104,6 +166,7 @@ pub async fn run(
             force,
             make_current,
         } => {
+            let address = address.unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
             let mut authorities = Vec::new();
             for path in ca_files {
                 authorities
@@ -127,6 +190,7 @@ pub async fn run(
                     Some(remora_context::model::RoleOverride::Assume(role)) => Some(role.clone()),
                     _ => None,
                 },
+                login: None,
             };
             let address = context.endpoint.address.clone();
             let role = context.assumed_role.clone();
@@ -245,9 +309,12 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
                     [
                         name,
                         address,
-                        summary
-                            .credentials
-                            .map_or_else(|| "—".to_owned(), |kind| kind.to_string()),
+                        match (&summary.context.login, summary.credentials) {
+                            (Some(base), Some(_)) => format!("via {base}"),
+                            (Some(base), None) => format!("via {base} (logged out)"),
+                            (None, Some(kind)) => kind.to_string(),
+                            (None, None) => "—".to_owned(),
+                        },
                         summary
                             .context
                             .assumed_role

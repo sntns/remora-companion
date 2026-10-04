@@ -358,6 +358,7 @@ mod tests {
                 },
                 roles: Default::default(),
                 assumed_role: None,
+                login: None,
             },
             credentials: Credentials {
                 secret: Secret::AccessKey { token: "t".into() },
