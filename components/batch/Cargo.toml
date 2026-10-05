@@ -10,6 +10,7 @@ publish.workspace = true
 remora-image = { path = "../image" }
 remora-squashfs = { path = "../squashfs" }
 remora-progress = { path = "../progress" }
+remora-context = { path = "../context" }
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

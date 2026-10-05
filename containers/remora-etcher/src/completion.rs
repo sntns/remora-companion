@@ -1,6 +1,7 @@
 //! The values remora-etcher's dynamic completion offers (see
-//! remora-completion): local disks, for the arguments naming a flash
-//! target. Paths complete on their own.
+//! remora-completion): contexts and roles (the same as rmra's), and local
+//! disks, for the arguments naming a flash target. Paths complete on their
+//! own.
 //!
 //! Runs inside the shell's Tab: it must be fast and never fail loudly.
 
@@ -10,7 +11,7 @@ use remora_format::human_size;
 use crate::bootstrap;
 
 pub fn provide(kind: Kind) -> Vec<Candidate> {
-    if kind != Kind::Disk {
+    if !matches!(kind, Kind::Disk | Kind::Context | Kind::Role) {
         return Vec::new();
     }
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -21,6 +22,15 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
     };
     runtime.block_on(async {
         let services = bootstrap::wire().await;
+        use remora_context_application_transport_cli as context;
+        match kind {
+            Kind::Context => return context::complete_contexts(&services.context).await,
+            Kind::Role => {
+                let over = context::context_on_command_line();
+                return context::complete_roles(&services.context, over.as_ref()).await;
+            }
+            _ => {}
+        }
         let Ok(disks) = services.disk.list().await else {
             return Vec::new();
         };

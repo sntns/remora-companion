@@ -1,7 +1,9 @@
 mod bootstrap;
 mod completion;
 
-use clap::{CommandFactory, Parser};
+use remora_context::model::ContextOverride;
+
+use clap::{CommandFactory, FromArgMatches, Parser};
 
 #[derive(Parser)]
 #[command(
@@ -12,6 +14,10 @@ use clap::{CommandFactory, Parser};
 struct Options {
     #[command(subcommand)]
     command: Commands,
+
+    /// Before the command: the context it runs against (factory, batch).
+    #[command(flatten)]
+    context: remora_context_application_transport_cli::ContextArgs,
 
     /// Increase verbosity (-v, -vv, -vvv). From -v on, errors are shown in
     /// full, with where each cause was raised.
@@ -25,6 +31,20 @@ struct Options {
 
 #[derive(clap::Subcommand)]
 enum Commands {
+    /// Log in to the selected context's platform (the same contexts as rmra).
+    Login(remora_context_application_transport_cli::LoginArgs),
+
+    /// Forget the selected context's credentials.
+    Logout(remora_context_application_transport_cli::LogoutArgs),
+
+    /// Show whom the selected context is logged in as.
+    Whoami(remora_context_application_transport_cli::WhoamiArgs),
+
+    /// Manage contexts: named platform endpoints, docker-context style, and
+    /// the IAM role each acts as. Shared with rmra.
+    #[command(subcommand)]
+    Context(remora_context_application_transport_cli::Command),
+
     /// List and inspect disks.
     #[command(subcommand)]
     Disk(remora_disk_application_transport_cli::Command),
@@ -63,16 +83,16 @@ enum Commands {
     #[command(subcommand)]
     Batch(remora_batch_application_transport_cli::Command),
 
-    /// Manufacture a device against sntns-platform's factory-device
-    /// endpoint, writing its credential as a `remora-factory.yaml` to
-    /// bundle into an image with `identity create`.
+    /// Manufacture a device on sntns-platform as the selected context,
+    /// writing its credential as a `remora-factory.yaml` to bundle into an
+    /// image with `identity create`.
     #[command(subcommand)]
     Factory(remora_factory_application_transport_cli::Command),
 
     /// Update remora-etcher itself to its latest release.
     Update(remora_update_application_transport_cli::Args),
 
-    /// Enable shell completion (commands, options, disks and paths with Tab).
+    /// Enable shell completion (contexts, roles, disks and paths with Tab).
     Completion(remora_completion::Args),
 }
 
@@ -83,22 +103,42 @@ fn main() {
     remora_completion::install(completion::provide);
     clap_complete::CompleteEnv::with_factory(Options::command).complete();
 
-    let options = Options::parse();
+    let matches = Options::command().get_matches();
+    let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let over = options.context.over(&matches);
     init_tracing(&options);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("the tokio runtime builds");
-    let code = runtime.block_on(run(options));
+    let code = runtime.block_on(run(options, over));
     std::process::exit(code);
 }
 
-async fn run(options: Options) -> i32 {
+async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
     let verbose = options.verbose > 0;
     let services = bootstrap::wire().await;
+    let over = over.as_ref();
 
+    use remora_context_application_transport_cli as context;
     match options.command {
+        Commands::Login(args) => exit_on_error(
+            context::run_login(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Logout(args) => exit_on_error(
+            context::run_logout(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Whoami(args) => exit_on_error(
+            context::run_whoami(args, &services.context, over).await,
+            verbose,
+        ),
+        Commands::Context(command) => exit_on_error(
+            context::run(command, &services.context, over).await,
+            verbose,
+        ),
         Commands::Disk(cmd) => exit_on_error(
             remora_disk_application_transport_cli::run(cmd, &services.disk).await,
             verbose,
@@ -128,11 +168,11 @@ async fn run(options: Options) -> i32 {
             verbose,
         ),
         Commands::Batch(cmd) => exit_on_error(
-            remora_batch_application_transport_cli::run(cmd, &services.batch).await,
+            remora_batch_application_transport_cli::run(cmd, &services.batch, over).await,
             verbose,
         ),
         Commands::Factory(cmd) => exit_on_error(
-            remora_factory_application_transport_cli::run(cmd, &services.factory).await,
+            remora_factory_application_transport_cli::run(cmd, &services.factory, over).await,
             verbose,
         ),
         Commands::Update(args) => {
@@ -146,7 +186,7 @@ async fn run(options: Options) -> i32 {
         Commands::Completion(args) => remora_completion::instructions(
             "remora-etcher",
             args,
-            "Commands, options, disks and paths complete with Tab.",
+            "Contexts, roles, disks and paths complete with Tab.",
         ),
     }
 }

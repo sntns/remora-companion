@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use error_stack::Report;
+use remora_context::model::ContextOverride;
 use remora_factory::{
     application::{Error, FactoryService, Result},
     model::DeviceSerial,
@@ -10,7 +11,8 @@ use remora_progress::OperationContext;
 #[derive(clap::Subcommand)]
 pub enum Command {
     /// Manufacture a device: generate a keypair + CSR, request a factory
-    /// IDevID credential from sntns-platform, and write it out as a
+    /// IDevID credential from sntns-platform as the selected context (its
+    /// login and role choose the manufacturing account), and write it out as a
     /// `remora-factory.yaml`. That file is a plain identity input, the same
     /// as any other -- bundle it into an image with `identity create
     /// --inputs`, exactly like `config build`'s output. Also available as
@@ -36,18 +38,6 @@ pub enum Command {
         #[arg(long)]
         output: PathBuf,
 
-        /// Base URL of the platform API, e.g. https://api.sntns.dev (dev)
-        /// or the production regional equivalent.
-        #[arg(long)]
-        api_url: String,
-
-        /// Platform API key, sent as `Authorization: X-SNTNS-API-KEY
-        /// <key>`. The identity behind it needs an IAM policy allowing
-        /// the `remora::create-factory-device` action (note the double
-        /// colon) with a non-empty `resources` list.
-        #[arg(long, env = "REMORA_FACTORY_API_KEY")]
-        api_key: String,
-
         /// Re-sign a `--device-name` that was already manufactured (a
         /// mis-flashed board, a reused test unit); the platform revokes its
         /// previous IDevID. Not allowed with `--serial-policy`, which always
@@ -65,14 +55,19 @@ pub enum Command {
     },
 }
 
-pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
+/// The context's login (or the role it acts as) needs the
+/// `remora::create-factory-device` action, and `remora::use-serial-number-
+/// policy` on the policy it allocates from.
+pub async fn run(
+    command: Command,
+    service: &FactoryService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
     match command {
         Command::Provision {
             serial_policy,
             device_name,
             output,
-            api_url,
-            api_key,
             force,
             access_url,
         } => {
@@ -82,14 +77,7 @@ pub async fn run(command: Command, service: &FactoryService) -> Result<()> {
             let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
             let result = service
-                .provision(
-                    &serial,
-                    &api_url,
-                    &api_key,
-                    access_url.as_deref(),
-                    &output,
-                    &ctx,
-                )
+                .provision(over, &serial, access_url.as_deref(), &output, &ctx)
                 .await;
             drop(ctx);
             follow.finish(&result).await;

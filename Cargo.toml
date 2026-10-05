@@ -39,7 +39,7 @@ members = [
     "components/batch-application",
     "components/batch-application-transport-cli",
     "components/factory",
-    "components/factory-adapter-gateway",
+    "components/factory-adapter-grpc",
     "components/factory-application",
     "components/factory-application-transport-cli",
     "components/platform-grpc",
@@ -124,11 +124,7 @@ tokio-util = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# remora-factory-adapter-gateway: the one adapter in this workspace
-# that's a real network call (a factory-device credential request against
-# sntns-platform's gateway) rather than blocking local file I/O -- see its
-# own doc comment for why it's async-native instead of sync-wrapped like
-# every other adapter here.
+# HTTP client of remora-update-adapter-github (release feed, installers).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 # Local keypair + PKCS#10 CSR generation for factory provisioning -- the

@@ -35,13 +35,11 @@ pub struct SshCertificate {
 }
 
 /// What a session's ProxyCommand must open the channel as and to: the
-/// context and role the session resolved to -- the same identity whose key
-/// was just certified -- and the device (which, for scp, is only known once
-/// the operands are read).
+/// context the session resolved to -- whose login and role are the identity
+/// the key was just certified for -- and the device (which, for scp, is only
+/// known once the operands are read).
 pub struct ProxyTarget<'a> {
     pub context: &'a str,
-    /// The assumed role's URN, `None` for the login itself.
-    pub role: Option<&'a str>,
     pub device: &'a str,
 }
 

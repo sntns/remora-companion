@@ -4,6 +4,7 @@ use remora_batch::{
     model::BatchStep,
 };
 use remora_config::application::ConfigService;
+use remora_context::model::{ContextOverride, Selection};
 use remora_convert::application::ConvertService;
 use remora_factory::{application::FactoryService, model::DeviceSerial};
 use remora_identity::application::IdentityService;
@@ -48,7 +49,12 @@ impl BatchControllerImpl {
 
 #[async_trait::async_trait]
 impl BatchServiceInterface for BatchControllerImpl {
-    async fn run(&self, steps: Vec<BatchStep>, ctx: &OperationContext) -> Result<()> {
+    async fn run(
+        &self,
+        steps: Vec<BatchStep>,
+        over: Option<&ContextOverride>,
+        ctx: &OperationContext,
+    ) -> Result<()> {
         let total = steps.len();
         for (index, step) in steps.into_iter().enumerate() {
             if ctx.cancel.is_cancelled() {
@@ -119,8 +125,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                 BatchStep::FactoryProvision {
                     device_name,
                     serial_number_policy,
-                    api_url,
-                    api_key,
+                    context,
                     access_url,
                     force,
                     output,
@@ -130,11 +135,14 @@ impl BatchServiceInterface for BatchControllerImpl {
                             Report::new(remora_factory::application::Error::InvalidSerial(e))
                         })
                         .change_context(Error::Step { index, kind })?;
+                    let step_over = context.map(|name| ContextOverride {
+                        name,
+                        source: Selection::Flag,
+                    });
                     self.factory
                         .provision(
+                            step_over.as_ref().or(over),
                             &serial,
-                            &api_url,
-                            &api_key,
                             access_url.as_deref(),
                             &output,
                             ctx,

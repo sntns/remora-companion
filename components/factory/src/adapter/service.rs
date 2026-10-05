@@ -1,3 +1,5 @@
+use remora_context::model::ResolvedContext;
+
 use super::error::Result;
 use crate::model::DeviceSerial;
 
@@ -27,20 +29,11 @@ pub struct ProvisionedIdentity {
     pub access_url: String,
 }
 
-/// DI seam for `remora-factory-application`: the actual network
-/// call to `sntns-platform`'s factory-device provisioning endpoint.
-///
-/// Unlike this workspace's other adapters (which wrap blocking local file
-/// I/O and stay synchronous by design -- see CLAUDE.md's DI convention),
-/// this one is a real network call and is async-native rather than
-/// sync-wrapped for uniformity.
-///
-/// `api_url`/`api_key` are passed per call rather than fixed at
-/// construction time: they're CLI-level configuration (`factory provision
-/// --api-url ... --api-key ...`), known only once the subcommand's own
-/// arguments are parsed, well after the composition root has already
-/// wired every service -- keeping the adapter itself stateless (beyond a
-/// reused HTTP client) avoids coupling wiring order to that.
+/// DI seam for `remora-factory-application`: the call to `sntns-platform`'s
+/// factory-device provisioning, made as the selected context (its login,
+/// and the role it acts as) -- the manufacturing account is the caller's.
+/// A real network call, so async-native rather than sync-wrapped like this
+/// workspace's local file adapters.
 #[async_trait::async_trait]
 pub trait FactoryProvisioningAdapter: Send + Sync {
     /// Request a factory device credential under `serial`, presenting
@@ -52,8 +45,7 @@ pub trait FactoryProvisioningAdapter: Send + Sync {
     /// the platform re-signs it and revokes the previous IDevID.
     async fn provision(
         &self,
-        api_url: &str,
-        api_key: &str,
+        context: &ResolvedContext,
         serial: &DeviceSerial,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity>;

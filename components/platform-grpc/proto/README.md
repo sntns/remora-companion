@@ -10,7 +10,7 @@ public gateway APIs, copied from `main` at `6c6af2f`:
 | `sntns/service/iam/v1/user_service.proto` | `components/sntns-service-iam-gateway-api-proto/sntns/service/iam/v1/{user_service,user_model}.proto` |
 | `sntns/service/remora/v1/release_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{release_service,release_model}.proto` |
 | `sntns/service/remora/v1/deployment_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{deployment_service,deployment_model}.proto` |
-| `sntns/service/remora/v1/device_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{device_service,device_model}.proto` (GetDevice, ListDevices only) |
+| `sntns/service/remora/v1/device_service.proto` | `components/sntns-service-remora-gateway-api-proto/sntns/service/remora/v1/{device_service,device_model}.proto` (GetDevice, ListDevices, CreateFactoryDevice only; CreateFactoryDevice from `ae4aa75b`) |
 | `sntns/service/iam/v1/account_service.proto` | `components/sntns-service-iam-gateway-api-proto/sntns/service/iam/v1/{account_service,account_model}.proto` |
 
 What was changed, and why it is safe:
@@ -19,7 +19,7 @@ What was changed, and why it is safe:
   drive the REST gateway and the OpenAPI document, never the gRPC wire
   format, so a client does not need them (and would otherwise need to vendor
   googleapis and grpc-gateway too).
-- Only the RPCs and messages `rmra` calls are kept. Package names, service
+- Only the RPCs and messages `rmra` and `remora-etcher` call are kept. Package names, service
   names, message names and field numbers are unchanged, so the method paths
   (`/sntns.service.iam.v1.UserService/GetCurrentUser`, ...) and the encoding
   are exactly upstream's. Fields left out of a kept message are skipped as

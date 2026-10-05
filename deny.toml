@@ -35,8 +35,8 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
-    # Pulled in by reqwest/rustls (remora-factory-adapter-gateway's
-    # network call to sntns-platform): ring/rustls-webpki/untrusted are
+    # Pulled in by reqwest/rustls and tonic (remora-update-adapter-github's
+    # release downloads, the gRPC gateway's TLS): ring/rustls-webpki/untrusted are
     # ISC (an OSI-approved, MIT/BSD-equivalent permissive license);
     # webpki-roots (Mozilla's CA bundle) is CDLA-Permissive-2.0, also
     # permissive.

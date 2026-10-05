@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use error_stack::{Report, ResultExt};
 use remora_batch::{application::BatchService, model::BatchStep};
+use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use super::error::{Error, Result};
@@ -19,7 +20,13 @@ pub enum Command {
     },
 }
 
-pub async fn run(command: Command, service: &BatchService) -> Result<()> {
+/// `over`: the context factory-provision steps manufacture as, unless a
+/// step names its own.
+pub async fn run(
+    command: Command,
+    service: &BatchService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
     match command {
         Command::Run { recipe } => {
             let contents = std::fs::read_to_string(&recipe)
@@ -31,7 +38,7 @@ pub async fn run(command: Command, service: &BatchService) -> Result<()> {
             let (sink, stream) = remora_progress::channel();
             let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
-            let result = service.run(steps, &ctx).await;
+            let result = service.run(steps, over, &ctx).await;
             drop(ctx);
             follow.finish(&result).await;
             result.change_context(Error::Batch)?;
@@ -59,6 +66,7 @@ mod tests {
         async fn run(
             &self,
             _steps: Vec<BatchStep>,
+            _over: Option<&ContextOverride>,
             _ctx: &OperationContext,
         ) -> remora_batch::application::Result<()> {
             Ok(())
@@ -84,7 +92,9 @@ mod tests {
     #[tokio::test]
     async fn fails_clearly_when_the_recipe_file_does_not_exist() {
         let recipe = temp_path("missing.json");
-        let err = run(Command::Run { recipe }, &service()).await.unwrap_err();
+        let err = run(Command::Run { recipe }, &service(), None)
+            .await
+            .unwrap_err();
         assert!(format!("{err:?}").contains("failed to read recipe file"));
     }
 
@@ -97,6 +107,7 @@ mod tests {
                 recipe: recipe.clone(),
             },
             &service(),
+            None,
         )
         .await
         .unwrap_err();
@@ -113,6 +124,7 @@ mod tests {
                 recipe: recipe.clone(),
             },
             &service(),
+            None,
         )
         .await
         .unwrap();

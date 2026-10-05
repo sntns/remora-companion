@@ -1,3 +1,4 @@
+use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use crate::model::BatchStep;
@@ -15,7 +16,14 @@ use super::error::Result;
 /// files any earlier steps already produced are left exactly as they were.
 #[async_trait::async_trait]
 pub trait BatchServiceInterface: Send + Sync {
-    async fn run(&self, steps: Vec<BatchStep>, ctx: &OperationContext) -> Result<()>;
+    /// `over` is the context a `FactoryProvision` step manufactures as,
+    /// unless the step names its own.
+    async fn run(
+        &self,
+        steps: Vec<BatchStep>,
+        over: Option<&ContextOverride>,
+        ctx: &OperationContext,
+    ) -> Result<()>;
 }
 
 /// Injectable handle to whatever `BatchServiceInterface` implementation was

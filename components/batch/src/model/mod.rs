@@ -65,8 +65,10 @@ pub enum BatchStep {
         device_name: Option<String>,
         #[serde(default)]
         serial_number_policy: Option<String>,
-        api_url: String,
-        api_key: String,
+        /// The context to manufacture as; default: the batch's own
+        /// (`--context`, else the current one).
+        #[serde(default)]
+        context: Option<String>,
         /// Escape hatch for a deployment that hasn't configured an
         /// access-url yet; see `FactoryServiceInterface::provision`'s doc
         /// comment. Normally omitted -- the platform's response supplies it.
