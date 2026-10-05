@@ -49,6 +49,8 @@ pub struct State {
     pub fail_next_upload_after: Option<usize>,
     pub devices: BTreeMap<String, HashMap<String, String>>,
     deployments: BTreeMap<String, StoredDeployment>,
+    /// Manufactured serials, with how many times each was signed.
+    pub factory_devices: BTreeMap<String, u32>,
 }
 
 #[derive(Clone)]
@@ -350,6 +352,48 @@ impl pb::device_service_server::DeviceService for TestGateway {
         Ok(Response::new(pb::DeviceServiceListDevicesResponse {
             device_summaries: summaries,
         }))
+    }
+
+    /// Manufactures like the platform: a policy allocates `<policy>-<n>`, an
+    /// existing name is refused unless `force`, which re-signs it.
+    async fn create_factory_device(
+        &self,
+        request: Request<pb::DeviceServiceCreateFactoryDeviceRequest>,
+    ) -> Result<Response<pb::DeviceServiceCreateFactoryDeviceResponse>, Status> {
+        let request = request.into_inner();
+        let mut state = self.state();
+        let serial = match (
+            request.device_name.is_empty(),
+            request.serial_number_policy_name.is_empty(),
+        ) {
+            (false, true) => request.device_name,
+            (true, false) if !request.force => format!(
+                "{}-{}",
+                request.serial_number_policy_name,
+                state.factory_devices.len() + 1
+            ),
+            _ => {
+                return Err(Status::invalid_argument(
+                    "device_name xor policy, force only with a name",
+                ))
+            }
+        };
+        let signed = state.factory_devices.entry(serial.clone()).or_default();
+        if *signed > 0 && !request.force {
+            return Err(Status::already_exists("a device already has this name"));
+        }
+        *signed += 1;
+        Ok(Response::new(
+            pb::DeviceServiceCreateFactoryDeviceResponse {
+                factory_device_name: format!("urn:test:factory-device:{serial}"),
+                certificate_reference: reference(&format!("certificate-{serial}-{signed}")),
+                certificate: format!("idevid {serial}").into_bytes(),
+                certificate_authority_certificate: b"factory ca".to_vec(),
+                server_certificate_authority_certificate: b"server ca".to_vec(),
+                access_url: "https://access.test/access/v1".into(),
+                serial_number: serial,
+            },
+        ))
     }
 }
 

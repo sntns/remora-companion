@@ -2789,6 +2789,7 @@ dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
+ "remora-context",
  "remora-image",
  "remora-progress",
  "remora-squashfs",
@@ -2805,6 +2806,9 @@ dependencies = [
  "remora-batch",
  "remora-config",
  "remora-config-application",
+ "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-application",
  "remora-convert",
  "remora-convert-adapter-gzip",
  "remora-convert-adapter-qcow2",
@@ -2824,6 +2828,7 @@ dependencies = [
  "remora-squashfs",
  "remora-squashfs-adapter-backhand",
  "remora-squashfs-application",
+ "tempfile",
  "tokio",
 ]
 
@@ -2835,6 +2840,7 @@ dependencies = [
  "clap",
  "error-stack",
  "remora-batch",
+ "remora-context",
  "remora-progress",
  "remora-tui",
  "serde_json",
@@ -3181,6 +3187,11 @@ dependencies = [
  "remora-config",
  "remora-config-application",
  "remora-config-application-transport-cli",
+ "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-adapter-grpc",
+ "remora-context-application",
+ "remora-context-application-transport-cli",
  "remora-convert",
  "remora-convert-adapter-gzip",
  "remora-convert-adapter-qcow2",
@@ -3191,7 +3202,7 @@ dependencies = [
  "remora-disk-application",
  "remora-disk-application-transport-cli",
  "remora-factory",
- "remora-factory-adapter-gateway",
+ "remora-factory-adapter-grpc",
  "remora-factory-application",
  "remora-factory-application-transport-cli",
  "remora-flash",
@@ -3232,22 +3243,24 @@ dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
+ "remora-context",
  "remora-progress",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "remora-factory-adapter-gateway"
+name = "remora-factory-adapter-grpc"
 version = "0.7.3"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "error-stack",
+ "remora-context",
  "remora-factory",
- "reqwest",
- "serde",
- "serde_json",
+ "remora-ota-adapter-grpc",
+ "remora-platform-grpc",
+ "tokio",
+ "tonic",
 ]
 
 [[package]]
@@ -3260,8 +3273,12 @@ dependencies = [
  "p256 0.14.0",
  "pem",
  "rcgen",
+ "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-application",
  "remora-factory",
  "remora-progress",
+ "tempfile",
  "tokio",
  "x509-parser",
 ]
@@ -3272,6 +3289,7 @@ version = "0.7.3"
 dependencies = [
  "clap",
  "error-stack",
+ "remora-context",
  "remora-factory",
  "remora-progress",
  "remora-tui",

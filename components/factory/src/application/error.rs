@@ -1,6 +1,8 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
+    Context(String),
+    #[error("{0}")]
     InvalidSerial(crate::model::DeviceSerialError),
     #[error("failed to generate a device keypair")]
     Keygen,

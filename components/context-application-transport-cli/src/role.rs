@@ -35,7 +35,7 @@ pub enum Command {
     /// Act as a role for every later command of this context, once the
     /// platform confirms the login may assume it.
     Assume {
-        /// An alias (`rmra role ls`), or a role URN.
+        /// An alias (`context role ls`), or a role URN.
         #[arg(add = remora_completion::values(remora_completion::Kind::Role))]
         role: String,
     },
@@ -64,7 +64,10 @@ pub async fn run(
                 crate::service::Format::Table if roles.is_empty() => tui::info(format!(
                     "No role in context {}. Add one with {}",
                     tui::accent(&context),
-                    tui::accent("rmra role add <alias> <role-urn>")
+                    tui::accent(format!(
+                        "{} context role add <alias> <role-urn>",
+                        crate::program()
+                    ))
                 )),
                 crate::service::Format::Table => {
                     let mut table = tui::Table::new(["alias", "urn"]);
@@ -96,7 +99,7 @@ pub async fn run(
             } else {
                 tui::step(format!(
                     "Assume it with {}",
-                    tui::accent(format!("rmra role assume {alias}"))
+                    tui::accent(format!("{} context role assume {alias}", crate::program()))
                 ));
             }
             Ok(())

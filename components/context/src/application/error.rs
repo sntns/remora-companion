@@ -16,7 +16,7 @@ pub enum Error {
     NotLoggedIn(String),
     #[error("failed to verify the credentials with the platform")]
     Verify,
-    #[error("no role {0:?} in this context: add it with `rmra role add {0} <role-urn>`, or give the role's URN")]
+    #[error("no role {0:?} in this context: add it with `rmra context role add {0} <role-urn>`, or give the role's URN")]
     UnknownRole(String),
     #[error("{0:?} is not a role URN (urn:…:role:…)")]
     InvalidRoleUrn(String),

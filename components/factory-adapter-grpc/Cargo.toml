@@ -1,0 +1,19 @@
+[package]
+name = "remora-factory-adapter-grpc"
+description = "FactoryProvisioningAdapter implementation over sntns-platform's remora gateway (DeviceService.CreateFactoryDevice), authenticated as the selected context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-factory = { path = "../factory" }
+remora-context = { path = "../context" }
+remora-platform-grpc = { path = "../platform-grpc" }
+async-trait.workspace = true
+error-stack.workspace = true
+tonic.workspace = true
+
+[dev-dependencies]
+remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

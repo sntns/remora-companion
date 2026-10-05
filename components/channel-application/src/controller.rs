@@ -100,7 +100,6 @@ impl ChannelControllerImpl {
 
         let proxy_command = proxy_command(&ProxyTarget {
             context: &context.context.name,
-            role: context.role.as_ref().map(|role| role.urn.as_str()),
             device,
         });
         let mut pinning = vec![
@@ -338,10 +337,7 @@ mod tests {
             platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
             store::ContextStoreAdapterService,
         },
-        model::{
-            Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride, Secret,
-            Selection, Tls,
-        },
+        model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
     };
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
@@ -633,25 +629,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_proxy_command_opens_the_channel_as_the_certified_role() {
+    async fn the_proxy_command_opens_the_channel_in_the_selected_context() {
         let root = tempfile::tempdir().unwrap();
         let channel = controller(root.path(), Gateway::default()).await;
         let mut ssh = request(&[], "ssh");
-        ssh.over = Some(ContextOverride {
-            name: None,
-            source: Selection::Flag,
-            role: RoleOverride::Assume("urn:sntns:iam:eu2:other:role:ops".into()),
-        });
-        ssh.proxy_command = Arc::new(|target| format!("role={:?}", target.role));
+        ssh.proxy_command = Arc::new(|target| format!("context={}", target.context));
         let prepared = channel.prepare_ssh(ssh).await.unwrap();
-        assert_eq!(
-            prepared.command.arguments[1],
-            "ProxyCommand=role=Some(\"urn:sntns:iam:eu2:other:role:ops\")"
-        );
-
-        let mut ssh = request(&[], "ssh");
-        ssh.proxy_command = Arc::new(|target| format!("role={:?}", target.role));
-        let prepared = channel.prepare_ssh(ssh).await.unwrap();
-        assert_eq!(prepared.command.arguments[1], "ProxyCommand=role=None");
+        assert_eq!(prepared.command.arguments[1], "ProxyCommand=context=eu2");
     }
 }

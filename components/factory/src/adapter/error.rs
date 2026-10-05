@@ -1,6 +1,6 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("failed to reach the platform's factory-device endpoint")]
+    #[error("failed to reach the platform's gateway")]
     Request,
     #[error("{0} was already manufactured (pass --force to re-sign it and revoke its old IDevID)")]
     AlreadyExists(String),

@@ -19,7 +19,7 @@ pub struct Context {
     /// operates another account's devices.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub roles: std::collections::BTreeMap<String, String>,
-    /// The role every call assumes (`rmra role assume`): an alias of
+    /// The role every call assumes (`context role assume`): an alias of
     /// `roles`, or a role URN. None acts as the login itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assumed_role: Option<String>,
@@ -90,17 +90,18 @@ pub enum Selection {
     Only,
 }
 
-/// A context named for one invocation, overriding the stored current one.
+/// A context named for one invocation (`--context`, `RMRA_CONTEXT`),
+/// overriding the stored current one. Only the context: which role it acts
+/// as is the context's own setting, never a per-command choice.
 #[derive(Debug, Clone)]
 pub struct ContextOverride {
     /// The context to use instead of the stored current one.
-    pub name: Option<String>,
+    pub name: String,
     pub source: Selection,
-    /// The role to act as instead of the context's own choice.
-    pub role: RoleOverride,
 }
 
-/// A role chosen for one invocation (`--assume-role`, `--no-assume-role`).
+/// The role a context is set to act as, when it is created or logged in
+/// (`--assume-role`, `--no-assume-role`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum RoleOverride {
     /// Whatever the context assumes, if anything.
@@ -126,7 +127,7 @@ impl AssumedRole {
     }
 }
 
-/// One of a context's roles, for `rmra role ls`.
+/// One of a context's roles, for `context role ls`.
 #[derive(Debug, Clone)]
 pub struct RoleSummary {
     pub alias: String,
@@ -142,6 +143,6 @@ pub struct ResolvedContext {
     pub context: Context,
     pub credentials: Credentials,
     pub selection: Selection,
-    /// The role every call of this invocation assumes, if any.
+    /// The role every call assumes, as the context says, if any.
     pub role: Option<AssumedRole>,
 }

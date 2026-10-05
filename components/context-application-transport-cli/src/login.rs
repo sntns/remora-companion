@@ -26,15 +26,44 @@ pub struct LoginArgs {
     /// Log in with an access key, reading its token from stdin.
     #[arg(long)]
     token_stdin: bool,
+    #[command(flatten)]
+    role: RoleArgs,
 }
 
 #[derive(clap::Args)]
 pub struct LogoutArgs {}
 
+/// The role a context is set to act as: on `login` and `context create`
+/// only, since which role a context acts as is part of the context, never
+/// a choice of each command.
+#[derive(clap::Args, Debug, Default)]
+pub struct RoleArgs {
+    /// Make the context act as this IAM role: an alias of its roles
+    /// (`context role ls`) or a role URN, possibly of another tenant.
+    #[arg(long, value_name = "ROLE")]
+    #[arg(add = remora_completion::values(remora_completion::Kind::Role))]
+    assume_role: Option<String>,
+    /// Make the context act as the login itself, even if it assumed a role.
+    #[arg(long, conflicts_with = "assume_role")]
+    no_assume_role: bool,
+}
+
+impl RoleArgs {
+    pub fn choice(&self) -> RoleOverride {
+        if self.no_assume_role {
+            return RoleOverride::Drop;
+        }
+        match self.assume_role.clone().filter(|role| !role.is_empty()) {
+            Some(role) => RoleOverride::Assume(role),
+            None => RoleOverride::Keep,
+        }
+    }
+}
+
 #[derive(clap::Args)]
 pub struct WhoamiArgs {}
 
-/// `rmra login`: verify credentials with the selected context's platform,
+/// `<bin> login`: verify credentials with the selected context's platform,
 /// then store them. With no flags it is a guided prompt -- including, on a
 /// first run, creating the context to log in to.
 pub async fn run_login(
@@ -49,7 +78,7 @@ pub async fn run_login(
         )));
     }
     if interactive {
-        tui::intro("rmra login");
+        tui::intro(format!("{} login", crate::program()));
     }
 
     let name = match service.selected(over).await.map_err(context_error)? {
@@ -74,12 +103,10 @@ pub async fn run_login(
         }
     };
     // From here on, address the context by name: a first-run context was
-    // just created, and an override already named it. The role travels
-    // separately: logging in decides it for the context.
+    // just created, and an override already named it.
     let target = ContextOverride {
-        name: Some(name.clone()),
+        name: name.clone(),
         source: over.map_or(remora_context::model::Selection::Current, |o| o.source),
-        role: RoleOverride::Keep,
     };
 
     let secret = if let Some(identity) = args.identity {
@@ -100,7 +127,7 @@ pub async fn run_login(
 
     // Which role the context acts as: --assume-role / --no-assume-role, else
     // asked when a human is there, else whatever the context already says.
-    let role = match over.map(|o| o.role.clone()).unwrap_or_default() {
+    let role = match args.role.choice() {
         RoleOverride::Keep if interactive => prompt_role(service, &target).await?,
         role => role,
     };
@@ -254,7 +281,7 @@ pub async fn run_whoami(
     Ok(())
 }
 
-/// The first-run path of `rmra login`: no context exists, so create one.
+/// The first-run path of `<bin> login`: no context exists, so create one.
 async fn first_context(service: &ContextService) -> Result<String> {
     tui::info("No context yet — let's create one.");
     let name: String = tui::input("Context name")

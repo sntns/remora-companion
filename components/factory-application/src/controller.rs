@@ -2,6 +2,7 @@ use std::path::Path;
 
 use error_stack::{Report, ResultExt};
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use remora_context::{application::ContextService, model::ContextOverride};
 use remora_factory::{
     adapter::FactoryProvisioningAdapterService,
     application::{Error, FactoryServiceInterface, Result},
@@ -12,21 +13,25 @@ use remora_progress::OperationContext;
 use crate::yaml;
 
 /// The factory vertical's use case: generate a device keypair + CSR
-/// locally (via the injected keygen -- no adapter seam for this, unlike
-/// most of this workspace's I/O: `rcgen` is pure computation, not
-/// infrastructure access with a swap-worthy alternative), request a
-/// factory credential from the injected `FactoryProvisioningAdapterService`,
+/// locally (no adapter seam for this, unlike most of this workspace's I/O:
+/// `rcgen` is pure computation, not infrastructure access with a
+/// swap-worthy alternative), request a factory credential from the injected
+/// `FactoryProvisioningAdapterService` as the selected context,
 /// and render the result as `remora-factory.yaml` at `output`. Deliberately
 /// has no dependency on `ImageService` -- see `FactoryServiceInterface`'s
 /// own doc comment for why bundling into an image is a separate, later
 /// step (`identity create`), not this controller's job.
 pub struct FactoryControllerImpl {
+    contexts: ContextService,
     provisioning: FactoryProvisioningAdapterService,
 }
 
 impl FactoryControllerImpl {
-    pub fn new(provisioning: FactoryProvisioningAdapterService) -> Self {
-        Self { provisioning }
+    pub fn new(contexts: ContextService, provisioning: FactoryProvisioningAdapterService) -> Self {
+        Self {
+            contexts,
+            provisioning,
+        }
     }
 }
 
@@ -34,13 +39,17 @@ impl FactoryControllerImpl {
 impl FactoryServiceInterface for FactoryControllerImpl {
     async fn provision(
         &self,
+        over: Option<&ContextOverride>,
         serial: &DeviceSerial,
-        api_url: &str,
-        api_key: &str,
         access_url_override: Option<&str>,
         output: &Path,
         ctx: &OperationContext,
     ) -> Result<ProvisionedDevice> {
+        // First: a context that isn't logged in fails before any key exists.
+        let context = self.contexts.resolve(over).await.map_err(|report| {
+            let message = report.current_context().to_string();
+            report.change_context(Error::Context(message))
+        })?;
         if ctx.cancel.is_cancelled() {
             return Err(Report::new(Error::Cancelled));
         }
@@ -70,7 +79,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         ctx.sink.phase("requesting factory device credential");
         let identity = self
             .provisioning
-            .provision(api_url, api_key, serial, &csr_der)
+            .provision(&context, serial, &csr_der)
             .await
             .change_context(Error::Provision)?;
 

@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+remora-context = { path = "../context" }
 remora-batch = { path = "../batch" }
 remora-convert = { path = "../convert" }
 remora-identity = { path = "../identity" }
@@ -19,6 +20,9 @@ error-stack.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+tempfile.workspace = true
 # Real (not mocked) adapters, for an integration-style test of the use case
 # end to end — same posture as the other application crates' tests.
 remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }

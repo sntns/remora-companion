@@ -15,6 +15,8 @@ use std::{
     },
 };
 
+use remora_context::{application::ContextService, model::ResolvedContext};
+use remora_context_application::ContextControllerImpl;
 use remora_factory::{
     adapter::{FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity},
     application::FactoryServiceInterface,
@@ -24,7 +26,7 @@ use remora_factory_application::FactoryControllerImpl;
 use remora_progress::OperationContext;
 
 /// Stands in for the real gateway call (see
-/// `remora-factory-adapter-gateway`, gated on a platform endpoint
+/// `remora-factory-adapter-grpc`, gated on a platform endpoint
 /// this test has no business depending on) -- returns a fixed, made-up but
 /// correctly-shaped response, so this test only exercises this crate's own
 /// logic (keygen/CSR/rendering the yaml).
@@ -34,8 +36,7 @@ struct FakeProvisioning;
 impl FactoryProvisioningAdapter for FakeProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &ResolvedContext,
         serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
@@ -73,7 +74,75 @@ fn temp_path(label: &str) -> PathBuf {
 }
 
 fn controller(provisioning: impl FactoryProvisioningAdapter + 'static) -> FactoryControllerImpl {
-    FactoryControllerImpl::new(FactoryProvisioningAdapterService::new(provisioning))
+    FactoryControllerImpl::new(
+        logged_in_contexts(),
+        FactoryProvisioningAdapterService::new(provisioning),
+    )
+}
+
+/// A context service with one context, `eu2`, logged in: the factory
+/// resolves it before calling the (fake) platform. Its directory is left
+/// behind on purpose -- the service outlives any one scope here.
+fn logged_in_contexts() -> ContextService {
+    use remora_context::{
+        adapter::{
+            credentials::{CredentialStoreAdapter, CredentialStoreAdapterService},
+            platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
+            store::{ContextStoreAdapter, ContextStoreAdapterService},
+        },
+        model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
+    };
+    use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
+
+    /// Resolving a context never calls its platform.
+    struct NoPlatform;
+
+    #[async_trait::async_trait]
+    impl PlatformSessionAdapter for NoPlatform {
+        async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
+            unreachable!("resolving a context does not log in")
+        }
+        async fn acting_account(
+            &self,
+            _: &Context,
+            _: &Credentials,
+            _: &str,
+        ) -> platform::Result<Option<String>> {
+            unreachable!("resolving a context does not log in")
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap().keep();
+    let store = FileContextStoreImpl::new(&root);
+    store
+        .put(&Context {
+            name: "eu2".into(),
+            description: None,
+            endpoint: Endpoint {
+                address: "api.example.invalid:50051".into(),
+                tls: Tls::default(),
+            },
+            roles: Default::default(),
+            assumed_role: None,
+            login: None,
+        })
+        .unwrap();
+    let credentials = FileCredentialStoreImpl::new(&root);
+    credentials
+        .put(
+            "eu2",
+            &Credentials {
+                secret: Secret::AccessKey {
+                    token: "unused-in-the-fake".into(),
+                },
+            },
+        )
+        .unwrap();
+    ContextService::new(ContextControllerImpl::new(
+        ContextStoreAdapterService::new(store),
+        CredentialStoreAdapterService::new(credentials),
+        PlatformSessionAdapterService::new(NoPlatform),
+    ))
 }
 
 /// Pulls the dedented body of a `key: |` block scalar out of a rendered
@@ -113,12 +182,11 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
 
     controller(FakeProvisioning)
         .provision(
+            None,
             &DeviceSerial::Explicit {
                 device_name: "e2e-serial-0001".to_string(),
                 force: false,
             },
-            "https://api.example.invalid",
-            "unused-in-the-fake",
             None,
             &output,
             &OperationContext::noop(),
@@ -191,8 +259,7 @@ struct EmptyAccessUrlProvisioning;
 impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &ResolvedContext,
         serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
@@ -215,12 +282,11 @@ async fn fails_when_the_platform_omits_an_access_url_and_no_override_was_given()
 
     let result = controller(EmptyAccessUrlProvisioning)
         .provision(
+            None,
             &DeviceSerial::Explicit {
                 device_name: "e2e-serial-0003".to_string(),
                 force: false,
             },
-            "https://api.example.invalid",
-            "unused-in-the-fake",
             None,
             &output,
             &OperationContext::noop(),
@@ -240,12 +306,11 @@ async fn honors_the_access_url_override_when_the_platform_response_is_empty() {
 
     controller(EmptyAccessUrlProvisioning)
         .provision(
+            None,
             &DeviceSerial::Explicit {
                 device_name: "e2e-serial-0004".to_string(),
                 force: false,
             },
-            "https://api.example.invalid",
-            "unused-in-the-fake",
             Some("https://override.example.invalid/access/v1"),
             &output,
             &OperationContext::noop(),
@@ -293,8 +358,7 @@ struct RealCapturedProvisioning {
 impl FactoryProvisioningAdapter for RealCapturedProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &ResolvedContext,
         _serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
@@ -393,12 +457,11 @@ async fn renders_a_real_platform_issued_credential_set_correctly() {
 
     controller(provisioning)
         .provision(
+            None,
             &DeviceSerial::Explicit {
                 device_name: fixture::DEVICE_NAME.to_string(),
                 force: false,
             },
-            "https://api.example.invalid",
-            "unused",
             None,
             &output,
             &OperationContext::noop(),
@@ -455,8 +518,7 @@ struct RecordingProvisioning {
 impl FactoryProvisioningAdapter for RecordingProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &ResolvedContext,
         serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
@@ -479,14 +541,7 @@ async fn provision_recording(serial: DeviceSerial) -> (Vec<DeviceSerial>, String
     let seen = Arc::new(Mutex::new(Vec::new()));
 
     let device = controller(RecordingProvisioning { seen: seen.clone() })
-        .provision(
-            &serial,
-            "https://api.example.invalid",
-            "unused-in-the-fake",
-            None,
-            &output,
-            &OperationContext::noop(),
-        )
+        .provision(None, &serial, None, &output, &OperationContext::noop())
         .await
         .expect("provisioning should succeed against the fake adapter");
 

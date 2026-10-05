@@ -32,6 +32,9 @@ pub trait ContextServiceInterface: Send + Sync {
         role: RoleOverride,
         replace: bool,
     ) -> Result<(Principal, Option<(AssumedRole, Option<String>)>)>;
+    /// Renames context `from` to `to`, with its login, the contexts declined
+    /// from it, and its being current.
+    async fn rename(&self, from: &str, to: &str) -> Result<()>;
     /// Removes a context and its credentials, and stops it being current.
     async fn remove(&self, name: &str) -> Result<()>;
     /// Makes `name` the stored current context.

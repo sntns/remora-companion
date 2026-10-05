@@ -311,23 +311,35 @@ async fn login_whoami_and_a_channel_on_stdio() {
     );
 
     // Roles: another tenant's role, remembered, verified, then assumed by
-    // every command -- the ssh ProxyCommand's channel open included.
+    // the context -- every command, the ssh ProxyCommand's channel open
+    // included.
     let (code, _, stderr) = rmra
         .run(
-            &["role", "add", "ops", "urn:sntns:iam:local:other:role:ops"],
+            &[
+                "context",
+                "role",
+                "add",
+                "ops",
+                "urn:sntns:iam:local:other:role:ops",
+            ],
             b"",
         )
         .await;
     assert_eq!(code, 0, "{stderr}");
     let (code, _, stderr) = rmra
         .run(
-            &["role", "assume", "urn:sntns:iam:local:other:role:admin"],
+            &[
+                "context",
+                "role",
+                "assume",
+                "urn:sntns:iam:local:other:role:admin",
+            ],
             b"",
         )
         .await;
     assert_eq!(code, 1);
     assert!(stderr.contains("role permission denied"), "{stderr}");
-    let (code, _, stderr) = rmra.run(&["role", "assume", "ops"], b"").await;
+    let (code, _, stderr) = rmra.run(&["context", "role", "assume", "ops"], b"").await;
     assert_eq!(code, 0, "{stderr}");
     assert!(stderr.contains("other"), "{stderr}");
 
@@ -344,31 +356,27 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .run(&["channel", "open", "OTHERDEV", "--quiet"], b"as the role")
         .await;
     assert_eq!((code, stdout.as_str()), (0, "elor eht sa"), "{stderr}");
-    let (code, _, stderr) = rmra
+    // The role is the context's, never a command's; the context is chosen
+    // before the command, never after it.
+    let (code, _, _) = rmra
         .run(
             &["--no-assume-role", "channel", "open", "OTHERDEV", "--quiet"],
             b"",
         )
         .await;
+    assert_eq!(code, 2);
+    let (code, _, _) = rmra
+        .run(&["channel", "open", "OTHERDEV", "-c", "local"], b"")
+        .await;
+    assert_eq!(code, 2);
+
+    let (code, _, _) = rmra.run(&["context", "role", "drop"], b"").await;
+    assert_eq!(code, 0);
+    let (code, _, stderr) = rmra
+        .run(&["channel", "open", "OTHERDEV", "--quiet"], b"")
+        .await;
     assert_eq!(code, 255);
     assert!(stderr.contains("device not found"), "{stderr}");
-
-    let (code, _, _) = rmra.run(&["role", "drop"], b"").await;
-    assert_eq!(code, 0);
-    let (code, _, _) = rmra
-        .run(
-            &[
-                "--assume-role",
-                "ops",
-                "channel",
-                "open",
-                "OTHERDEV",
-                "--quiet",
-            ],
-            b"x",
-        )
-        .await;
-    assert_eq!(code, 0);
 
     // The role as part of the context, decided at login: a context created
     // to act as another tenant's role, verified when it logs in; a refused
@@ -406,9 +414,9 @@ async fn login_whoami_and_a_channel_on_stdio() {
             &[
                 "-c",
                 "other-ops",
+                "login",
                 "--assume-role",
                 "urn:sntns:iam:local:other:role:admin",
-                "login",
                 "--token-stdin",
             ],
             login.as_bytes(),
@@ -428,8 +436,8 @@ async fn login_whoami_and_a_channel_on_stdio() {
             &[
                 "-c",
                 "other-ops",
-                "--no-assume-role",
                 "login",
+                "--no-assume-role",
                 "--token-stdin",
             ],
             login.as_bytes(),
@@ -487,10 +495,24 @@ async fn login_whoami_and_a_channel_on_stdio() {
     assert_eq!((code, stdout.as_str()), (0, "denilced"), "{stderr}");
     let (_, stdout, _) = rmra.run(&["context", "ls"], b"").await;
     assert!(stdout.contains("via local"), "{stdout}");
+
+    // Renamed, it keeps its login and role.
+    let (code, _, stderr) = rmra
+        .run(&["context", "rename", "as-ops", "tenant-ops"], b"")
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let (code, stdout, stderr) = rmra
+        .run(
+            &["-c", "tenant-ops", "channel", "open", "OTHERDEV", "--quiet"],
+            b"renamed",
+        )
+        .await;
+    assert_eq!((code, stdout.as_str()), (0, "demaner"), "{stderr}");
+
     let (code, _, stderr) = rmra.run(&["context", "rm", "-f", "local"], b"").await;
     assert_eq!(code, 1);
-    assert!(stderr.contains("as-ops"), "{stderr}");
-    let (code, _, _) = rmra.run(&["context", "rm", "-f", "as-ops"], b"").await;
+    assert!(stderr.contains("tenant-ops"), "{stderr}");
+    let (code, _, _) = rmra.run(&["context", "rm", "-f", "tenant-ops"], b"").await;
     assert_eq!(code, 0);
 
     let (code, _, _) = rmra.run(&["logout"], b"").await;

@@ -79,9 +79,10 @@ declined contexts use it. Its role is verified when it's created.
 From then on every call of the context (devices, OTA, `ssh`/`scp`, whose
 channel is opened as the very role the key was certified for) acts in the
 role's account. Roles can also be named and switched without logging in
-again (`rmra role add <alias> <urn>`, `rmra role assume <alias>`,
-`rmra role drop`), or chosen for one command (`--assume-role <alias|urn>`,
-RMRA_ASSUME_ROLE, `--no-assume-role`).
+again (`rmra context role add <alias> <urn>`, `rmra context role assume
+<alias>`, `rmra context role drop`). The role is always the context's: no
+command takes a role of its own -- for another role, use (or `--from`
+create) another context.
 
 ### Shell completion
 
@@ -122,7 +123,12 @@ rmra context create staging --address api.staging.example:50051
 rmra context ls
 rmra context use staging
 rmra --context eu2 whoami          # just this once; or RMRA_CONTEXT=eu2
+rmra context rename staging preprod
 ```
+
+`--context`/`-c` comes before the command (`rmra -c eu2 ssh …`), not after
+it. A renamed context keeps its login, its role, its being current, and the
+contexts declined from it.
 
 Contexts live in `~/.config/rmra` (`%APPDATA%\rmra` on Windows; override
 with `RMRA_CONFIG`): `contexts/<name>/meta.json` for the endpoint,
@@ -214,6 +220,13 @@ doesn't succeed; Ctrl-C stops watching, not the deployments. Every listing
 takes `--format json` for scripts.
 
 ## remora-etcher
+
+### Contexts
+
+The same contexts as rmra's, in the same place, with the same commands:
+`remora-etcher login`, `whoami`, `logout`, `context ls|create|use|rename|rm`
+and `context role …`. A context created or logged in with one binary is
+usable with the other; `-c`/`RMRA_CONTEXT` select one, before the command.
 
 ### Shell completion
 
@@ -307,6 +320,23 @@ remora-etcher squashfs inspect rootfs.squashfs
 
 Parameter-compatible with the defaults `oe_mksquashfs` uses to build the
 Remora rootfs (gzip, 128 KiB blocks, real uid/gid/mode preserved).
+
+### Manufacture a device
+
+```
+remora-etcher -c factory factory provision --serial-policy hubs --output remora-factory.yaml
+remora-etcher -c factory factory provision --device-name 1H7Z --force --output remora-factory.yaml
+```
+
+Generates the device's key locally and has the platform issue its IDevID,
+as the selected context: its login (or the role it acts as) needs
+`remora::create-factory-device`, and `remora::use-serial-number-policy` on
+the policy. `--serial-policy` allocates a fresh serial, printed alone on
+stdout for the label; `--device-name` uses one chosen elsewhere, refused if
+already manufactured unless `--force` (re-signed, the old IDevID revoked).
+The resulting `remora-factory.yaml` is bundled into an image with
+`identity create`. As a `factory-provision` batch step, `"context"` picks
+the context, else the batch's own.
 
 ### Convert between image formats
 

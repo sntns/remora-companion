@@ -87,22 +87,19 @@ impl ContextControllerImpl {
         }
     }
 
-    /// The role an invocation acts as: the override's, else the context's.
-    fn role_for(context: &Context, over: Option<&ContextOverride>) -> Result<Option<AssumedRole>> {
-        let choice = match over.map(|o| &o.role) {
-            Some(RoleOverride::Drop) => None,
-            Some(RoleOverride::Assume(choice)) => Some(choice.as_str()),
-            Some(RoleOverride::Keep) | None => context.assumed_role.as_deref(),
-        };
-        choice
+    /// The role a context acts as: its own setting, if any.
+    fn role_of(context: &Context) -> Result<Option<AssumedRole>> {
+        context
+            .assumed_role
+            .as_deref()
             .map(|choice| Self::role_named(context, choice))
             .transpose()
     }
 
     /// The selected context itself, which must exist.
     fn select(&self, over: Option<&ContextOverride>) -> Result<(Context, Selection)> {
-        if let Some((name, source)) = over.and_then(|o| o.name.as_ref().map(|n| (n, o.source))) {
-            return Ok((self.existing(name)?, source));
+        if let Some(over) = over {
+            return Ok((self.existing(&over.name)?, over.source));
         }
         if let Some(current) = self.store.current().change_context(Error::Store)? {
             // A current pointer left dangling by hand-editing reads as the
@@ -233,6 +230,52 @@ impl ContextServiceInterface for ContextControllerImpl {
         Ok((principal, assumed))
     }
 
+    async fn rename(&self, from: &str, to: &str) -> Result<()> {
+        let mut context = self.existing(from)?;
+        Self::validate(to)?;
+        if self.store.get(to).change_context(Error::Store)?.is_some() {
+            return Err(Report::new(Error::AlreadyExists(to.to_owned())));
+        }
+        // Written under the new name first, the old removed last: a failure
+        // halfway leaves a context too many, never one lost.
+        context.name = to.to_owned();
+        self.store.put(&context).change_context(Error::Store)?;
+        // Its own login moves with it; a declined one's stays its base's.
+        if context.login.is_none() {
+            if let Some(credentials) = self
+                .credentials
+                .get(from)
+                .change_context(Error::Credentials)?
+            {
+                self.credentials
+                    .put(to, &credentials)
+                    .change_context(Error::Credentials)?;
+                self.credentials
+                    .delete(from)
+                    .change_context(Error::Credentials)?;
+            }
+        }
+        // Contexts declined from it now share the login under its new name.
+        for mut other in self.store.list().change_context(Error::Store)? {
+            if other.login.as_deref() == Some(from) {
+                other.login = Some(to.to_owned());
+                self.store.put(&other).change_context(Error::Store)?;
+            }
+        }
+        if self
+            .store
+            .current()
+            .change_context(Error::Store)?
+            .as_deref()
+            == Some(from)
+        {
+            self.store
+                .set_current(Some(to))
+                .change_context(Error::Store)?;
+        }
+        self.store.delete(from).change_context(Error::Store)
+    }
+
     async fn remove(&self, name: &str) -> Result<()> {
         let context = self.existing(name)?;
         let users: Vec<_> = self
@@ -290,7 +333,7 @@ impl ContextServiceInterface for ContextControllerImpl {
             .get(context.login_name())
             .change_context(Error::Credentials)?
             .ok_or_else(|| Report::new(Error::NotLoggedIn(context.login_name().to_owned())))?;
-        let role = Self::role_for(&context, over)?;
+        let role = Self::role_of(&context)?;
         Ok(ResolvedContext {
             context,
             credentials,
@@ -522,17 +565,8 @@ mod tests {
 
     fn flag(name: &str) -> ContextOverride {
         ContextOverride {
-            name: Some(name.into()),
+            name: name.into(),
             source: Selection::Flag,
-            role: RoleOverride::Keep,
-        }
-    }
-
-    fn role(role: RoleOverride) -> ContextOverride {
-        ContextOverride {
-            name: None,
-            source: Selection::Flag,
-            role,
         }
     }
 
@@ -697,7 +731,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_assumed_role_applies_until_dropped_and_overrides_win() {
+    async fn an_assumed_role_applies_until_dropped() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
         contexts.create(context("eu2"), false).await.unwrap();
@@ -728,17 +762,11 @@ mod tests {
         assert_eq!(principal.user_name, "ada");
         assert_eq!(acting, Some(Some("other".into())));
 
-        // Per invocation: drop it, or name another (a URN works too).
-        let dropped = contexts
-            .resolve(Some(&role(RoleOverride::Drop)))
-            .await
-            .unwrap();
-        assert_eq!(dropped.role, None);
-        let by_urn = contexts
-            .resolve(Some(&role(RoleOverride::Assume(OPS.into()))))
-            .await
-            .unwrap();
+        // A role given by URN reads as its alias.
+        contexts.assume_role(None, OPS).await.unwrap();
+        let by_urn = contexts.resolve(None).await.unwrap();
         assert_eq!(by_urn.role.unwrap().alias.as_deref(), Some("ops"));
+        contexts.assume_role(None, "ops").await.unwrap();
 
         assert_eq!(
             contexts.drop_role(None).await.unwrap(),
@@ -922,5 +950,50 @@ mod tests {
         contexts.remove("acme").await.unwrap();
         assert!(contexts.resolve(Some(&flag("eu2"))).await.is_ok());
         contexts.remove("eu2").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn renames_a_context_with_its_login_and_declined_contexts() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts.create(context("eu2"), false).await.unwrap();
+        contexts.create(context("dev"), false).await.unwrap();
+        contexts.use_context("eu2").await.unwrap();
+        contexts
+            .login(None, token("good"), RoleOverride::Keep)
+            .await
+            .unwrap();
+        contexts
+            .derive("eu2", "acme", None, RoleOverride::Drop, false)
+            .await
+            .unwrap();
+
+        let report = contexts.rename("eu2", "dev").await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::AlreadyExists(_)));
+        let report = contexts.rename("eu2", "../x").await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::InvalidName(_)));
+        let report = contexts.rename("nope", "x").await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::NotFound(_)));
+
+        contexts.rename("eu2", "prod").await.unwrap();
+        assert!(matches!(
+            contexts.inspect("eu2").await.unwrap_err().current_context(),
+            Error::NotFound(_)
+        ));
+        // Still current, still logged in, and acme still shares its login.
+        assert_eq!(
+            contexts.selected(None).await.unwrap(),
+            Some(("prod".into(), Selection::Current))
+        );
+        assert!(contexts.resolve(None).await.is_ok());
+        let acme = contexts.inspect("acme").await.unwrap();
+        assert_eq!(acme.context.login.as_deref(), Some("prod"));
+        assert!(acme.credentials.is_some());
+        assert!(contexts.resolve(Some(&flag("acme"))).await.is_ok());
+
+        // A declined context renames without touching its base's login.
+        contexts.rename("acme", "acme-ops").await.unwrap();
+        assert!(contexts.resolve(Some(&flag("acme-ops"))).await.is_ok());
+        assert!(contexts.resolve(None).await.is_ok());
     }
 }

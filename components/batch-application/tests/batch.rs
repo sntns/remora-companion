@@ -23,6 +23,8 @@ use remora_batch::{application::BatchServiceInterface, model::BatchStep};
 use remora_batch_application::BatchControllerImpl;
 use remora_config::application::ConfigService;
 use remora_config_application::ConfigControllerImpl;
+use remora_context::application::ContextService;
+use remora_context_application::ContextControllerImpl;
 use remora_convert::{adapter::ContainerFormatAdapter, application::ConvertService};
 use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
@@ -125,13 +127,77 @@ struct UnusedProvisioning;
 impl FactoryProvisioningAdapter for UnusedProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &remora_context::model::ResolvedContext,
         _serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
         unreachable!("no test in this file exercises a FactoryProvision step")
     }
+}
+
+/// A context service with one context, `eu2`, logged in: the factory
+/// resolves it before calling the (fake) platform. Its directory is left
+/// behind on purpose -- the service outlives any one scope here.
+fn logged_in_contexts() -> ContextService {
+    use remora_context::{
+        adapter::{
+            credentials::{CredentialStoreAdapter, CredentialStoreAdapterService},
+            platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
+            store::{ContextStoreAdapter, ContextStoreAdapterService},
+        },
+        model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
+    };
+    use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
+
+    /// Resolving a context never calls its platform.
+    struct NoPlatform;
+
+    #[async_trait::async_trait]
+    impl PlatformSessionAdapter for NoPlatform {
+        async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
+            unreachable!("resolving a context does not log in")
+        }
+        async fn acting_account(
+            &self,
+            _: &Context,
+            _: &Credentials,
+            _: &str,
+        ) -> platform::Result<Option<String>> {
+            unreachable!("resolving a context does not log in")
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap().keep();
+    let store = FileContextStoreImpl::new(&root);
+    store
+        .put(&Context {
+            name: "eu2".into(),
+            description: None,
+            endpoint: Endpoint {
+                address: "api.example.invalid:50051".into(),
+                tls: Tls::default(),
+            },
+            roles: Default::default(),
+            assumed_role: None,
+            login: None,
+        })
+        .unwrap();
+    let credentials = FileCredentialStoreImpl::new(&root);
+    credentials
+        .put(
+            "eu2",
+            &Credentials {
+                secret: Secret::AccessKey {
+                    token: "unused-in-the-fake".into(),
+                },
+            },
+        )
+        .unwrap();
+    ContextService::new(ContextControllerImpl::new(
+        ContextStoreAdapterService::new(store),
+        CredentialStoreAdapterService::new(credentials),
+        PlatformSessionAdapterService::new(NoPlatform),
+    ))
 }
 
 fn read_shared_partition_file(disk: &Path, dest_path: &str) -> Vec<u8> {
@@ -174,6 +240,7 @@ fn controller() -> BatchControllerImpl {
     ));
 
     let factory = FactoryService::new(FactoryControllerImpl::new(
+        logged_in_contexts(),
         FactoryProvisioningAdapterService::new(UnusedProvisioning),
     ));
 
@@ -236,7 +303,7 @@ async fn runs_the_convert_provision_convert_back_recipe() {
     ];
 
     controller()
-        .run(steps, &OperationContext::noop())
+        .run(steps, None, &OperationContext::noop())
         .await
         .expect("batch should succeed");
 
@@ -315,7 +382,7 @@ async fn stops_at_the_first_failing_step_without_running_the_rest() {
     ];
 
     let err = controller()
-        .run(steps, &OperationContext::noop())
+        .run(steps, None, &OperationContext::noop())
         .await
         .expect_err("the second step should fail");
     let message = format!("{err:?}");
@@ -349,8 +416,7 @@ struct FakeProvisioning;
 impl FactoryProvisioningAdapter for FakeProvisioning {
     async fn provision(
         &self,
-        _api_url: &str,
-        _api_key: &str,
+        _context: &remora_context::model::ResolvedContext,
         serial: &DeviceSerial,
         _csr_der: &[u8],
     ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
@@ -403,6 +469,7 @@ async fn runs_a_factory_provision_step() {
         remora_squashfs::adapter::SquashfsAdapterService::new(SquashfsAdapterImpl),
     ));
     let factory = FactoryService::new(FactoryControllerImpl::new(
+        logged_in_contexts(),
         FactoryProvisioningAdapterService::new(FakeProvisioning),
     ));
     let controller = BatchControllerImpl::new(convert, identity, config, image, squashfs, factory);
@@ -413,12 +480,12 @@ async fn runs_a_factory_provision_step() {
             vec![BatchStep::FactoryProvision {
                 device_name: Some("batch-e2e-0001".to_string()),
                 serial_number_policy: None,
-                api_url: "https://api.example.invalid".to_string(),
-                api_key: "unused-in-the-fake".to_string(),
+                context: None,
                 access_url: None,
                 force: false,
                 output: output.clone(),
             }],
+            None,
             &OperationContext::noop(),
         )
         .await

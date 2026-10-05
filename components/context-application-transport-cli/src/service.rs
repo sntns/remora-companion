@@ -8,9 +8,13 @@ use remora_context::{
 use remora_tui as tui;
 use serde::Serialize;
 
-use crate::error::{context_error, prompt_error, Error, Result};
+use crate::{
+    error::{context_error, prompt_error, Error, Result},
+    login::RoleArgs,
+    program,
+};
 
-/// The production gateway a fresh `rmra login` suggests.
+/// The production gateway a fresh `login` suggests.
 pub const DEFAULT_ADDRESS: &str = "api.eu2.sntns.io:50051";
 
 #[derive(clap::Subcommand)]
@@ -28,8 +32,8 @@ pub enum Command {
 
     /// Create a context: a named gateway endpoint to log in to.
     #[command(after_help = "Examples:\n  \
-        rmra context create eu2 --use && rmra login\n  \
-        rmra context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops")]
+        context create eu2 --use, then login\n  \
+        context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops")]
     Create {
         name: String,
         /// Decline an existing, logged-in context: its endpoint and role
@@ -62,6 +66,8 @@ pub enum Command {
         /// Also make it the current context.
         #[arg(long = "use")]
         make_current: bool,
+        #[command(flatten)]
+        role: RoleArgs,
     },
 
     /// Show contexts' settings as JSON (default: the selected context).
@@ -87,8 +93,22 @@ pub enum Command {
         force: bool,
     },
 
+    /// Rename a context; its login, the contexts declined from it, and
+    /// its being current follow.
+    #[command(visible_alias = "mv")]
+    Rename {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
+        from: String,
+        to: String,
+    },
+
     /// Print the selected context's name.
     Show,
+
+    /// Manage the IAM roles the selected context's login may assume, e.g.
+    /// in another tenant, and which one it acts as.
+    #[command(subcommand)]
+    Role(crate::role::Command),
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -110,9 +130,10 @@ pub async fn run(
             description,
             force,
             make_current,
+            role,
             ..
         } => {
-            let role = over.map(|o| o.role.clone()).unwrap_or_default();
+            let role = role.choice();
             let spinner = tui::Spinner::start(format!(
                 "Declining {} into {}",
                 tui::accent(&base),
@@ -165,6 +186,7 @@ pub async fn run(
             server_name,
             force,
             make_current,
+            role,
         } => {
             let address = address.unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
             let mut authorities = Vec::new();
@@ -186,8 +208,8 @@ pub async fn run(
                 roles: Default::default(),
                 // `--assume-role <urn>`: the context acts as that role,
                 // verified when it logs in.
-                assumed_role: match over.map(|o| &o.role) {
-                    Some(remora_context::model::RoleOverride::Assume(role)) => Some(role.clone()),
+                assumed_role: match role.choice() {
+                    remora_context::model::RoleOverride::Assume(role) => Some(role),
                     _ => None,
                 },
                 login: None,
@@ -264,10 +286,20 @@ pub async fn run(
             }
             Ok(())
         }
+        Command::Rename { from, to } => {
+            service.rename(&from, &to).await.map_err(context_error)?;
+            tui::success(format!(
+                "Renamed context {} to {}",
+                tui::accent(&from),
+                tui::accent(&to)
+            ));
+            Ok(())
+        }
         Command::Show => {
             println!("{}", selected_name(service, over).await?);
             Ok(())
         }
+        Command::Role(command) => crate::role::run(command, service, over).await,
     }
 }
 
@@ -290,7 +322,7 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
         Format::Table if contexts.is_empty() => {
             tui::info(format!(
                 "No context yet. Start with {}",
-                tui::accent("rmra login")
+                tui::accent(format!("{} login", program()))
             ));
         }
         Format::Table => {
@@ -342,9 +374,9 @@ async fn selected_name(service: &ContextService, over: Option<&ContextOverride>)
 
 fn login_hint(name: &str, current: bool) -> String {
     if current {
-        "rmra login".to_owned()
+        format!("{} login", program())
     } else {
-        format!("rmra --context {name} login")
+        format!("{} --context {name} login", program())
     }
 }
 

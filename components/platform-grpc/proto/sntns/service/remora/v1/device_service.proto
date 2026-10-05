@@ -4,10 +4,12 @@ package sntns.service.remora.v1;
 
 import "sntns/service/v1/model.proto";
 
-// Devices, as far as choosing deployment targets needs them.
+// Devices, as far as choosing deployment targets and manufacturing them
+// need them.
 service DeviceService {
     rpc GetDevice(DeviceServiceGetDeviceRequest) returns (DeviceServiceGetDeviceResponse);
     rpc ListDevices(DeviceServiceListDevicesRequest) returns (DeviceServiceListDevicesResponse);
+    rpc CreateFactoryDevice(DeviceServiceCreateFactoryDeviceRequest) returns (DeviceServiceCreateFactoryDeviceResponse);
 }
 
 message DeviceDescriptor {
@@ -34,4 +36,35 @@ message DeviceServiceListDevicesRequest {
 
 message DeviceServiceListDevicesResponse {
     repeated DeviceSummary device_summaries = 1;
+}
+
+// Manufacture: register a device against the calling account and issue the
+// credential it is built with. The manufacturing account is the caller's own.
+message DeviceServiceCreateFactoryDeviceRequest {
+    // The device's durable hardware serial.
+    string device_name = 1;
+    // DER-encoded PKCS#10 certificate signing request; its subject is ignored.
+    bytes certificate_signing_request = 2;
+    // Generates the serial when device_name is empty. Exactly one of the two.
+    string serial_number_policy_name = 3;
+    // Re-sign a device_name that already has a record; the old credential is
+    // revoked. Only with an explicit device_name.
+    bool force = 4;
+}
+
+message DeviceServiceCreateFactoryDeviceResponse {
+    // The manufacturer-scoped name carried in the certificate's URI SAN.
+    string factory_device_name = 1;
+    // The issued certificate's resource: its URN is the device's RFC 9421 keyid.
+    .sntns.service.v1.ResourceReference certificate_reference = 2;
+    // The IDevID, DER-encoded.
+    bytes certificate = 3;
+    // The factory anchor, DER-encoded.
+    bytes certificate_authority_certificate = 4;
+    // The anchor for the first bootstrap response, DER-encoded.
+    bytes server_certificate_authority_certificate = 5;
+    // Where the device makes its first call, configured on the platform.
+    string access_url = 6;
+    // The serial the device was created under: what goes on the label.
+    string serial_number = 7;
 }

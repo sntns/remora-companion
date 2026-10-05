@@ -28,10 +28,14 @@ pub(crate) fn prompt_error(error: std::io::Error) -> error_stack::Report<Error> 
 
 /// Lifts a context-service failure into this transport's error, keeping the
 /// service's message as the headline (it is already the useful one, e.g.
-/// "not logged in to context eu2: run `rmra login`").
+/// "not logged in to context eu2: run `rmra login`"). The service spells
+/// the commands it suggests as rmra's; they are the running binary's.
 pub(crate) fn context_error(
     report: error_stack::Report<remora_context::application::Error>,
 ) -> error_stack::Report<Error> {
-    let message = report.current_context().to_string();
+    let message = report
+        .current_context()
+        .to_string()
+        .replace("`rmra ", &format!("`{} ", crate::program()));
     report.change_context(Error::Context(message))
 }

@@ -4,6 +4,16 @@ use remora_batch::application::BatchService;
 use remora_batch_application::BatchControllerImpl;
 use remora_config::application::ConfigService;
 use remora_config_application::ConfigControllerImpl;
+use remora_context::{
+    adapter::{
+        credentials::CredentialStoreAdapterService, platform::PlatformSessionAdapterService,
+        store::ContextStoreAdapterService,
+    },
+    application::ContextService,
+};
+use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCredentialStoreImpl};
+use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
+use remora_context_application::ContextControllerImpl;
 use remora_convert::application::ConvertService;
 use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
@@ -12,7 +22,7 @@ use remora_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_disk_adapter_native::DiskAdapterImpl;
 use remora_disk_application::DiskControllerImpl;
 use remora_factory::{adapter::FactoryProvisioningAdapterService, application::FactoryService};
-use remora_factory_adapter_gateway::GatewayAdapterImpl;
+use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
 use remora_factory_application::FactoryControllerImpl;
 use remora_flash::{adapter::BmapAdapterService, application::FlashService};
 use remora_flash_adapter_bmap::BmapAdapterImpl;
@@ -43,6 +53,7 @@ use remora_update_application::UpdateControllerImpl;
 /// -> `Arc<Box<dyn DiskServiceInterface>>` -> `Box<dyn DiskServiceInterface>`
 /// -> `dyn DiskServiceInterface`), so call sites just do `services.disk.list()`.
 pub struct Services {
+    pub context: ContextService,
     pub disk: DiskService,
     pub flash: FlashService,
     pub image: ImageService,
@@ -227,11 +238,19 @@ pub async fn wire() -> Services {
         .await
         .expect("ConvertService was just registered");
 
-    // GatewayAdapterImpl is stateless (gateway URL/API key are CLI-level
-    // config, passed per call -- see FactoryProvisioningAdapter's doc
-    // comment), so it needs no set_type/get_type round-trip either.
+    // The same contexts as rmra's, in the same place: one login serves
+    // both binaries.
+    let root = default_root();
+    let context = ContextService::new(ContextControllerImpl::new(
+        ContextStoreAdapterService::new(FileContextStoreImpl::new(&root)),
+        CredentialStoreAdapterService::new(FileCredentialStoreImpl::new(&root)),
+        PlatformSessionAdapterService::new(PlatformSessionAdapterImpl),
+    ));
+
+    // Manufactures as the selected context, over the gateway's gRPC API.
     let factory = FactoryService::new(FactoryControllerImpl::new(
-        FactoryProvisioningAdapterService::new(GatewayAdapterImpl::default()),
+        context.clone(),
+        FactoryProvisioningAdapterService::new(FactoryGatewayAdapterImpl),
     ));
 
     // Pure orchestration over the other verticals' already-wired services —
@@ -253,6 +272,7 @@ pub async fn wire() -> Services {
     ));
 
     Services {
+        context,
         disk,
         flash,
         image,

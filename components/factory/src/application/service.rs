@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use super::error::Result;
@@ -43,11 +44,13 @@ pub trait FactoryServiceInterface: Send + Sync {
     /// empty URL into the credential would produce a device that can
     /// never phone home, discovered at the worst possible moment, so this
     /// call fails instead unless an override is given for that case.
+    ///
+    /// Made as the context `over` selects (else the current one): its login
+    /// and role decide which account manufactures the device.
     async fn provision(
         &self,
+        over: Option<&ContextOverride>,
         serial: &DeviceSerial,
-        api_url: &str,
-        api_key: &str,
         access_url_override: Option<&str>,
         output: &Path,
         ctx: &OperationContext,

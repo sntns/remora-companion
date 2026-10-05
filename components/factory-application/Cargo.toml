@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 remora-factory = { path = "../factory" }
 remora-progress = { path = "../progress" }
+remora-context = { path = "../context" }
 error-stack.workspace = true
 async-trait.workspace = true
 rcgen.workspace = true
@@ -22,3 +23,6 @@ pem.workspace = true
 x509-parser = { version = "0.18", features = ["verify"] }
 base64.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+tempfile.workspace = true
