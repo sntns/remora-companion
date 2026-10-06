@@ -15,16 +15,8 @@ pub enum Error {
     Serve,
     #[error("the labelling console failed")]
     Operate,
-    #[error("the station at {0} is not a remora station")]
-    NotAStation(String),
-    #[error("{0}")]
-    Claim(String),
-    #[error("failed to generate the device key")]
-    Keygen,
-    #[error("failed to write {0}")]
-    WriteOutput(PathBuf),
-    #[error("cancelled")]
-    Cancelled,
+    #[error("the simulated hub did not get its identity")]
+    Simulate,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

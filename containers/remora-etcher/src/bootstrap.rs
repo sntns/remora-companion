@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use remora_batch::application::BatchService;
 use remora_batch_application::BatchControllerImpl;
+use remora_claim::{adapter::station::StationClientAdapterService, application::ClaimService};
+use remora_claim_adapter_http::HttpStationClientImpl;
+use remora_claim_application::ClaimControllerImpl;
 use remora_config::application::ConfigService;
 use remora_config_application::ConfigControllerImpl;
 use remora_context::{
@@ -82,10 +85,7 @@ pub struct Services {
     pub batch: BatchService,
     pub factory: FactoryService,
     pub station: StationService,
-    /// The factory's own key and credential adapters, which `station
-    /// simulate` uses as a hub would its own code.
-    pub device_keys: DeviceKeyAdapterService,
-    pub credential_writer: CredentialWriterAdapterService,
+    pub claim: ClaimService,
     pub update: UpdateService,
 }
 
@@ -315,7 +315,7 @@ pub async fn wire() -> Services {
     container
         .set_type(DeviceKeyAdapterService::new(DeviceKeyAdapterImpl))
         .await;
-    let device_keys = container
+    let keys = container
         .get_type::<DeviceKeyAdapterService>()
         .await
         .expect("DeviceKeyAdapterService was just registered");
@@ -335,7 +335,7 @@ pub async fn wire() -> Services {
             CredentialWriterAdapterImpl,
         ))
         .await;
-    let credential_writer = container
+    let credentials = container
         .get_type::<CredentialWriterAdapterService>()
         .await
         .expect("CredentialWriterAdapterService was just registered");
@@ -343,9 +343,9 @@ pub async fn wire() -> Services {
     container
         .set_type(FactoryService::new(FactoryControllerImpl::new(
             context.clone(),
-            device_keys.clone(),
+            keys,
             provisioning,
-            credential_writer.clone(),
+            credentials,
         )))
         .await;
     let factory = container
@@ -393,6 +393,29 @@ pub async fn wire() -> Services {
         .get_type::<StationService>()
         .await
         .expect("StationService was just registered");
+
+    // A hub's side of the station, for `station simulate`: its key and
+    // credential through the factory vertical, the station over HTTP.
+    container
+        .set_type(StationClientAdapterService::new(
+            HttpStationClientImpl::new(),
+        ))
+        .await;
+    let station_client = container
+        .get_type::<StationClientAdapterService>()
+        .await
+        .expect("StationClientAdapterService was just registered");
+
+    container
+        .set_type(ClaimService::new(ClaimControllerImpl::new(
+            station_client,
+            factory.clone(),
+        )))
+        .await;
+    let claim = container
+        .get_type::<ClaimService>()
+        .await
+        .expect("ClaimService was just registered");
 
     // Pure orchestration over the other verticals' already-wired services:
     // no adapter of its own.
@@ -455,8 +478,7 @@ pub async fn wire() -> Services {
         batch,
         factory,
         station,
-        device_keys,
-        credential_writer,
+        claim,
         update,
     }
 }

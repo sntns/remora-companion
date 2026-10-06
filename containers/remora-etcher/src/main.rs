@@ -185,8 +185,7 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             remora_station_application_transport_cli::run(
                 cmd,
                 &services.station,
-                &services.device_keys,
-                &services.credential_writer,
+                &services.claim,
                 over,
             )
             .await,

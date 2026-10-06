@@ -1,18 +1,9 @@
-//! The station's side of the provisioning protocol (v1): plain HTTP/1.1,
-//! JSON, binaries in standard base64. Nothing on it is secret -- a device
-//! checks the identity it gets against anchors baked into its image -- so
-//! there is no TLS. `serve` projects it onto `StationService`; `client` is
-//! the device's side, for `station simulate`.
+//! The station's side of the provisioning protocol (v1, see
+//! `remora-station-protocol`): an axum router projecting it onto
+//! `StationService`.
 
-mod client;
 mod error;
 mod service;
-mod wire;
 
-pub use client::StationClient;
 pub use error::{Error, Result};
 pub use service::{router, serve, BODY_LIMIT};
-pub use wire::{
-    AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HardwareBody, HelloBody,
-    IdentityBody, ImageBody, LabelBody, StateBody, DEFAULT_PORT, PROTOCOL, SERVICE,
-};

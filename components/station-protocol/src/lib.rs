@@ -1,11 +1,18 @@
-//! The JSON bodies of protocol v1, field for field.
+//! The hub <-> station protocol v1, as it travels: plain HTTP/1.1, JSON,
+//! binaries in standard base64 -- the bodies field for field, the error
+//! codes, and their conversions to and from the station's model. One
+//! place for both ends: the station's HTTP transport serves it, the claim
+//! vertical's HTTP adapter speaks it (like `remora-platform-grpc`'s
+//! protos for the platform). Nothing on it is secret -- a device checks
+//! the identity it gets against anchors baked into its image -- so there
+//! is no TLS.
 
 use std::collections::BTreeMap;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use remora_factory::adapter::provisioning::ProvisionedIdentity;
 use remora_station::model::{
-    ClaimId, ClaimRequest, ClaimState, ClaimStatus, HardwareInfo, Hello, ImageInfo, LabelState,
+    Ack, ClaimId, ClaimRequest, ClaimState, ClaimStatus, HardwareInfo, Hello, ImageInfo, LabelState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +36,33 @@ impl From<Hello> for HelloBody {
             environment: hello.environment,
         }
     }
+}
+
+impl HelloBody {
+    /// The station's answer, when it is one speaking this protocol.
+    pub fn into_hello(self) -> Option<Hello> {
+        (self.service == SERVICE && self.protocol == PROTOCOL).then_some(Hello {
+            environment: self.environment,
+        })
+    }
+}
+
+/// What makes a body unusable, beyond not being JSON.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BodyError {
+    #[error("{field} is not standard base64: {source}")]
+    Base64 {
+        field: &'static str,
+        source: base64::DecodeError,
+    },
+    #[error("hardware.board is missing")]
+    MissingBoard,
+}
+
+fn decode(field: &'static str, value: &str) -> Result<Vec<u8>, BodyError> {
+    STANDARD
+        .decode(value.trim())
+        .map_err(|source| BodyError::Base64 { field, source })
 }
 
 /// `POST /v1/claims`.
@@ -64,14 +98,12 @@ pub struct ImageBody {
 }
 
 impl ClaimBody {
-    /// The request it carries; `Err` says what's malformed. What it says
-    /// about the device is the station's to check (`ClaimRequest::validate`).
-    pub fn into_request(self) -> Result<ClaimRequest, String> {
-        let csr_der = STANDARD
-            .decode(self.csr.trim())
-            .map_err(|e| format!("csr is not standard base64: {e}"))?;
+    /// The request it carries. What it says about the device is the
+    /// station's to check (`ClaimRequest::validate`).
+    pub fn into_request(self) -> Result<ClaimRequest, BodyError> {
+        let csr_der = decode("csr", &self.csr)?;
         if self.hardware.board.is_empty() {
-            return Err("hardware.board is missing".into());
+            return Err(BodyError::MissingBoard);
         }
         let HardwareBody {
             board,
@@ -105,6 +137,27 @@ impl ClaimBody {
     }
 }
 
+impl From<&ClaimRequest> for ClaimBody {
+    fn from(request: &ClaimRequest) -> Self {
+        let hardware = &request.hardware;
+        Self {
+            csr: STANDARD.encode(&request.csr_der),
+            hardware: HardwareBody {
+                board: hardware.board.clone(),
+                temp_hostname: hardware.temp_hostname.clone(),
+                eth_mac: hardware.eth_mac.clone(),
+                bsp_serial: hardware.bsp_serial.clone(),
+                machine_id: hardware.machine_id.clone(),
+                macs: hardware.macs.clone(),
+            },
+            image: ImageBody {
+                version: request.image.version.clone(),
+                compatible: request.image.compatible.clone(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateBody {
@@ -135,20 +188,15 @@ pub struct IdentityBody {
 }
 
 impl IdentityBody {
-    pub fn into_identity(self) -> Result<ProvisionedIdentity, String> {
-        let decode = |field: &str, value: &str| {
-            STANDARD
-                .decode(value)
-                .map_err(|e| format!("identity.{field} is not standard base64: {e}"))
-        };
+    pub fn into_identity(self) -> Result<ProvisionedIdentity, BodyError> {
         Ok(ProvisionedIdentity {
-            certificate_der: decode("certificate", &self.certificate)?,
+            certificate_der: decode("identity.certificate", &self.certificate)?,
             certificate_authority_der: decode(
-                "certificate_authority",
+                "identity.certificate_authority",
                 &self.certificate_authority,
             )?,
             server_certificate_authority_der: decode(
-                "server_certificate_authority",
+                "identity.server_certificate_authority",
                 &self.server_certificate_authority,
             )?,
             serial_number: self.serial_number,
@@ -204,6 +252,25 @@ impl ClaimStatusBody {
     pub fn claim_id(&self) -> ClaimId {
         ClaimId::new(self.claim_id.clone())
     }
+
+    /// The status it carries.
+    pub fn into_status(self) -> Result<ClaimStatus, BodyError> {
+        Ok(ClaimStatus {
+            claim_id: ClaimId::new(self.claim_id),
+            state: match self.state {
+                StateBody::Issued => ClaimState::Issued,
+                StateBody::Installed => ClaimState::Installed,
+                StateBody::Failed => ClaimState::Failed,
+            },
+            label: match self.label {
+                LabelBody::Queued => LabelState::Queued,
+                LabelBody::Active => LabelState::Active,
+                LabelBody::Labelled => LabelState::Labelled,
+            },
+            queue_position: self.queue_position,
+            identity: self.identity.into_identity()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +286,36 @@ pub struct AckBody {
     pub state: AckState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+impl From<&Ack> for AckBody {
+    fn from(ack: &Ack) -> Self {
+        match ack {
+            Ack::Installed => Self {
+                state: AckState::Installed,
+                reason: None,
+            },
+            Ack::Failed { reason } => Self {
+                state: AckState::Failed,
+                reason: Some(reason.clone()),
+            },
+        }
+    }
+}
+
+impl AckBody {
+    /// The ack it carries; a failure without a reason says so.
+    pub fn into_ack(self) -> Ack {
+        match self.state {
+            AckState::Installed => Ack::Installed,
+            AckState::Failed => Ack::Failed {
+                reason: self
+                    .reason
+                    .filter(|reason| !reason.trim().is_empty())
+                    .unwrap_or_else(|| "no reason given".into()),
+            },
+        }
+    }
 }
 
 /// Every refusal: `{ "error", "code" }`, and `retry_after` (seconds) when

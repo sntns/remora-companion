@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 remora-station = { path = "../station" }
 remora-station-application-transport-http = { path = "../station-application-transport-http" }
-remora-factory = { path = "../factory" }
+remora-claim = { path = "../claim" }
 remora-context = { path = "../context" }
 remora-progress = { path = "../progress" }
 remora-tui = { path = "../tui" }
@@ -19,9 +19,7 @@ thiserror.workspace = true
 serde.workspace = true
 yaml_serde.workspace = true
 humantime.workspace = true
-base64.workspace = true
 tokio = { workspace = true, features = ["net"] }
-tokio-util.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -64,6 +64,9 @@ remora-station-adapter-jsonl = { path = "../../components/station-adapter-jsonl"
 remora-station-adapter-hooks-process = { path = "../../components/station-adapter-hooks-process" }
 remora-station-adapter-operator-tui = { path = "../../components/station-adapter-operator-tui" }
 remora-station-application-transport-cli = { path = "../../components/station-application-transport-cli" }
+remora-claim = { path = "../../components/claim" }
+remora-claim-application = { path = "../../components/claim-application" }
+remora-claim-adapter-http = { path = "../../components/claim-adapter-http" }
 remora-update = { path = "../../components/update" }
 remora-update-application = { path = "../../components/update-application" }
 remora-update-adapter-github = { path = "../../components/update-adapter-github" }

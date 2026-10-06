@@ -1,14 +1,31 @@
+//! A raw device side of the protocol for these tests: bodies as given,
+//! malformed ones included (`remora-claim-adapter-http` is the real one).
+
 use error_stack::{Report, ResultExt};
+use remora_station_protocol::{
+    AckBody, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HelloBody,
+};
 use serde::de::DeserializeOwned;
 
-use crate::{
-    error::{Error, Result},
-    wire::{AckBody, ClaimBody, ClaimStatusBody, ErrorBody, HelloBody},
-};
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("failed to reach the station at {0}")]
+    Unreachable(String),
+    #[error("the station answered {status}: {message}")]
+    Status {
+        status: u16,
+        code: Option<ErrorCode>,
+        message: String,
+        retry_after: Option<u64>,
+    },
+    #[error("unexpected answer from the station")]
+    Parse,
+}
 
-/// A device's side of the protocol, for `station simulate` (and tests): one
-/// method per route, a refusal as `Error::Status` with the station's own
-/// message and, on a 503, how long to wait.
+pub type Result<T> = std::result::Result<T, Report<Error>>;
+
+/// One method per route, a refusal as `Error::Status` with the station's
+/// own message, code and, on a 503, how long to wait.
 #[derive(Debug, Clone)]
 pub struct StationClient {
     base: String,
@@ -22,10 +39,6 @@ impl StationClient {
             base: base_url.trim_end_matches('/').to_string(),
             http: reqwest::Client::new(),
         }
-    }
-
-    pub fn base_url(&self) -> &str {
-        &self.base
     }
 
     pub async fn hello(&self) -> Result<HelloBody> {

@@ -12,13 +12,13 @@ use axum::{
 use error_stack::{AttachmentKind, FrameKind, Report, ResultExt};
 use remora_station::{
     application::{Error as StationError, StationService},
-    model::{Ack, ClaimId},
+    model::ClaimId,
+};
+use remora_station_protocol::{
+    AckBody, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HelloBody,
 };
 
-use crate::{
-    error::{Error, Result},
-    wire::{AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HelloBody},
-};
+use crate::error::{Error, Result};
 
 /// How long a device waits before retrying a claim the platform couldn't
 /// take: long enough not to hammer a platform that's down.
@@ -148,7 +148,7 @@ async fn claim(
     let request = match body::<ClaimBody>(bytes) {
         Ok(claim) => match claim.into_request() {
             Ok(request) => request,
-            Err(error) => return refuse(ErrorCode::InvalidRequest, error),
+            Err(error) => return refuse(ErrorCode::InvalidRequest, error.to_string()),
         },
         Err((code, error)) => return refuse(code, error),
     };
@@ -171,18 +171,7 @@ async fn ack(
     bytes: std::result::Result<Bytes, BytesRejection>,
 ) -> Response {
     let ack = match body::<AckBody>(bytes) {
-        Ok(AckBody {
-            state: AckState::Installed,
-            ..
-        }) => Ack::Installed,
-        Ok(AckBody {
-            state: AckState::Failed,
-            reason,
-        }) => Ack::Failed {
-            reason: reason
-                .filter(|reason| !reason.trim().is_empty())
-                .unwrap_or_else(|| "no reason given".into()),
-        },
+        Ok(ack) => ack.into_ack(),
         Err((code, error)) => return refuse(code, error),
     };
     match service.ack(&ClaimId::new(claim_id), ack).await {

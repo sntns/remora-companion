@@ -2955,6 +2955,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-claim"
+version = "0.9.0"
+dependencies = [
+ "async-trait",
+ "busybody",
+ "error-stack",
+ "remora-progress",
+ "remora-station",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-claim-adapter-http"
+version = "0.9.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "error-stack",
+ "remora-claim",
+ "remora-station",
+ "remora-station-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "remora-claim-application"
+version = "0.9.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-claim",
+ "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-adapter-grpc",
+ "remora-context-application",
+ "remora-factory",
+ "remora-factory-adapter-grpc",
+ "remora-factory-adapter-local",
+ "remora-factory-application",
+ "remora-progress",
+ "remora-station",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "remora-completion"
 version = "0.9.0"
 dependencies = [
@@ -3228,6 +3278,9 @@ dependencies = [
  "remora-batch",
  "remora-batch-application",
  "remora-batch-application-transport-cli",
+ "remora-claim",
+ "remora-claim-adapter-http",
+ "remora-claim-application",
  "remora-completion",
  "remora-config",
  "remora-config-application",
@@ -3799,12 +3852,11 @@ dependencies = [
 name = "remora-station-application-transport-cli"
 version = "0.9.0"
 dependencies = [
- "base64 0.22.1",
  "clap",
  "error-stack",
  "humantime",
+ "remora-claim",
  "remora-context",
- "remora-factory",
  "remora-progress",
  "remora-station",
  "remora-station-application-transport-http",
@@ -3813,7 +3865,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "yaml_serde",
 ]
 
@@ -3839,12 +3890,24 @@ dependencies = [
  "remora-station-adapter-hooks-process",
  "remora-station-adapter-jsonl",
  "remora-station-application",
+ "remora-station-protocol",
  "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "remora-station-protocol"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "remora-factory",
+ "remora-station",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

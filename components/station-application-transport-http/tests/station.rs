@@ -4,7 +4,9 @@
 //! against the in-process fake gateway, and a real HTTP client playing the
 //! devices. Only the operator console's display is a stub, keeping what it
 //! was shown; the operator's scans and commands go to `handle`, as `serve`
-//! sends them.
+//! sends them. Unix only: the hooks are shell scripts.
+
+#![cfg(unix)]
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -53,11 +55,15 @@ use remora_station::{
 use remora_station_adapter_hooks_process::ProcessHookRunnerImpl;
 use remora_station_adapter_jsonl::JsonlJournalImpl;
 use remora_station_application::StationControllerImpl;
-use remora_station_application_transport_http::{
-    serve, AckBody, AckState, ClaimBody, ClaimStatusBody, Error, ErrorCode, HardwareBody,
-    ImageBody, LabelBody, StateBody, StationClient, BODY_LIMIT,
+use remora_station_application_transport_http::{serve, BODY_LIMIT};
+use remora_station_protocol::{
+    AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorCode, HardwareBody, ImageBody, LabelBody,
+    StateBody,
 };
 use tokio::sync::oneshot;
+
+mod client;
+use client::{Error, StationClient};
 
 /// What the console was shown, kept for the test to inspect: the
 /// terminal's own console can't be read back.
@@ -117,7 +123,6 @@ fn config(root: &Path) -> StationConfig {
 }
 
 /// `<hooks>/<event>.d/<name>`, a shell script.
-#[cfg(unix)]
 fn hook(config: &StationConfig, event: &str, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     let dir = config.hooks.join(format!("{event}.d"));
@@ -381,7 +386,6 @@ async fn scan_when_printed(station: &Station, claim: &ClaimStatusBody, scanned: 
     station.scan(scanned).await;
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn ten_concurrent_claims_are_issued_then_labelled_one_at_a_time_in_order() {
     let (gateway, resolved) = TestGateway::serve().await;
@@ -479,7 +483,6 @@ async fn futures_join<T: Send + 'static>(
     results
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
     let (_gateway, resolved) = TestGateway::serve().await;
@@ -584,7 +587,6 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn retries_and_a_restarted_station_return_the_same_identity_without_the_platform() {
     let (gateway, resolved) = TestGateway::serve().await;
@@ -647,7 +649,6 @@ async fn retries_and_a_restarted_station_return_the_same_identity_without_the_pl
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_silent_active_hub_goes_back_to_the_queue() {
     let (_gateway, resolved) = TestGateway::serve().await;
@@ -679,7 +680,6 @@ async fn a_silent_active_hub_goes_back_to_the_queue() {
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_failing_label_hook_blocks_validation_until_reprinted_or_forced() {
     let (_gateway, resolved) = TestGateway::serve().await;
@@ -749,7 +749,6 @@ async fn a_failing_label_hook_blocks_validation_until_reprinted_or_forced() {
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn skipping_sends_the_active_hub_to_the_end_of_the_queue() {
     let (_gateway, resolved) = TestGateway::serve().await;
@@ -771,7 +770,6 @@ async fn skipping_sends_the_active_hub_to_the_end_of_the_queue() {
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn refusals_map_to_the_contract_status_codes() {
     let (gateway, resolved) = TestGateway::serve().await;
@@ -948,7 +946,6 @@ async fn refusals_map_to_the_contract_status_codes() {
     station.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn issued_hooks_get_the_claim_a_hub_sent() {
     let (_gateway, resolved) = TestGateway::serve().await;

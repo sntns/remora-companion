@@ -1,9 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+use remora_claim::application::ClaimService;
 use remora_context::model::ContextOverride;
-use remora_factory::adapter::{
-    credential::CredentialWriterAdapterService, key::DeviceKeyAdapterService,
-};
 use remora_station::application::StationService;
 
 use crate::{config::Confirm, error::Result, serve, simulate};
@@ -97,18 +95,16 @@ pub struct SimulateArgs {
 
 /// `serve` issues as the selected context: its login (or the role it acts
 /// as) needs `remora::create-factory-device`, and
-/// `remora::use-serial-number-policy` on each policy. `simulate` is a hub:
-/// it makes its own key, and writes its credential, through the factory's
-/// key and credential adapters -- what a hub does with its own code.
+/// `remora::use-serial-number-policy` on each policy. `simulate` is a hub,
+/// through the claim vertical: no context involved.
 pub async fn run(
     command: Command,
-    service: &StationService,
-    keys: &DeviceKeyAdapterService,
-    credentials: &CredentialWriterAdapterService,
+    station: &StationService,
+    claims: &ClaimService,
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     match command {
-        Command::Serve(args) => serve::run(args, service, over).await,
-        Command::Simulate(args) => simulate::run(args, keys, credentials).await,
+        Command::Serve(args) => serve::run(args, station, over).await,
+        Command::Simulate(args) => simulate::run(args, claims).await,
     }
 }
