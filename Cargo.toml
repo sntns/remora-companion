@@ -58,6 +58,7 @@ members = [
     "components/ota",
     "components/ota-application",
     "components/ota-adapter-grpc",
+    "components/ota-adapter-file",
     "components/ota-application-transport-cli",
     "components/device",
     "components/device-application",

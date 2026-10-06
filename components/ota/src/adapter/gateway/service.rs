@@ -16,14 +16,25 @@ pub struct InitialUpload {
 }
 
 /// An artifact upload in flight: chunks go in order, `finish` commits it.
+///
+/// The upload protocol carries no total length: the platform takes whatever
+/// it received when the stream ends cleanly as the whole artifact. So an
+/// upload that stops short must end with [`ArtifactSink::abort`] (or by
+/// dropping the sink, which does the same without waiting), never by
+/// simply going away -- that would commit a truncated bundle.
 #[async_trait::async_trait]
 pub trait ArtifactSink: Send {
     async fn send(&mut self, chunk: Vec<u8>) -> Result<()>;
+    /// Ends the stream cleanly: the platform commits what it received.
     async fn finish(self: Box<Self>) -> Result<()>;
+    /// Cancels the call: the platform keeps what it received for a resume
+    /// with the same content id, and commits nothing.
+    async fn abort(self: Box<Self>);
 }
 
 /// sntns-platform's remora gateway, as far as over-the-air updates need it:
-/// releases, their artifacts, deployments, and devices to target.
+/// releases, their artifacts, and deployments. Devices to target come from
+/// the device vertical.
 #[async_trait::async_trait]
 pub trait OtaGatewayAdapter: Send + Sync {
     async fn list_releases(
@@ -49,6 +60,10 @@ pub trait OtaGatewayAdapter: Send + Sync {
     ) -> Result<()>;
     async fn delete_release(&self, context: &ResolvedContext, name: &str) -> Result<()>;
 
+    /// A fresh resume token for a new upload, in the form the platform
+    /// expects. Here rather than in the use case: what a token looks like
+    /// is the platform's contract, and making one takes randomness.
+    fn new_content_id(&self) -> String;
     /// How many bytes the platform already holds for an upload's resume token.
     async fn upload_offset(&self, context: &ResolvedContext, content_id: &str) -> Result<u64>;
     async fn begin_upload(
@@ -56,9 +71,6 @@ pub trait OtaGatewayAdapter: Send + Sync {
         context: &ResolvedContext,
         upload: InitialUpload,
     ) -> Result<Box<dyn ArtifactSink>>;
-
-    async fn list_devices(&self, context: &ResolvedContext, labels: &Labels)
-        -> Result<Vec<String>>;
 
     async fn create_deployment(
         &self,

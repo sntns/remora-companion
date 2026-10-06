@@ -3116,7 +3116,12 @@ dependencies = [
  "async-trait",
  "error-stack",
  "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-application",
  "remora-device",
+ "remora-device-adapter-grpc",
+ "remora-ota-adapter-grpc",
+ "tempfile",
  "tokio",
 ]
 
@@ -3504,12 +3509,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-ota-adapter-file"
+version = "0.8.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-ota",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "remora-ota-adapter-grpc"
 version = "0.8.0"
 dependencies = [
  "async-trait",
  "error-stack",
  "prost-types",
+ "rand_core 0.6.4",
  "remora-context",
  "remora-ota",
  "remora-ota-adapter-grpc",
@@ -3525,11 +3542,14 @@ version = "0.8.0"
 dependencies = [
  "async-trait",
  "error-stack",
- "rand_core 0.6.4",
  "remora-context",
  "remora-context-adapter-file",
  "remora-context-application",
+ "remora-device",
+ "remora-device-adapter-grpc",
+ "remora-device-application",
  "remora-ota",
+ "remora-ota-adapter-file",
  "remora-ota-adapter-grpc",
  "remora-progress",
  "tempfile",
@@ -3545,6 +3565,7 @@ dependencies = [
  "error-stack",
  "remora-completion",
  "remora-context",
+ "remora-device",
  "remora-ota",
  "remora-progress",
  "remora-tui",
@@ -3789,6 +3810,7 @@ dependencies = [
  "remora-device-application",
  "remora-device-application-transport-cli",
  "remora-ota",
+ "remora-ota-adapter-file",
  "remora-ota-adapter-grpc",
  "remora-ota-application",
  "remora-ota-application-transport-cli",

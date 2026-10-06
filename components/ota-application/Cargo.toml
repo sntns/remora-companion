@@ -9,14 +9,17 @@ publish.workspace = true
 [dependencies]
 remora-ota = { path = "../ota" }
 remora-context = { path = "../context" }
+remora-device = { path = "../device" }
 remora-progress = { path = "../progress" }
 async-trait.workspace = true
 error-stack.workspace = true
-rand_core.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util"] }
+tokio.workspace = true
 
 [dev-dependencies]
 remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+remora-ota-adapter-file = { path = "../ota-adapter-file" }
+remora-device-application = { path = "../device-application" }
+remora-device-adapter-grpc = { path = "../device-adapter-grpc" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 tempfile.workspace = true

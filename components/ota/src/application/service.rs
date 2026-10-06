@@ -1,10 +1,13 @@
+use std::time::Duration;
+
 use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use super::error::Result;
 use crate::model::{
-    DeployRequest, Deployment, DeploymentFilter, DeploymentSummary, Labels, LogEntry, Planned,
-    Release, ReleaseSummary, Targets, UploadOutcome, UploadRequest,
+    DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
+    DeploymentSummary, Labels, LogEntry, Planned, Release, ReleaseSummary, Targets, UploadOutcome,
+    UploadRequest, WatchOutcome,
 };
 
 /// The ota vertical's application-facing port: over-the-air updates as an
@@ -35,7 +38,9 @@ pub trait OtaServiceInterface: Send + Sync {
     async fn delete_release(&self, over: Option<&ContextOverride>, name: &str) -> Result<()>;
     /// Uploads a file as an artifact, reporting bytes through `ctx`. Resumes
     /// from where the platform got to: on its own after a dropped stream,
-    /// and across runs with [`UploadRequest::resume`].
+    /// and across runs with [`UploadRequest::resume`]. Cancelled through
+    /// `ctx`, it fails with [`super::Error::Cancelled`], which carries the
+    /// token to resume with; nothing is committed either way.
     async fn upload(
         &self,
         over: Option<&ContextOverride>,
@@ -44,7 +49,9 @@ pub trait OtaServiceInterface: Send + Sync {
     ) -> Result<UploadOutcome>;
 
     /// The devices `targets` names: as given, or every device matching the
-    /// selector. Lets a transport show (and confirm) a rollout's reach.
+    /// selector. Lets a transport show (and confirm) a rollout's reach --
+    /// then deploy to exactly those, as [`Targets::Devices`], so that a
+    /// device labelled in the meantime isn't updated unasked.
     async fn resolve_targets(
         &self,
         over: Option<&ContextOverride>,
@@ -72,6 +79,29 @@ pub trait OtaServiceInterface: Send + Sync {
         over: Option<&ContextOverride>,
         name: &str,
     ) -> Result<Vec<LogEntry>>;
+    /// Polls deployments every `interval` until each is settled (see
+    /// [`DeploymentStatus::is_settled`]), calling `on_progress` whenever one
+    /// is polled. Cancelling `ctx` stops watching (not the deployments):
+    /// those still going are returned as pending.
+    async fn watch(
+        &self,
+        over: Option<&ContextOverride>,
+        names: &[String],
+        interval: Duration,
+        ctx: &OperationContext,
+        on_progress: &mut (dyn FnMut(DeploymentProgress) + Send),
+    ) -> Result<WatchOutcome>;
+    /// Calls `on_entry` with each report of the device, oldest first, as
+    /// they arrive, polling every `interval` until the deployment is
+    /// settled; returns its status then, or `None` once `ctx` is cancelled.
+    async fn follow_logs(
+        &self,
+        over: Option<&ContextOverride>,
+        name: &str,
+        interval: Duration,
+        ctx: &OperationContext,
+        on_entry: &mut (dyn FnMut(LogEntry) + Send),
+    ) -> Result<Option<DeploymentStatus>>;
     async fn start_deployment(&self, over: Option<&ContextOverride>, name: &str) -> Result<()>;
     async fn cancel_deployment(&self, over: Option<&ContextOverride>, name: &str) -> Result<()>;
     async fn delete_deployment(&self, over: Option<&ContextOverride>, name: &str) -> Result<()>;
