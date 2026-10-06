@@ -8,17 +8,21 @@ pub fn read<R: Read + Seek>(
     let gpt = gptman::GPT::find_from(reader)?;
     let sector_size = gpt.sector_size;
 
-    let mut partitions: Vec<PartitionEntry> = gpt
+    let mut partitions = gpt
         .iter()
         .filter(|(_, p)| p.is_used())
-        .map(|(i, p)| PartitionEntry {
-            index: i,
-            label: Some(p.partition_name.as_str().to_string()).filter(|s| !s.is_empty()),
-            start_bytes: p.starting_lba * sector_size,
-            size_bytes: p.size().unwrap_or(0) * sector_size,
-            partition_type: format_type_guid(&p.partition_type_guid),
+        .map(|(i, p)| {
+            // An entry ending before it starts is a corrupt table, not an
+            // empty partition to write into.
+            Ok(PartitionEntry {
+                index: i,
+                label: Some(p.partition_name.as_str().to_string()).filter(|s| !s.is_empty()),
+                start_bytes: p.starting_lba * sector_size,
+                size_bytes: p.size()? * sector_size,
+                partition_type: format_type_guid(&p.partition_type_guid),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, gptman::Error>>()?;
     partitions.sort_by_key(|p| p.index);
 
     Ok(PartitionTable {

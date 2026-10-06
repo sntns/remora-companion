@@ -15,4 +15,3 @@ clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true

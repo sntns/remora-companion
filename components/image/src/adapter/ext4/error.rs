@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("failed to open {0}")]
-    Open(PathBuf),
+    #[error("I/O error on {0}")]
+    Io(PathBuf, #[source] std::io::Error),
     #[error(
         "partition window [{offset}, {}) does not fit inside {} ({window_size} bytes)",
         offset + len, path.display()

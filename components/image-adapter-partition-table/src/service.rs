@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use remora_image::{
     adapter::partition_table::{Error, PartitionTableAdapter, Result},
     model::{FsKind, PartitionTable},
@@ -17,16 +17,14 @@ pub struct PartitionTableAdapterImpl;
 
 impl PartitionTableAdapter for PartitionTableAdapterImpl {
     fn read(&self, path: &Path) -> Result<PartitionTable> {
-        let mut file =
-            File::open(path).map_err(|_| Report::new(Error::Open(path.to_path_buf())))?;
+        let mut file = File::open(path).change_context_lazy(|| Error::Open(path.to_path_buf()))?;
 
         let gpt_err = match gpt::read(&mut file) {
             Ok(table) => return Ok(table),
             Err(e) => e,
         };
 
-        file.seek(SeekFrom::Start(0))
-            .map_err(|_| Report::new(Error::Seek))?;
+        file.seek(SeekFrom::Start(0)).change_context(Error::Seek)?;
 
         match mbr::read(&mut file) {
             Ok(table) => Ok(table),
@@ -60,14 +58,14 @@ const FAT32_FILSYSTYPE_OFFSET: usize = 0x52;
 /// ext4 or vfat by reading its own on-disk signature, rather than inferring
 /// it from a boot-mode label the caller would otherwise have to supply.
 fn detect_fs_kind(image: &Path, partition_offset: u64) -> Result<FsKind> {
-    let mut file = File::open(image).map_err(|_| Report::new(Error::Open(image.to_path_buf())))?;
+    let mut file = File::open(image).change_context_lazy(|| Error::Open(image.to_path_buf()))?;
 
     let mut magic = [0u8; 2];
     file.seek(SeekFrom::Start(
         partition_offset + EXT4_SUPERBLOCK_OFFSET + EXT4_MAGIC_OFFSET,
     ))
     .and_then(|_| file.read_exact(&mut magic))
-    .map_err(|_| Report::new(Error::Seek))?;
+    .change_context(Error::Seek)?;
     if u16::from_le_bytes(magic) == EXT4_MAGIC {
         return Ok(FsKind::Ext4);
     }
@@ -75,7 +73,7 @@ fn detect_fs_kind(image: &Path, partition_offset: u64) -> Result<FsKind> {
     let mut boot_sector = [0u8; 512];
     file.seek(SeekFrom::Start(partition_offset))
         .and_then(|_| file.read_exact(&mut boot_sector))
-        .map_err(|_| Report::new(Error::Seek))?;
+        .change_context(Error::Seek)?;
     let has_boot_signature = boot_sector
         [FAT_BOOT_SECTOR_SIGNATURE_OFFSET..FAT_BOOT_SECTOR_SIGNATURE_OFFSET + 2]
         == FAT_BOOT_SECTOR_SIGNATURE;

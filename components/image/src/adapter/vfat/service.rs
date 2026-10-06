@@ -5,7 +5,9 @@ use super::error::Result;
 /// DI seam over the vfat backend: implemented by
 /// `remora-image-adapter-vfat` for the real `fatfs` wrapper, and by
 /// that same adapter for the `PartitionFilesystem` composite port. No
-/// `*Service` DI wrapper yet — see `ext4::Ext4Adapter`'s doc comment.
+/// `*Service` DI wrapper: the image use case is its only consumer, and it
+/// takes the backend as an `Arc<dyn PartitionFilesystem>` (see
+/// `bootstrap.rs` for why that one skips the container).
 pub trait VfatAdapter: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     fn write_file(

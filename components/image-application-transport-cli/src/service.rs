@@ -183,7 +183,7 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                 let follow = remora_tui::follow(stream);
                 let ctx = remora_progress::OperationContext::new(
                     sink,
-                    tokio_util::sync::CancellationToken::new(),
+                    remora_progress::cancelled_by_ctrl_c(),
                 );
                 let result = service.cp_dir(&request, &ctx).await;
                 drop(ctx);
@@ -239,6 +239,19 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
 }
 
 fn print_partitions(table: &PartitionTable, boot_mode: Option<BootMode>) {
+    // A boot mode's role indices only mean something on the table kind it
+    // lays out: BIOS's `data` index is GPT's slotB.
+    let boot_mode = boot_mode.filter(|mode| {
+        let fits = mode.table_kind() == table.kind;
+        if !fits {
+            remora_tui::warning(format!(
+                "Boot mode {mode:?} lays out a {:?} table, this one is {:?}: roles not shown",
+                mode.table_kind(),
+                table.kind
+            ));
+        }
+        fits
+    });
     let mut rows = remora_tui::Table::new(["#", "start", "size", "type", "label", "role"]);
     for entry in &table.partitions {
         let role = boot_mode
