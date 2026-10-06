@@ -12,7 +12,10 @@ use remora_station::{
     },
     model::{BoardPolicy, ClaimState, LabelState},
 };
-use tokio::{io::AsyncWriteExt, process::Command};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::Command,
+};
 
 /// How much of a script's stdout and stderr is kept, each: enough for any
 /// message, without letting a chatty script bloat the journal.
@@ -150,26 +153,47 @@ async fn run_one(hook: String, script: &Path, run: &HookRun) -> HookOutcome {
             let _ = stdin.write_all(record.as_bytes()).await;
         });
     }
-    // Dropping the wait on a timeout drops the child, which kills it.
-    match tokio::time::timeout(run.timeout, child.wait_with_output()).await {
-        Ok(Ok(output)) => HookOutcome {
+    // Both pipes are drained alongside the wait (a script filling one must
+    // never block on it), keeping only the first OUTPUT_LIMIT bytes of
+    // each: a chatty script can't make the station buffer it all.
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let finished = async { tokio::join!(bounded(stdout), bounded(stderr), child.wait()) };
+    match tokio::time::timeout(run.timeout, finished).await {
+        Ok((stdout, stderr, Ok(status))) => HookOutcome {
             hook,
-            exit: output.status.code(),
+            exit: status.code(),
             timed_out: false,
-            stdout: text(&output.stdout),
-            stderr: text(&output.stderr),
+            stdout,
+            stderr,
         },
-        Ok(Err(error)) => failed(
+        Ok((_, _, Err(error))) => failed(
             format!("failed to wait for {}: {error}", script.display()),
             false,
         ),
+        // Dropping the child kills it.
         Err(_) => failed(format!("killed after {}s", run.timeout.as_secs_f32()), true),
     }
 }
 
-fn text(bytes: &[u8]) -> String {
-    let mut text = String::from_utf8_lossy(&bytes[..bytes.len().min(OUTPUT_LIMIT)]).into_owned();
-    if bytes.len() > OUTPUT_LIMIT {
+/// What `pipe` carries, up to OUTPUT_LIMIT bytes (marked when cut); the
+/// rest is read and dropped until the script closes it.
+async fn bounded(pipe: Option<impl AsyncRead + Unpin>) -> String {
+    let Some(mut pipe) = pipe else {
+        return String::new();
+    };
+    let mut kept = Vec::new();
+    let _ = (&mut pipe)
+        .take(OUTPUT_LIMIT as u64 + 1)
+        .read_to_end(&mut kept)
+        .await;
+    let truncated = kept.len() > OUTPUT_LIMIT;
+    kept.truncate(OUTPUT_LIMIT);
+    if truncated {
+        let _ = tokio::io::copy(&mut pipe, &mut tokio::io::sink()).await;
+    }
+    let mut text = String::from_utf8_lossy(&kept).into_owned();
+    if truncated {
         text.push_str("\n[truncated]");
     }
     text
@@ -474,6 +498,33 @@ cat >&2"#,
         assert!(outcomes[0].timed_out);
         assert_eq!(outcomes[0].exit, None);
         assert_eq!(outcomes[1].stdout, "next\n");
+    }
+
+    #[tokio::test]
+    async fn keeps_only_the_start_of_a_chatty_script() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("issued.d");
+        std::fs::create_dir(&dir).unwrap();
+        // Ten times the limit on stdout, and it still exits normally.
+        script(
+            &dir,
+            "10-chatty",
+            "head -c 655360 /dev/zero | tr '\\0' x; echo done >&2",
+            true,
+        );
+        let outcomes = ProcessHookRunnerImpl
+            .run(&hook_run(
+                root.path(),
+                HookEvent::Issued,
+                Duration::from_secs(10),
+            ))
+            .await
+            .unwrap();
+        let outcome = &outcomes[0];
+        assert!(outcome.succeeded(), "{:?}", outcome.stderr);
+        assert_eq!(outcome.stdout.len(), OUTPUT_LIMIT + "\n[truncated]".len());
+        assert!(outcome.stdout.ends_with("x\n[truncated]"));
+        assert_eq!(outcome.stderr, "done\n");
     }
 
     #[tokio::test]
