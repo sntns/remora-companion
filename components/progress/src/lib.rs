@@ -89,6 +89,28 @@ impl OperationContext {
     }
 }
 
+/// A cancellation token the operator cancels with Ctrl-C: the first one
+/// asks the running operation to stop cleanly (it checks
+/// `OperationContext::cancel` between steps), a second one exits at once
+/// with 130, the shell's code for an interrupt -- for when the operation is
+/// stuck in something it can't interrupt. Call it from a transport, inside
+/// the runtime.
+pub fn cancelled_by_ctrl_c() -> CancellationToken {
+    let token = CancellationToken::new();
+    let watched = token.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            // No signal handling here: Ctrl-C keeps its default, killing.
+            return;
+        }
+        watched.cancel();
+        if tokio::signal::ctrl_c().await.is_ok() {
+            std::process::exit(130);
+        }
+    });
+    token
+}
+
 /// What happened to a [`track_output_file_size`]-wrapped operation.
 #[derive(Debug)]
 pub enum TrackedOutcome<T, E> {
