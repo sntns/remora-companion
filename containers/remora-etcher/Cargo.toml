@@ -94,5 +94,5 @@ section = "utility"
 priority = "optional"
 assets = [
     ["target/release/remora-etcher", "usr/bin/", "755"],
-    ["../../README.md", "usr/share/doc/cargo-deb/README", "644"],
+    ["../../README.md", "usr/share/doc/remora-etcher/README", "644"],
 ]

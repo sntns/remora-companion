@@ -21,9 +21,9 @@ pub enum OperationEvent {
 }
 
 /// The sending half of an operation's progress channel. Cheap to clone (an
-/// `mpsc::UnboundedSender` clone), so it can be handed to a spawned polling
-/// task (see `remora-flash-adapter-bmap`) alongside the main
-/// operation.
+/// `mpsc::UnboundedSender` clone), so it can be handed to a spawned task
+/// alongside the main operation, or reported from while waiting on a
+/// blocking one (see [`track_output_file_size`]).
 #[derive(Clone)]
 pub struct ProgressSink(Option<mpsc::UnboundedSender<OperationEvent>>);
 

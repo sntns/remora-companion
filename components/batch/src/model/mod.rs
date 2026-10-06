@@ -52,7 +52,7 @@ pub enum BatchStep {
     /// specific platform environment with per-unit output (a new key and
     /// serial each time) -- a recipe containing it is not
     /// reproducible/replayable offline the way the rest of `batch` is.
-    /// Included anyway on request; see the batch vertical's own doc
+    /// Included anyway on request; see `FactoryServiceInterface`'s own doc
     /// comment for the tradeoff. Produces a standalone `remora-factory.yaml`
     /// at `output`, same as running `factory provision` directly -- pair it
     /// with a later `IdentityCreate` step (`inputs` including this file) to
