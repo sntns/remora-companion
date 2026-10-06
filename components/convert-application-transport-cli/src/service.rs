@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use remora_convert::application::{ConvertService, Result};
+use error_stack::ResultExt;
+use remora_convert::application::ConvertService;
 use remora_progress::OperationContext;
-use tokio_util::sync::CancellationToken;
+
+use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -36,11 +38,11 @@ pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
                 .to_raw(
                     &image,
                     &output,
-                    &OperationContext::new(sink, CancellationToken::new()),
+                    &OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c()),
                 )
                 .await;
             follow.finish(&result).await;
-            result?;
+            result.change_context(Error::ToRaw)?;
             remora_tui::success(format!("Wrote {}", remora_tui::accent(output.display())));
             Ok(())
         }
@@ -51,11 +53,11 @@ pub async fn run(command: Command, service: &ConvertService) -> Result<()> {
                 .from_raw(
                     &raw,
                     &output,
-                    &OperationContext::new(sink, CancellationToken::new()),
+                    &OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c()),
                 )
                 .await;
             follow.finish(&result).await;
-            result?;
+            result.change_context(Error::FromRaw)?;
             remora_tui::success(format!("Wrote {}", remora_tui::accent(output.display())));
             Ok(())
         }
