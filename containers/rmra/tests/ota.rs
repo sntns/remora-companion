@@ -3,7 +3,7 @@
 //! mid-way and resumed on its own, or interrupted with Ctrl-C and resumed
 //! with the printed token), roll it out, and follow it to the end.
 
-use std::{process::Stdio, time::Duration};
+use std::process::Stdio;
 
 use remora_ota_adapter_grpc::test_gateway::TestGateway;
 
@@ -214,6 +214,8 @@ async fn publish_deploy_and_follow_an_update() {
 #[cfg(unix)]
 #[tokio::test]
 async fn an_interrupted_upload_resumes_with_the_printed_token() {
+    use std::time::Duration;
+
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
     let (gateway, resolved) = TestGateway::serve().await;
