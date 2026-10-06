@@ -1,4 +1,8 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, SystemTime},
+};
 
 use error_stack::{Report, ResultExt};
 use remora_context::model::ResolvedContext;
@@ -13,13 +17,13 @@ use remora_platform_grpc::{
     connect, sntns::service::remora::v1 as pb, status_summary, Connection, GatewayChannel,
 };
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{Stream, StreamExt};
 
 type Releases = pb::release_service_client::ReleaseServiceClient<GatewayChannel>;
 type Deployments = pb::deployment_service_client::DeploymentServiceClient<GatewayChannel>;
-type Devices = pb::device_service_client::DeviceServiceClient<GatewayChannel>;
+type UploadRequest = pb::ReleaseServiceUploadReleaseArtifactRequest;
 
-/// The remora gateway's release, deployment and device services over gRPC.
+/// The remora gateway's release and deployment services over gRPC.
 pub struct OtaGatewayAdapterImpl;
 
 async fn channel(context: &ResolvedContext) -> Result<GatewayChannel> {
@@ -171,6 +175,14 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         Ok(())
     }
 
+    /// 128 random bits, hex.
+    fn new_content_id(&self) -> String {
+        use rand_core::RngCore;
+        let mut bytes = [0u8; 16];
+        rand_core::OsRng.fill_bytes(&mut bytes);
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
     async fn upload_offset(&self, context: &ResolvedContext, content_id: &str) -> Result<u64> {
         let offset = Releases::new(channel(context).await?)
             .get_release_artifact_upload_offset(
@@ -194,56 +206,32 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         // An artifact is a whole bundle: no 4 MiB cap on what we send.
         let mut client =
             Releases::new(channel(context).await?).max_encoding_message_size(usize::MAX);
+        let initial = UploadRequest {
+            request: Some(Request::InitialRequest(
+                pb::ReleaseServiceUploadReleaseArtifactInitialRequest {
+                    release_name: upload.release,
+                    artifact_file_name: upload.file_name,
+                    artifact_content_type: upload.content_type,
+                    artifact_tag_condition: upload.tag_condition,
+                    artifact_content_id: upload.content_id,
+                },
+            )),
+        };
         let (chunks, outgoing) = mpsc::channel(4);
-        chunks
-            .send(pb::ReleaseServiceUploadReleaseArtifactRequest {
-                request: Some(Request::InitialRequest(
-                    pb::ReleaseServiceUploadReleaseArtifactInitialRequest {
-                        release_name: upload.release,
-                        artifact_file_name: upload.file_name,
-                        artifact_content_type: upload.content_type,
-                        artifact_tag_condition: upload.tag_condition,
-                        artifact_content_id: upload.content_id,
-                    },
-                )),
-            })
-            .await
-            .expect("the receiver is held just below");
+        let requests = tokio_stream::once(initial).chain(UntilEnd(outgoing));
         // Client streaming answers only once the request stream ends, so the
         // call runs alongside the sends and `finish` collects its answer.
         let call = tokio::spawn(async move {
             client
-                .upload_release_artifact(ReceiverStream::new(outgoing))
+                .upload_release_artifact(requests)
                 .await
                 .map(|_| ())
                 .map_err(classify)
         });
         Ok(Box::new(GrpcArtifactSink {
             chunks: Some(chunks),
-            call,
+            call: Some(call),
         }))
-    }
-
-    async fn list_devices(
-        &self,
-        context: &ResolvedContext,
-        labels: &Labels,
-    ) -> Result<Vec<String>> {
-        let response = Devices::new(channel(context).await?)
-            .list_devices(pb::DeviceServiceListDevicesRequest {
-                device_labels: hash_map(labels),
-            })
-            .await
-            .map_err(classify)?
-            .into_inner();
-        let mut devices: Vec<_> = response
-            .device_summaries
-            .into_iter()
-            .map(|summary| name_of(summary.resource))
-            .filter(|name| !name.is_empty())
-            .collect();
-        devices.sort();
-        Ok(devices)
     }
 
     async fn create_deployment(
@@ -375,16 +363,60 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
     }
 }
 
+/// What the sink hands the request stream.
+enum Outgoing {
+    Chunk(UploadRequest),
+    /// The upload is complete: end the stream cleanly, which commits it.
+    End,
+}
+
+/// The request stream after the initial request: chunks until
+/// [`Outgoing::End`]. Its sender going away without one (a sink dropped or
+/// aborted mid-way) never ends the stream: a clean end is what makes the
+/// platform commit, so a truncated upload must only ever be reset -- which
+/// the sink does by dropping the call (hyper then sends RST_STREAM).
+struct UntilEnd(mpsc::Receiver<Outgoing>);
+
+impl Stream for UntilEnd {
+    type Item = UploadRequest;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.0.poll_recv(cx) {
+            Poll::Ready(Some(Outgoing::Chunk(request))) => Poll::Ready(Some(request)),
+            Poll::Ready(Some(Outgoing::End)) => Poll::Ready(None),
+            Poll::Ready(None) | Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 struct GrpcArtifactSink {
-    chunks: Option<mpsc::Sender<pb::ReleaseServiceUploadReleaseArtifactRequest>>,
-    call: JoinHandle<Result<()>>,
+    chunks: Option<mpsc::Sender<Outgoing>>,
+    /// `None` once collected.
+    call: Option<JoinHandle<Result<()>>>,
 }
 
 impl GrpcArtifactSink {
     /// The call's own outcome, once the request stream is over.
-    async fn outcome(call: JoinHandle<Result<()>>) -> Result<()> {
+    async fn outcome(&mut self) -> Result<()> {
+        let Some(call) = self.call.take() else {
+            return Err(Report::new(Error::Call).attach("the upload has already ended"));
+        };
         call.await
             .map_err(|e| Report::new(Error::Call).attach(e.to_string()))?
+    }
+
+    /// Sends one item; when the call already ended, reports why it did
+    /// rather than that a send failed.
+    async fn push(&mut self, item: Outgoing) -> Result<()> {
+        let Some(chunks) = &self.chunks else {
+            return Err(Report::new(Error::Call).attach("the upload has already failed"));
+        };
+        if chunks.send(item).await.is_ok() {
+            return Ok(());
+        }
+        self.chunks = None;
+        self.outcome().await?;
+        Err(Report::new(Error::Call).attach("the gateway ended the upload early"))
     }
 }
 
@@ -392,29 +424,38 @@ impl GrpcArtifactSink {
 impl ArtifactSink for GrpcArtifactSink {
     async fn send(&mut self, chunk: Vec<u8>) -> Result<()> {
         use pb::release_service_upload_release_artifact_request::Request;
-        let Some(chunks) = &self.chunks else {
-            return Err(Report::new(Error::Call).attach("the upload has already failed"));
-        };
-        let request = pb::ReleaseServiceUploadReleaseArtifactRequest {
+        self.push(Outgoing::Chunk(UploadRequest {
             request: Some(Request::SubsequentRequest(
                 pb::ReleaseServiceUploadReleaseArtifactSubsequentRequest {
                     artifact_chunk: chunk,
                 },
             )),
-        };
-        if chunks.send(request).await.is_ok() {
-            return Ok(());
-        }
-        // The call ended early: report why it did, not that a send failed.
-        self.chunks = None;
-        let call = std::mem::replace(&mut self.call, tokio::spawn(async { Ok(()) }));
-        Self::outcome(call).await?;
-        Err(Report::new(Error::Call).attach("the gateway ended the upload early"))
+        }))
+        .await
     }
 
     async fn finish(mut self: Box<Self>) -> Result<()> {
-        self.chunks = None;
-        Self::outcome(self.call).await
+        self.push(Outgoing::End).await?;
+        self.outcome().await
+    }
+
+    async fn abort(mut self: Box<Self>) {
+        if let Some(call) = self.call.take() {
+            call.abort();
+            // Wait for the call to be gone, so that the reset is on its way
+            // before the caller moves on (or the process exits).
+            let _ = call.await;
+        }
+    }
+}
+
+impl Drop for GrpcArtifactSink {
+    /// A sink dropped without `finish` (an early return, a panic) is an
+    /// abandoned upload, same as `abort`.
+    fn drop(&mut self) {
+        if let Some(call) = self.call.take() {
+            call.abort();
+        }
     }
 }
 
@@ -544,6 +585,77 @@ mod tests {
         assert_eq!(adapter.upload_offset(&context, "id-2").await.unwrap(), 4);
     }
 
+    /// Waits until `done` holds of the fake's state.
+    async fn until(gateway: &TestGateway, done: impl Fn(&crate::test_gateway::State) -> bool) {
+        for _ in 0..500 {
+            if done(&gateway.0.lock().unwrap()) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let state = gateway.0.lock().unwrap();
+        panic!(
+            "the gateway never got there: {:?}",
+            (
+                state.abandoned_uploads,
+                state.upload_offset("a"),
+                state.upload_offset("b")
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upload_stopped_short_is_never_committed() {
+        let (gateway, context) = TestGateway::serve().await;
+        let adapter = OtaGatewayAdapterImpl;
+        adapter
+            .create_release(&context, "r1", "1", &Labels::new())
+            .await
+            .unwrap();
+        let upload = |id: &str| InitialUpload {
+            release: "r1".into(),
+            file_name: "bundle.raucb".into(),
+            content_type: String::new(),
+            tag_condition: String::new(),
+            content_id: id.into(),
+        };
+
+        // Aborted on purpose: what arrived stays for a resume, uncommitted.
+        let mut sink = adapter.begin_upload(&context, upload("a")).await.unwrap();
+        sink.send(b"half a ".to_vec()).await.unwrap();
+        until(&gateway, |state| state.upload_offset("a") == 7).await;
+        sink.abort().await;
+        until(&gateway, |state| state.abandoned_uploads == 1).await;
+
+        // Dropped on an early return: same thing.
+        let mut sink = adapter.begin_upload(&context, upload("b")).await.unwrap();
+        sink.send(b"half".to_vec()).await.unwrap();
+        until(&gateway, |state| state.upload_offset("b") == 4).await;
+        drop(sink);
+        until(&gateway, |state| state.abandoned_uploads == 2).await;
+
+        assert!(gateway.artifact_bytes("r1", "bundle.raucb").is_none());
+        let release = adapter.get_release(&context, "r1").await.unwrap();
+        assert!(release.artifacts.is_empty());
+
+        // The token resumes it, and finishing commits the whole of it.
+        let mut sink = adapter.begin_upload(&context, upload("a")).await.unwrap();
+        sink.send(b"bundle".to_vec()).await.unwrap();
+        sink.finish().await.unwrap();
+        assert_eq!(
+            gateway.artifact_bytes("r1", "bundle.raucb").unwrap(),
+            b"half a bundle"
+        );
+    }
+
+    #[tokio::test]
+    async fn content_ids_are_fresh() {
+        let adapter = OtaGatewayAdapterImpl;
+        let id = adapter.new_content_id();
+        assert_eq!(id.len(), 32);
+        assert_ne!(id, adapter.new_content_id());
+    }
+
     #[tokio::test]
     async fn deployments_progress_and_refuse_a_second_one_per_device() {
         let (_, context) = TestGateway::serve().await;
@@ -552,14 +664,6 @@ mod tests {
             .create_release(&context, "r1", "1", &Labels::new())
             .await
             .unwrap();
-        assert_eq!(
-            adapter
-                .list_devices(&context, &Labels::from([("board".into(), "rp5".into())]))
-                .await
-                .unwrap(),
-            ["BROKEN", "DEV1", "DEV2"]
-        );
-
         adapter
             .create_deployment(&context, "d1", "r1", "DEV1", &Labels::new())
             .await

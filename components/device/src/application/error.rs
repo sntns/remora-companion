@@ -1,7 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{0}")]
-    Context(String),
+    #[error("no usable context")]
+    Context,
     #[error("failed to list devices")]
     List,
     #[error("failed to get device {0:?}")]

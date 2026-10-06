@@ -2,6 +2,8 @@
 //! uploads held in memory, a fixed set of labelled devices, and deployments
 //! that move PENDING → RUNNING → SUCCEEDED as they're polled (FAILED for a
 //! device named `BROKEN`), reporting progress as log entries on the way.
+//! Like the platform, an upload is committed only when its stream ends
+//! cleanly; one that errors or is reset keeps its bytes for a resume.
 //! Never built into a shipped binary (the `test-gateway` feature is only
 //! enabled from `[dev-dependencies]`).
 
@@ -47,10 +49,23 @@ pub struct State {
     /// The next upload stream fails after receiving this many bytes, once:
     /// a dropped connection, with what arrived kept for a resume.
     pub fail_next_upload_after: Option<usize>,
+    /// How long each received chunk takes to store: a slow link, so that a
+    /// test can interrupt an upload while it runs.
+    pub upload_chunk_delay: Option<std::time::Duration>,
+    /// Upload streams that ended without being committed (failed, reset by
+    /// the client, or the client gone).
+    pub abandoned_uploads: usize,
     pub devices: BTreeMap<String, HashMap<String, String>>,
     deployments: BTreeMap<String, StoredDeployment>,
     /// Manufactured serials, with how many times each was signed.
     pub factory_devices: BTreeMap<String, u32>,
+}
+
+impl State {
+    /// How many bytes arrived for a content id, committed or not.
+    pub fn upload_offset(&self, content_id: &str) -> usize {
+        self.uploads.get(content_id).map_or(0, |u| u.bytes.len())
+    }
 }
 
 #[derive(Clone)]
@@ -125,8 +140,30 @@ impl TestGateway {
         state.uploads.get(&id).map(|upload| upload.bytes.clone())
     }
 
+    /// Forces a deployment's status, e.g. one this version doesn't know.
+    pub fn set_deployment_status(&self, name: &str, status: &str) {
+        if let Some(deployment) = self.state().deployments.get_mut(name) {
+            deployment.status = status.to_owned();
+        }
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.0.lock().unwrap()
+    }
+}
+
+/// Counts an upload stream as abandoned unless it was committed -- even
+/// when the server drops the handler outright on a client reset.
+struct UploadGuard {
+    gateway: TestGateway,
+    committed: bool,
+}
+
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.gateway.state().abandoned_uploads += 1;
+        }
     }
 }
 
@@ -250,28 +287,49 @@ impl pb::release_service_server::ReleaseService for TestGateway {
         if !self.state().releases.contains_key(&initial.release_name) {
             return Err(Status::not_found("the release has not been found"));
         }
-        let fail_after = self.state().fail_next_upload_after.take();
+        let mut guard = UploadGuard {
+            gateway: self.clone(),
+            committed: false,
+        };
+        let (fail_after, delay) = {
+            let mut state = self.state();
+            (
+                state.fail_next_upload_after.take(),
+                state.upload_chunk_delay,
+            )
+        };
         let mut received = 0;
         while let Some(message) = incoming.next().await {
             let message = message?;
             if let Some(In::SubsequentRequest(chunk)) = message.request {
-                let mut state = self.state();
-                let upload = state
-                    .uploads
-                    .entry(initial.artifact_content_id.clone())
-                    .or_default();
-                let mut bytes = chunk.artifact_chunk.as_slice();
-                if let Some(limit) = fail_after {
-                    let room = limit.saturating_sub(received);
-                    if bytes.len() > room {
-                        upload.bytes.extend_from_slice(&bytes[..room]);
-                        return Err(Status::unavailable("connection reset"));
+                {
+                    let mut state = self.state();
+                    let upload = state
+                        .uploads
+                        .entry(initial.artifact_content_id.clone())
+                        .or_default();
+                    let bytes = chunk.artifact_chunk.as_slice();
+                    if let Some(limit) = fail_after {
+                        let room = limit.saturating_sub(received);
+                        if bytes.len() > room {
+                            upload.bytes.extend_from_slice(&bytes[..room]);
+                            return Err(Status::unavailable("connection reset"));
+                        }
                     }
+                    received += bytes.len();
+                    upload.bytes.extend_from_slice(bytes);
                 }
-                received += bytes.len();
-                upload.bytes.extend_from_slice(std::mem::take(&mut bytes));
+                if let Some(delay) = delay {
+                    tokio::time::sleep(delay).await;
+                }
             }
         }
+        // tonic hands a client's cancellation (RST_STREAM) to a handler as
+        // a clean end of stream, where the platform (grpc-go) sees an error
+        // and commits nothing. Yielding once lets hyper notice the reset
+        // and drop this handler before it commits, as the platform would.
+        tokio::task::yield_now().await;
+        guard.committed = true;
         let mut state = self.state();
         let length = state
             .uploads
@@ -304,7 +362,7 @@ impl pb::release_service_server::ReleaseService for TestGateway {
         request: Request<pb::ReleaseServiceGetReleaseArtifactUploadOffsetRequest>,
     ) -> Result<Response<pb::ReleaseServiceGetReleaseArtifactUploadOffsetResponse>, Status> {
         let id = request.into_inner().artifact_content_id;
-        let offset = self.state().uploads.get(&id).map_or(0, |u| u.bytes.len());
+        let offset = self.state().upload_offset(&id);
         Ok(Response::new(
             pb::ReleaseServiceGetReleaseArtifactUploadOffsetResponse {
                 artifact_content_offset: offset as i64,

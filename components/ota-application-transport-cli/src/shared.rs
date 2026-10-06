@@ -1,4 +1,4 @@
-use error_stack::Report;
+use error_stack::{FrameKind, Report, ResultExt};
 use remora_ota::model::{DeploymentStatus, Labels};
 use remora_tui::Tone;
 
@@ -10,15 +10,12 @@ pub enum Format {
     Json,
 }
 
-/// `key=value` pairs, as `--label`/`--selector` take them.
+/// `key=value` pairs, as `--label`/`--selector` take them -- parsed the
+/// device vertical's way, since they select devices.
 pub fn parse_labels(pairs: &[String]) -> Result<Labels> {
-    pairs
-        .iter()
-        .map(|pair| match pair.split_once('=') {
-            Some((key, value)) if !key.is_empty() => Ok((key.to_owned(), value.to_owned())),
-            _ => Err(Report::new(Error::Label(pair.clone()))),
-        })
-        .collect()
+    remora_device::model::parse_labels(pairs)
+        .map_err(Report::new)
+        .change_context(Error::Labels)
 }
 
 pub fn status_tone(status: &DeploymentStatus) -> Tone {
@@ -29,6 +26,20 @@ pub fn status_tone(status: &DeploymentStatus) -> Tone {
         DeploymentStatus::Canceling | DeploymentStatus::Canceled => Tone::Warn,
         DeploymentStatus::Pending | DeploymentStatus::Other(_) => Tone::Idle,
     }
+}
+
+/// A failure in a table cell: the platform's own words when it gave any
+/// (the last printable attachment, its gRPC status), else the error. The
+/// whole chain is still rendered with the command's error.
+pub fn reason<C: std::fmt::Display + Send + Sync + 'static>(report: &Report<C>) -> String {
+    report
+        .frames()
+        .filter_map(|frame| match frame.kind() {
+            FrameKind::Attachment(error_stack::AttachmentKind::Printable(p)) => Some(p.to_string()),
+            _ => None,
+        })
+        .last()
+        .unwrap_or_else(|| report.current_context().to_string())
 }
 
 pub fn print_json(value: &serde_json::Value) {

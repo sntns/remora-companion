@@ -1,0 +1,16 @@
+[package]
+name = "remora-ota-adapter-file"
+description = "ArtifactSourceAdapter over local files: the bundle an upload streams, read from any offset for a resume"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-ota = { path = "../ota" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+
+[dev-dependencies]
+tempfile.workspace = true

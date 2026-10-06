@@ -1,17 +1,21 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::time::Duration;
 
 use error_stack::Report;
 use remora_context::model::ContextOverride;
 use remora_ota::{
     application::OtaService,
-    model::{DeployRequest, Deployment, DeploymentFilter, LogEntry, Targets},
+    model::{
+        DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, LogEntry, Planned,
+        PlannedOutcome, Targets,
+    },
 };
+use remora_progress::{OperationContext, ProgressSink};
 use remora_tui::{self as tui, Tone, WatchLine};
 use serde_json::json;
 
 use crate::{
     error::{ota_error, prompt_error, Error, Result},
-    shared::{labels_line, parse_labels, print_json, status_tone, Format},
+    shared::{labels_line, parse_labels, print_json, reason, status_tone, Format},
 };
 
 #[derive(clap::Subcommand)]
@@ -56,6 +60,9 @@ pub enum Command {
         /// Follow them until they finish.
         #[arg(short, long)]
         watch: bool,
+        /// Seconds between polls while following.
+        #[arg(long, default_value_t = 2, requires = "watch")]
+        interval: u64,
     },
 
     /// Cancel deployments that are still pending or running.
@@ -83,6 +90,12 @@ pub enum Command {
         /// Keep printing new reports until the deployment finishes.
         #[arg(short, long)]
         follow: bool,
+        /// Seconds between polls while following.
+        #[arg(long, default_value_t = 2, requires = "follow")]
+        interval: u64,
+        /// `json`: an array, or one object per line with --follow.
+        #[arg(long, default_value = "table")]
+        format: Format,
     },
 
     /// Follow deployments live until they finish; fails if any doesn't
@@ -128,6 +141,9 @@ pub struct DeployArgs {
     /// Don't ask before deploying to devices picked by --selector.
     #[arg(short, long)]
     yes: bool,
+    /// How to print what was created, for each device.
+    #[arg(long, default_value = "table")]
+    format: Format,
 }
 
 pub async fn run(
@@ -203,7 +219,11 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Start { names, watch } => {
+        Command::Start {
+            names,
+            watch,
+            interval,
+        } => {
             for name in &names {
                 service
                     .start_deployment(over, name)
@@ -212,7 +232,7 @@ pub async fn run(
                 tui::success(format!("Started {}", tui::accent(name)));
             }
             if watch {
-                follow(service, over, names, Duration::from_secs(2)).await?;
+                follow(service, over, &names, seconds(interval)).await?;
             }
             Ok(())
         }
@@ -247,11 +267,30 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Logs { name, follow } => logs(service, over, &name, follow).await,
+        Command::Logs {
+            name,
+            follow,
+            interval,
+            format,
+        } => {
+            let interval = follow.then(|| seconds(interval));
+            logs(service, over, &name, interval, format).await
+        }
         Command::Watch { names, interval } => {
-            self::follow(service, over, names, Duration::from_secs(interval.max(1))).await
+            self::follow(service, over, &names, seconds(interval)).await
         }
     }
+}
+
+/// A polling interval from `--interval`: at least a second, so that a
+/// typo doesn't hammer the platform.
+fn seconds(interval: u64) -> Duration {
+    Duration::from_secs(interval.max(1))
+}
+
+/// Watching and following stop on Ctrl-C: the deployments carry on.
+fn interruptible() -> OperationContext {
+    OperationContext::new(ProgressSink::noop(), remora_progress::cancelled_by_ctrl_c())
 }
 
 /// `rmra deploy`: one deployment per device, started unless `--draft`.
@@ -260,40 +299,40 @@ pub async fn run_deploy(
     service: &OtaService,
     over: Option<&ContextOverride>,
 ) -> Result<()> {
-    let targets = if args.devices.is_empty() {
+    let labels = parse_labels(&args.labels)?;
+    let targets = if !args.devices.is_empty() {
+        Targets::Devices(args.devices)
+    } else if args.yes {
         Targets::Selector(parse_labels(&args.selector)?)
     } else {
-        Targets::Devices(args.devices)
-    };
-    // A selector can reach the whole fleet: say how much before doing it.
-    if let Targets::Selector(labels) = &targets {
+        // A selector can reach the whole fleet: say how much before doing
+        // it, then deploy to exactly the devices confirmed -- not to one
+        // labelled in the meantime, which nobody was asked about.
+        let selector = parse_labels(&args.selector)?;
+        if !tui::interactive() {
+            return Err(Report::new(Error::NeedsYes));
+        }
         let devices = service
-            .resolve_targets(over, &targets)
+            .resolve_targets(over, &Targets::Selector(selector.clone()))
             .await
             .map_err(ota_error)?;
+        tui::note("Targets", devices.join("\n"));
         let question = format!(
             "Deploy {} to {} device{} matching {}?",
             tui::accent(&args.release),
             devices.len(),
             if devices.len() == 1 { "" } else { "s" },
-            labels_line(labels)
+            labels_line(&selector)
         );
-        if !args.yes {
-            if !tui::interactive() {
-                return Err(Report::new(Error::Ota(
-                    "not a terminal: pass --yes to deploy to devices picked by --selector".into(),
-                )));
-            }
-            tui::note("Targets", devices.join("\n"));
-            if !tui::confirm(question)
-                .initial_value(false)
-                .interact()
-                .map_err(prompt_error)?
-            {
-                return Err(Report::new(Error::Cancelled));
-            }
+        if !tui::confirm(question)
+            .initial_value(false)
+            .interact()
+            .map_err(prompt_error)?
+        {
+            return Err(Report::new(Error::Cancelled));
         }
-    }
+        Targets::Devices(devices)
+    };
 
     let spinner = tui::Spinner::start(format!("Deploying {}", tui::accent(&args.release)));
     let planned = match service
@@ -303,7 +342,7 @@ pub async fn run_deploy(
                 release: args.release.clone(),
                 targets,
                 name: args.name,
-                labels: parse_labels(&args.labels)?,
+                labels,
                 start: !args.draft,
             },
         )
@@ -315,12 +354,16 @@ pub async fn run_deploy(
             return Err(ota_error(report));
         }
     };
-    let failed = planned.iter().filter(|p| p.outcome.is_err()).count();
+    let total = planned.len();
+    let failed = planned
+        .iter()
+        .filter(|p| p.outcome.failure().is_some())
+        .count();
     let summary = format!(
         "{} of {} deployment{} created{}",
-        planned.len() - failed,
-        planned.len(),
-        if planned.len() == 1 { "" } else { "s" },
+        total - failed,
+        total,
+        if total == 1 { "" } else { "s" },
         if args.draft {
             " as drafts"
         } else {
@@ -332,14 +375,54 @@ pub async fn run_deploy(
     } else {
         spinner.fail(summary);
     }
+    match args.format {
+        Format::Json => print_json(&json!(planned.iter().map(planned_json).collect::<Vec<_>>())),
+        Format::Table => print_planned(&planned),
+    }
 
+    let started: Vec<_> = planned
+        .iter()
+        .filter(|p| matches!(p.outcome, PlannedOutcome::Started))
+        .map(|p| p.deployment.clone())
+        .collect();
+    if args.watch && !started.is_empty() {
+        follow(service, over, &started, seconds(args.interval)).await?;
+    } else if !started.is_empty() {
+        tui::step(format!(
+            "Follow with {}",
+            tui::accent(format!("rmra deployment watch {}", started.join(" ")))
+        ));
+    }
+    // Each failure's whole chain, under one headline.
+    let failures: Option<Report<[remora_ota::application::Error]>> = planned
+        .into_iter()
+        .filter_map(|plan| match plan.outcome {
+            PlannedOutcome::NotCreated(report) | PlannedOutcome::NotStarted(report) => Some(report),
+            PlannedOutcome::Started | PlannedOutcome::Draft => None,
+        })
+        .collect();
+    match failures {
+        Some(failures) => Err(failures.change_context(Error::NotCreated(failed, total))),
+        None => Ok(()),
+    }
+}
+
+fn planned_result(plan: &Planned) -> (String, Tone) {
+    match &plan.outcome {
+        PlannedOutcome::Started => ("started".to_owned(), Tone::Active),
+        PlannedOutcome::Draft => ("draft".to_owned(), Tone::Idle),
+        PlannedOutcome::NotCreated(report) => (reason(report), Tone::Bad),
+        PlannedOutcome::NotStarted(report) => (
+            format!("created, but not started: {}", reason(report)),
+            Tone::Bad,
+        ),
+    }
+}
+
+fn print_planned(planned: &[Planned]) {
     let mut table = tui::Table::new(["device", "deployment", "result"]);
-    for plan in &planned {
-        let (result, tone) = match &plan.outcome {
-            Ok(true) => ("started".to_owned(), Tone::Active),
-            Ok(false) => ("draft".to_owned(), Tone::Idle),
-            Err(reason) => (reason.clone(), Tone::Bad),
-        };
+    for plan in planned {
+        let (result, tone) = planned_result(plan);
         table.row_toned([
             (plan.device.clone(), None),
             (plan.deployment.clone(), None),
@@ -347,37 +430,29 @@ pub async fn run_deploy(
         ]);
     }
     table.print();
-
-    let started: Vec<_> = planned
-        .iter()
-        .filter(|p| matches!(p.outcome, Ok(true)))
-        .map(|p| p.deployment.clone())
-        .collect();
-    if args.watch && !started.is_empty() {
-        follow(
-            service,
-            over,
-            started,
-            Duration::from_secs(args.interval.max(1)),
-        )
-        .await?;
-    } else if !started.is_empty() {
-        tui::step(format!(
-            "Follow with {}",
-            tui::accent(format!("rmra deployment watch {}", started.join(" ")))
-        ));
-    }
-    if failed > 0 {
-        return Err(Report::new(Error::NotCreated(failed, planned.len())));
-    }
-    Ok(())
 }
 
-/// Polls deployments until each is terminal, drawing one live line each.
+fn planned_json(plan: &Planned) -> serde_json::Value {
+    let (result, error) = match &plan.outcome {
+        PlannedOutcome::Started => ("started", None),
+        PlannedOutcome::Draft => ("draft", None),
+        PlannedOutcome::NotCreated(report) => ("not-created", Some(reason(report))),
+        PlannedOutcome::NotStarted(report) => ("not-started", Some(reason(report))),
+    };
+    json!({
+        "device": plan.device,
+        "deployment": plan.deployment,
+        "result": result,
+        "error": error,
+    })
+}
+
+/// Follows deployments until each is settled, one live line each; fails
+/// if any doesn't succeed.
 async fn follow(
     service: &OtaService,
     over: Option<&ContextOverride>,
-    names: Vec<String>,
+    names: &[String],
     interval: Duration,
 ) -> Result<()> {
     let total = names.len();
@@ -385,47 +460,30 @@ async fn follow(
         "Following {total} deployment{}",
         if total == 1 { "" } else { "s" }
     ));
-    let mut pending: BTreeSet<String> = names.into_iter().collect();
-    let mut unsuccessful = 0;
-    while !pending.is_empty() {
-        for name in pending.clone() {
-            let deployment = match service.get_deployment(over, &name).await {
-                Ok(deployment) => deployment,
-                Err(report) => {
-                    watch.finish();
-                    return Err(ota_error(report));
-                }
-            };
-            let logs = service
-                .deployment_logs(over, &name)
-                .await
-                .unwrap_or_default();
-            let line = watch_line(&deployment, &logs);
-            watch.update(&name, line);
-            if deployment.status.is_terminal() {
-                pending.remove(&name);
-                if deployment.status.is_failure() {
-                    unsuccessful += 1;
-                }
-            }
-        }
-        if pending.is_empty() {
-            break;
-        }
-        tokio::select! {
-            () = tokio::time::sleep(interval) => {}
-            _ = tokio::signal::ctrl_c() => {
-                watch.finish();
-                tui::info(format!(
-                    "Stopped watching; {} deployment{} carry on",
-                    pending.len(),
-                    if pending.len() == 1 { "" } else { "s" }
-                ));
-                return Ok(());
-            }
-        }
-    }
+    let outcome = service
+        .watch(over, names, interval, &interruptible(), &mut |progress| {
+            watch.update(&progress.name, watch_line(&progress))
+        })
+        .await;
     watch.finish();
+    let outcome = outcome.map_err(ota_error)?;
+    if !outcome.pending.is_empty() {
+        tui::info(format!(
+            "Stopped watching; {} deployment{} carry on",
+            outcome.pending.len(),
+            if outcome.pending.len() == 1 { "" } else { "s" }
+        ));
+        return Ok(());
+    }
+    if !outcome.unknown.is_empty() {
+        tui::warning(format!(
+            "{} reached a status this rmra doesn't know: see {}, or get a newer rmra with {}",
+            outcome.unknown.join(", "),
+            tui::accent("rmra deployment show <name>"),
+            tui::accent("rmra update")
+        ));
+    }
+    let unsuccessful = outcome.failed.len() + outcome.unknown.len();
     if unsuccessful > 0 {
         return Err(Report::new(Error::Unsuccessful(unsuccessful, total)));
     }
@@ -441,72 +499,56 @@ async fn follow(
     Ok(())
 }
 
-/// A deployment's live line: status, how far the latest report says it
-/// is, and the latest thing it said (or why it failed).
-fn watch_line(deployment: &Deployment, logs: &[LogEntry]) -> WatchLine {
-    let percent = logs
-        .iter()
-        .rev()
-        .find_map(|entry| entry.progress.as_ref())
-        .filter(|progress| progress.max > 0)
-        .map(|progress| (progress.current.clamp(0, progress.max) * 100 / progress.max) as u64);
-    let detail = if deployment.status.is_failure() && !deployment.details.is_empty() {
-        labels_line(&deployment.details)
-    } else {
-        logs.iter()
-            .rev()
-            .find_map(|entry| entry.details.last().cloned())
-            .unwrap_or_default()
-    };
+fn watch_line(progress: &DeploymentProgress) -> WatchLine {
     WatchLine {
-        status: deployment.status.to_string(),
-        tone: status_tone(&deployment.status),
-        percent: if deployment.status == remora_ota::model::DeploymentStatus::Succeeded {
-            Some(100)
-        } else {
-            percent
-        },
-        detail,
-        finished: deployment.status.is_terminal(),
+        status: progress.status.to_string(),
+        tone: status_tone(&progress.status),
+        percent: progress.percent,
+        detail: progress.detail.clone(),
+        finished: progress.status.is_settled(),
     }
 }
 
+/// Prints a deployment's reports; with `follow` (an interval), new ones as
+/// they come until it is settled.
 async fn logs(
     service: &OtaService,
     over: Option<&ContextOverride>,
     name: &str,
-    follow: bool,
+    follow: Option<Duration>,
+    format: Format,
 ) -> Result<()> {
-    let mut printed = 0;
-    loop {
+    let Some(interval) = follow else {
         let logs = service
             .deployment_logs(over, name)
             .await
             .map_err(ota_error)?;
-        for entry in logs.iter().skip(printed) {
-            println!("{}", log_line(entry));
+        match format {
+            Format::Json => print_json(&json!(logs.iter().map(log_json).collect::<Vec<_>>())),
+            Format::Table => logs
+                .iter()
+                .for_each(|entry| println!("{}", log_line(entry))),
         }
-        printed = printed.max(logs.len());
-        if !follow {
-            return Ok(());
-        }
-        let deployment = service
-            .get_deployment(over, name)
-            .await
-            .map_err(ota_error)?;
-        if deployment.status.is_terminal() {
-            tui::info(format!(
-                "{} is {}",
-                tui::accent(name),
-                tui::toned(&deployment.status, status_tone(&deployment.status))
-            ));
-            return Ok(());
-        }
-        tokio::select! {
-            () = tokio::time::sleep(Duration::from_secs(2)) => {}
-            _ = tokio::signal::ctrl_c() => return Ok(()),
-        }
+        return Ok(());
+    };
+    let status = service
+        .follow_logs(over, name, interval, &interruptible(), &mut |entry| {
+            match format {
+                // One object per line: a stream a script can read as it comes.
+                Format::Json => println!("{}", log_json(&entry)),
+                Format::Table => println!("{}", log_line(&entry)),
+            }
+        })
+        .await
+        .map_err(ota_error)?;
+    if let Some(status) = status {
+        tui::info(format!(
+            "{} is {}",
+            tui::accent(name),
+            tui::toned(&status, status_tone(&status))
+        ));
     }
+    Ok(())
 }
 
 fn log_line(entry: &LogEntry) -> String {

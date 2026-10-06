@@ -18,7 +18,11 @@ use remora_context_application::ContextControllerImpl;
 use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
 use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
-use remora_ota::{adapter::gateway::OtaGatewayAdapterService, application::OtaService};
+use remora_ota::{
+    adapter::{gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService},
+    application::OtaService,
+};
+use remora_ota_adapter_file::FileArtifactSourceImpl;
 use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_update::{
@@ -113,25 +117,6 @@ pub async fn wire() -> Services {
         .expect("ChannelService was just registered");
 
     container
-        .set_type(OtaGatewayAdapterService::new(OtaGatewayAdapterImpl))
-        .await;
-    let ota_gateway = container
-        .get_type::<OtaGatewayAdapterService>()
-        .await
-        .expect("OtaGatewayAdapterService was just registered");
-
-    container
-        .set_type(OtaService::new(OtaControllerImpl::new(
-            context.clone(),
-            ota_gateway,
-        )))
-        .await;
-    let ota = container
-        .get_type::<OtaService>()
-        .await
-        .expect("OtaService was just registered");
-
-    container
         .set_type(DeviceGatewayAdapterService::new(DeviceGatewayAdapterImpl))
         .await;
     let device_gateway = container
@@ -149,6 +134,36 @@ pub async fn wire() -> Services {
         .get_type::<DeviceService>()
         .await
         .expect("DeviceService was just registered");
+
+    // OTA after device: a selector picks its devices through DeviceService.
+    container
+        .set_type(OtaGatewayAdapterService::new(OtaGatewayAdapterImpl))
+        .await;
+    let ota_gateway = container
+        .get_type::<OtaGatewayAdapterService>()
+        .await
+        .expect("OtaGatewayAdapterService was just registered");
+
+    container
+        .set_type(ArtifactSourceAdapterService::new(FileArtifactSourceImpl))
+        .await;
+    let artifacts = container
+        .get_type::<ArtifactSourceAdapterService>()
+        .await
+        .expect("ArtifactSourceAdapterService was just registered");
+
+    container
+        .set_type(OtaService::new(OtaControllerImpl::new(
+            context.clone(),
+            device.clone(),
+            ota_gateway,
+            artifacts,
+        )))
+        .await;
+    let ota = container
+        .get_type::<OtaService>()
+        .await
+        .expect("OtaService was just registered");
 
     container
         .set_type(ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(
