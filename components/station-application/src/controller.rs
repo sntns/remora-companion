@@ -68,6 +68,7 @@ impl StationControllerImpl {
             running: OnceLock::new(),
             state: Mutex::new(State::default()),
             claim_locks: SyncMutex::new(HashMap::new()),
+            commits: Mutex::new(()),
             searching: AtomicUsize::new(0),
             hook_runs: SyncMutex::new(Some(JoinSet::new())),
         }))
@@ -86,6 +87,11 @@ struct Shared {
     running: OnceLock<Running>,
     state: Mutex<State>,
     claim_locks: SyncMutex<HashMap<ClaimId, Arc<Mutex<()>>>>,
+    /// Taken by `commit` from its journal write to its queueing: the queue
+    /// then holds claims in the journal's order, which is the order a
+    /// restart rebuilds it in. Commits wait on each other's disk write;
+    /// polls, which only need `state`, don't.
+    commits: Mutex<()>,
     /// Claims waiting on the platform.
     searching: AtomicUsize,
     /// The hook runs under way, so that `shutdown` can wait for them (and
@@ -786,6 +792,7 @@ impl Shared {
     /// answered from here, never by a second platform call: a serial the
     /// register doesn't know would be lost to the next restart.
     async fn commit(self: &Arc<Self>, running: &Running, id: &ClaimId) -> Result<ClaimStatus> {
+        let _order = self.commits.lock().await;
         let (identity, policy) = {
             let state = self.state.lock().await;
             let claim = state.pending.get(id).expect("committing a pending claim");
