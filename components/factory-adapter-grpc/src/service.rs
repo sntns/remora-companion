@@ -1,7 +1,7 @@
 use error_stack::Report;
 use remora_context::model::ResolvedContext;
 use remora_factory::{
-    adapter::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
+    adapter::provisioning::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
     model::DeviceSerial,
 };
 use remora_platform_grpc::{

@@ -1,24 +1,47 @@
+/// A device's private key, PKCS#8 DER. Generated locally and never sent
+/// anywhere -- only the CSR built from it crosses the wire. Opaque, and
+/// redacted in `Debug`: error-stack reports print with `{:?}`, and this key
+/// is the device's identity.
+#[derive(Clone)]
+pub struct PrivateKey(Vec<u8>);
+
+impl PrivateKey {
+    pub fn from_pkcs8_der(der: Vec<u8>) -> Self {
+        Self(der)
+    }
+
+    pub fn pkcs8_der(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PrivateKey(<redacted>)")
+    }
+}
+
 /// Everything a manufactured device needs to self-enroll at first boot,
 /// per `sntns-platform`'s device-bootstrap contract: what the platform's
 /// factory-device call hands back, plus the private key generated locally
 /// to request it (the platform never sees this key -- only the CSR built
 /// from it crosses the wire).
 ///
-/// Rendered as `remora-factory.yaml` at the application layer (PEM
-/// encoding/SEC1 conversion are format-conversion concerns, not domain
-/// data -- see `remora-factory-application`), matching
-/// `remora-edge`'s actual `FactoryIdentity` parser: `url`, `key`,
-/// `certificate`, `key-id`, `authority`, `server-authority` (hyphenated,
-/// not underscored -- two real provisioned devices' files under
-/// `~/provisioning` use underscores, but those predate the parser and are
-/// themselves wrong).
+/// Written out as `remora-factory.yaml` by a `CredentialWriterAdapter`
+/// (PEM encoding/SEC1 conversion are format concerns, not domain data --
+/// see `remora-factory-adapter-local`), matching `remora-edge`'s actual
+/// `FactoryIdentity` parser: `url`, `key`, `certificate`, `key-id`,
+/// `authority`, `server-authority` (hyphenated, not underscored -- two
+/// real provisioned devices' files under `~/provisioning` use underscores,
+/// but those predate the parser and are themselves wrong).
+///
+/// `Debug` is safe to derive: `private_key` redacts itself.
 #[derive(Debug, Clone)]
 pub struct FactoryCredential {
-    /// PKCS#8 DER. Generated locally; never sent anywhere. Rendered into
-    /// the yaml as SEC1 PEM (`BEGIN EC PRIVATE KEY`), not PKCS#8 PEM,
-    /// matching the known-good files -- rcgen's own DER output is PKCS#8,
-    /// so this conversion is not a no-op.
-    pub private_key_der: Vec<u8>,
+    /// Rendered into the yaml as SEC1 PEM (`BEGIN EC PRIVATE KEY`), not
+    /// PKCS#8 PEM, matching the known-good files -- so the conversion from
+    /// what this holds is not a no-op.
+    pub private_key: PrivateKey,
     /// The IDevID: CN is the device's serial, issued by the manufacturing
     /// account's factory authority.
     pub certificate_der: Vec<u8>,

@@ -40,6 +40,7 @@ members = [
     "components/batch-application-transport-cli",
     "components/factory",
     "components/factory-adapter-grpc",
+    "components/factory-adapter-local",
     "components/factory-application",
     "components/factory-application-transport-cli",
     "components/platform-grpc",

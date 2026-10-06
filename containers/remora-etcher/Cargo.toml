@@ -50,6 +50,7 @@ remora-batch-application = { path = "../../components/batch-application" }
 remora-batch-application-transport-cli = { path = "../../components/batch-application-transport-cli" }
 remora-factory = { path = "../../components/factory" }
 remora-factory-adapter-grpc = { path = "../../components/factory-adapter-grpc" }
+remora-factory-adapter-local = { path = "../../components/factory-adapter-local" }
 remora-context = { path = "../../components/context" }
 remora-context-application = { path = "../../components/context-application" }
 remora-context-adapter-file = { path = "../../components/context-adapter-file" }

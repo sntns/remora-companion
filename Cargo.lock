@@ -2814,6 +2814,7 @@ dependencies = [
  "remora-convert-adapter-qcow2",
  "remora-convert-application",
  "remora-factory",
+ "remora-factory-adapter-local",
  "remora-factory-application",
  "remora-fs-walk",
  "remora-identity",
@@ -3202,6 +3203,7 @@ dependencies = [
  "remora-disk-application-transport-cli",
  "remora-factory",
  "remora-factory-adapter-grpc",
+ "remora-factory-adapter-local",
  "remora-factory-application",
  "remora-factory-application-transport-cli",
  "remora-flash",
@@ -3263,7 +3265,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "remora-factory-application"
+name = "remora-factory-adapter-local"
 version = "0.8.0"
 dependencies = [
  "async-trait",
@@ -3272,14 +3274,28 @@ dependencies = [
  "p256 0.14.0",
  "pem",
  "rcgen",
+ "remora-factory",
+ "tempfile",
+ "tokio",
+ "x509-parser",
+]
+
+[[package]]
+name = "remora-factory-application"
+version = "0.8.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "p256 0.14.0",
+ "pem",
  "remora-context",
  "remora-context-adapter-file",
  "remora-context-application",
  "remora-factory",
+ "remora-factory-adapter-local",
  "remora-progress",
  "tempfile",
  "tokio",
- "x509-parser",
 ]
 
 [[package]]

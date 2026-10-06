@@ -21,8 +21,15 @@ use remora_convert_application::ConvertControllerImpl;
 use remora_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_disk_adapter_native::DiskAdapterImpl;
 use remora_disk_application::DiskControllerImpl;
-use remora_factory::{adapter::FactoryProvisioningAdapterService, application::FactoryService};
+use remora_factory::{
+    adapter::{
+        credential::CredentialWriterAdapterService, key::DeviceKeyAdapterService,
+        provisioning::FactoryProvisioningAdapterService,
+    },
+    application::FactoryService,
+};
 use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
+use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
 use remora_flash::{adapter::BmapAdapterService, application::FlashService};
 use remora_flash_adapter_bmap::BmapAdapterImpl;
@@ -247,10 +254,13 @@ pub async fn wire() -> Services {
         PlatformSessionAdapterService::new(PlatformSessionAdapterImpl),
     ));
 
-    // Manufactures as the selected context, over the gateway's gRPC API.
+    // Manufactures as the selected context, over the gateway's gRPC API;
+    // the device key and remora-factory.yaml stay local.
     let factory = FactoryService::new(FactoryControllerImpl::new(
         context.clone(),
+        DeviceKeyAdapterService::new(DeviceKeyAdapterImpl),
         FactoryProvisioningAdapterService::new(FactoryGatewayAdapterImpl),
+        CredentialWriterAdapterService::new(CredentialWriterAdapterImpl),
     ));
 
     // Pure orchestration over the other verticals' already-wired services —
