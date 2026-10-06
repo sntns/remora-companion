@@ -75,6 +75,46 @@ Le **point de commit** est la validation de l'étiquette. Le hub n'écrit son id
 
 - HTTP/1.1 en clair, port 8484 par défaut, JSON, binaires en base64 standard.
 - Le TLS est inutile : tout ce qui circule est public, et le hub vérifie l'identité reçue contre des ancres intégrées à l'image (§5.4).
+- Corps de requête limités à **64 Kio** (une CSR P-256 en base64 fait moins de 1 Kio) ; au-delà : `413`.
+- Les corps sont définis une seule fois, dans `components/station-protocol` (`remora-station-protocol`), partagé par le serveur et le client.
+
+### Erreurs
+
+Toute réponse d'erreur de la station a pour corps :
+
+```json
+{ "error": "<message lisible>", "code": "<code kebab-case>", "retry_after": 5 }
+```
+
+`error` sert aux journaux ; le hub décide sur `code`, stable dans la v1. `retry_after` (secondes, aussi en en-tête `Retry-After`) n'accompagne que les `503`.
+
+| Statut | `code` | Routes | Sens, et réaction du hub |
+|---|---|---|---|
+| `400` | `invalid-csr` | claims | CSR illisible, clé non P-256 ou auto-signature invalide. **Seul cas où le hub régénère sa clé.** |
+| `400` | `invalid-hardware` | claims | Un champ `hardware`/`image` refusé (nommé dans `error`, voir ci-dessous), ou absent alors que le `device-name` du board en a besoin. |
+| `400` | `invalid-request` | claims, ack | JSON invalide, champ obligatoire manquant (dont `hardware.board` vide), base64 invalide. |
+| `413` | `payload-too-large` | claims, ack | Corps de plus de 64 Kio. |
+| `403` | `unknown-board` | claims | Board non configuré sur cette station. |
+| `403` | `quota-exceeded` | claims | `max-claims` atteint pour cette session. |
+| `403` | `refused` | claims | Refus plateforme (permission, policy). |
+| `403` | `missing-access-url` | claims | La plateforme n'a pas d'URL d'accès pour les devices de ce déploiement. |
+| `409` | `already-exists` | claims | `device_name` explicite déjà existant (§4.2) ; LED erreur. |
+| `409` | `not-labelled` | ack | Ack `installed` avant la validation de l'étiquette. |
+| `404` | `unknown-claim` | status, ack | Claim inconnu de cette station. |
+| `503` | `unavailable` | claims | Plateforme injoignable, ou credentials de la station refusés ; réessayer après `retry_after`. |
+| `503` | `journal-unavailable` | claims | Le journal ne peut pas être écrit (§4.6) ; réessayer après `retry_after`. |
+| `503` | `not-started` | toutes | Station pas encore prête ; réessayer après `retry_after`. |
+| `500` | `internal` | toutes | Autre erreur. |
+
+### Ce que le hub dit de lui-même
+
+Tout ce que le hub déclare atteint le terminal de l'opérateur, l'environnement des hooks, le journal et les gabarits `device-name`. La station le valide donc avant tout (`400 invalid-hardware` sinon) :
+
+- une chaîne vide vaut absence, partout sauf `board` (le hub envoie `""` pour ce qu'il ne sait pas lire) ;
+- `board` (non vide), `temp_hostname`, `eth_mac`, `bsp_serial`, `machine_id`, `image.version`, `image.compatible` et les valeurs de `macs` : au plus 64 caractères parmi `[A-Za-z0-9:._+-]` ;
+- `macs` : au plus 32 entrées, clés (noms d'interface) d'au plus 16 caractères parmi `[A-Za-z0-9._-]`.
+
+La `reason` d'un ack `failed` n'est jamais refusée : les caractères de contrôle (sauts de ligne compris) deviennent des espaces, les espaces sont fusionnés, et elle est tronquée à 512 caractères.
 
 ### `GET /v1/hello`
 
@@ -101,13 +141,7 @@ Le **point de commit** est la validation de l'étiquette. Le hub n'écrit son id
 
 **`claim_id`** = SHA-256 hexadécimal de la `SubjectPublicKeyInfo` de la CSR. Il est déterministe : un hub qui réessaie avec la même clé retombe sur le même claim. **Un retry n'alloue jamais un deuxième serial.**
 
-| Code | Corps | Sens |
-|---|---|---|
-| `200` | `ClaimStatus` | claim connu ou nouvellement émis |
-| `400` | `{ "error" }` | CSR invalide ; le hub régénère une clé |
-| `403` | `{ "error" }` | board non configuré, quota atteint, refus plateforme (permission, policy) |
-| `409` | `{ "error" }` | `device_name` explicite déjà existant (§4.2) ; le hub passe en LED erreur |
-| `503` | `{ "error", "retry_after" }` | plateforme injoignable ; le hub réessaie |
+`200` avec un `ClaimStatus` : claim connu ou nouvellement émis. Sinon, une erreur du tableau ci-dessus (`invalid-*`, `payload-too-large`, `unknown-board`, `quota-exceeded`, `refused`, `missing-access-url`, `already-exists`, `unavailable`, `journal-unavailable`).
 
 ### `GET /v1/claims/{claim_id}`
 
@@ -146,7 +180,11 @@ Le hub interroge cette route **toutes les secondes** tant qu'il n'a pas reçu `l
 { "state": "failed", "reason": "certificate does not chain to the baked factory authority" }
 ```
 
-Le hub l'envoie après l'écriture du squashfs et avant le reboot, au mieux. Une perte est sans conséquence.
+- `installed` : le hub l'envoie après l'écriture du squashfs et avant le reboot, au mieux. Une perte est sans conséquence. **Refusé (`409 not-labelled`) tant que l'étiquette n'est pas validée** : le `claim_id` circule en clair à chaque poll, et seul le point de commit autorise un hub à se dire installé (et à déclencher `installed.d`).
+- `failed` : accepté **dans tout état**, puisque le hub vérifie son identité dès réception (§5.2, étape 4). Il est journalisé, déclenche `failed.d` et **sort le claim de la file d'étiquetage** ; s'il était actif, le hub suivant devient actif. Un claim `failed` n'est plus jamais activé.
+- Après un ack, `label` reste cohérent : `labelled` si l'étiquette avait été validée, sinon `queued` sans `queue_position` (hors file).
+- Un ack répété (réponse perdue) renvoie le même `ClaimStatus` sans relancer de hook. `installed` est définitif ; `failed` peut encore devenir `installed` une fois le claim `labelled` (le hub a finalement écrit son identité).
+- `200` avec le `ClaimStatus`, ou `400 invalid-request`, `404 unknown-claim`, `409 not-labelled`.
 
 ## 4. remora-etcher : vertical `station` (périmètre principal)
 
@@ -187,7 +225,7 @@ boards:                           # boards acceptés ; tout autre board → 403
   - `force` n'est **pas** exposé : le SAV est hors périmètre. Un `device-name` déjà existant renvoie 409, journalisé.
 - **Contexte** : il doit avoir `remora::create-factory-device`, plus `remora::use-serial-number-policy` sur chaque policy utilisée. On recommande un **contexte `access-key` dédié**, avec un rôle limité à ces permissions.
 - **Validation au démarrage**, avant d'écouter :
-  - le contexte se résout et est connecté ;
+  - le contexte se résout et est connecté : la station appelle `whoami` sur la plateforme, donc des credentials révoqués l'empêchent de démarrer (et, en cours de route, renvoient `503 unavailable` aux hubs avec une alerte à l'opérateur) ;
   - le gabarit de chaque board est valide ;
   - le répertoire de hooks est lisible.
 - **Sorties**, selon les conventions du dépôt :
@@ -200,7 +238,7 @@ Commande de test, pour les tests d'intégration et hub-virtual :
 remora-etcher station simulate --url http://127.0.0.1:8484 --board hub-virtual [--output remora-factory.yaml]
 ```
 
-Elle joue un hub complet : clé, claim, poll, LED simulée sur stderr, écriture du `remora-factory.yaml` au format de `factory provision`, et ack.
+Elle joue un hub complet : clé, claim, poll, LED simulée sur stderr, écriture du `remora-factory.yaml` au format de `factory provision`, et ack. C'est un transport du vertical `claim` (§4.3), qui porte la logique côté hub : réessais sur `503` (après `retry_after`) et sur erreur réseau, abandon sur tout autre refus.
 
 ### 4.2 Évolution du vertical `factory`
 
@@ -227,9 +265,15 @@ async fn provision_csr(
 | `station-application` | `StationControllerImpl` : injecte `ContextService`, `FactoryService`, et les trois ports. Gère la machine d'états, l'idempotence, le quota, la file d'étiquetage, la présence et le lancement des hooks. |
 | `station-adapter-jsonl` | Journal JSONL (append + fsync, rechargement). |
 | `station-adapter-hooks-process` | Exécution des `<évènement>.d/*` (§4.4). |
-| `station-adapter-operator-tui` | Tableau de bord, lecture du scan et des commandes clavier (`remora-tui`). |
+| `station-adapter-operator-tui` | Tableau de bord (`remora-tui`) ; affichage seulement, les caractères de contrôle retirés. |
+| `station-protocol` | Les corps JSON du §3, les codes d'erreur et leurs conversions, partagés par le serveur et le client. |
 | `station-application-transport-http` | Routeur axum 0.8 (déjà dans Cargo.lock via tonic) qui projette le §3 sur `StationService`. Aucune logique métier. |
-| `station-application-transport-cli` | `station serve` et `station simulate`. |
+| `station-application-transport-cli` | `station serve` (lit le clavier/la douchette, horloge de la file, Ctrl-C, arrêt propre) et `station simulate`. |
+| `components/claim` (`remora-claim`) | Côté hub : `ClaimPlan`, `ClaimOutcome` (sur les types du modèle `station`), port `StationClientAdapter` (hello, claim, status, ack), `ClaimServiceInterface`. |
+| `claim-adapter-http` | Client HTTP du §3, avec timeouts de connexion et de requête. |
+| `claim-application` | `ClaimControllerImpl` : injecte `StationClientAdapterService` et `FactoryService` (clé du device, écriture du `remora-factory.yaml`) ; réessais, poll, LED rapportée en progression. |
+
+`StationServiceInterface` expose `start`, `hello`, `submit`, `status`, `ack`, plus `handle` (une saisie de l'opérateur), `tick` (l'horloge de la file : présence, activation) et `shutdown` (arrêt propre, §4.4). La boucle de la console vit dans le transport.
 
 Câblage dans `containers/remora-etcher/src/bootstrap.rs`. Nouvelles dépendances directes : `axum`, `x509-cert`. Pas de mDNS.
 
@@ -254,6 +298,7 @@ Arborescence sous `hooks:` (par défaut `./station.d`) :
 - stdout et stderr de chaque script sont capturés dans le journal et affichés dans le tableau de bord.
 - Un échec dans un répertoire non bloquant est journalisé et signalé, mais n'arrête pas le flux.
 - Un échec dans `label.d` bloque la validation du hub actif jusqu'à une réimpression réussie (commande `r`) ou un contournement explicite (commande `f`, journalisé).
+- **À l'arrêt** (`q`, Ctrl-C), une fois le serveur HTTP arrêté : plus aucun hook ne démarre, ceux en cours ont `hook-timeout` pour finir (leur sortie est journalisée), les autres sont tués (signalé à l'opérateur), puis le journal est vidé sur disque.
 
 **Paramètres** passés à chaque script :
 
@@ -331,6 +376,8 @@ Une ligne JSON par transition :
 {"ts":"…","claim_id":"…","event":"installed"}
 ```
 
+Les transitions sont écrites dans l'ordre par un unique écrivain, hors du verrou d'état : un poll n'attend jamais un `fsync`. Seuls `received` et `issued` sont attendus avant de répondre au hub. Si `issued` ne peut pas être écrit, l'identité est **retenue** en mémoire : le hub reçoit `503 journal-unavailable`, l'opérateur est alerté, et le retry du hub est servi depuis la mémoire une fois le journal réinscriptible -- jamais par un deuxième appel plateforme. Un `received` impossible à écrire refuse de même tout nouveau claim.
+
 Au démarrage, la station recharge le journal. Les règles d'idempotence couvrent toutes les coupures :
 
 | Situation | Comportement |
@@ -355,7 +402,11 @@ Ce journal est aussi le registre de production : serial ↔ MAC ↔ serial BSP �
   - hub silencieux > `presence-timeout` → remis en file ;
   - échec de `label.d` → validation bloquée, `r` relance, `f` force ;
   - ordre lexical, timeout et environnement des hooks ;
-  - board non configuré → 403 ; quota → 403 ; `device-name` existant → 409 ; plateforme `Unavailable` → 503 ; CSR invalide → 400 ;
+  - board non configuré → 403 ; quota → 403 ; `device-name` existant → 409 ; plateforme `Unavailable` → 503 ; CSR invalide → 400 ; chaque code du §3 ;
+  - ack `installed` avant étiquetage → 409 `not-labelled` ; ack `failed` avant étiquetage → accepté, hors file ;
+  - valeurs réelles et chaînes vides acceptées, chaque limite de champ refusée (`invalid-hardware`), corps trop gros (413) ;
+  - `issued` impossible à journaliser → 503, aucun deuxième appel plateforme ;
+  - arrêt avec des hooks en cours : attendus jusqu'à `hook-timeout`, tués au-delà ;
   - `simulate` produit un `remora-factory.yaml` lisible par le `FactoryIdentity` de remora-edge.
 
 ### 4.8 Sécurité
@@ -402,7 +453,7 @@ Déroulé :
 
 1. Activer le profil réseau `provisioning`. LED : `claim-searching`.
 2. Charger ou générer la clé P-256 et la persister **avant** tout envoi, pour que le `claim_id` reste stable. Construire la CSR.
-3. Découvrir la station, puis faire `POST /v1/claims`. Réessayer avec backoff sur 503 et sur erreur réseau.
+3. Découvrir la station, puis faire `POST /v1/claims`. Réessayer avec backoff sur 503 (après `retry_after`) et sur erreur réseau. Ne régénérer la clé que sur `400 invalid-csr` (§3, Erreurs).
 4. **Vérifier** l'identité reçue :
    - la clé publique du certificat est celle du hub ;
    - la signature est faite par `certificate_authority` ;
@@ -410,7 +461,7 @@ Déroulé :
    - le CN est non vide ;
    - le préfixe d'`access_url` est respecté.
 
-   En cas d'échec : ack `failed`, LED `claim-error`, la clé est conservée, nouvel essai plus tard.
+   En cas d'échec : ack `failed` (accepté dans tout état : le claim sort de la file), LED `claim-error`, la clé est conservée, nouvel essai plus tard.
 5. Interroger la station toutes les secondes. La LED suit `label` : `queued` → `claim-queued`, `active` → `claim-active` (fixe).
 6. Sur `labelled` :
    - LED `claim-done` (éteinte) ;
@@ -419,7 +470,7 @@ Déroulé :
    - restauration du profil réseau ;
    - suppression de `pending-key-path` ;
    - **reboot** (`ManagerService::reboot`). Il est interdit de remonter l'identité à chaud.
-7. Un 409 ou un 403 met la LED en `claim-error`, avec un nouvel essai lent (le temps que l'opérateur corrige la config de la station).
+7. Un 409, un 403 ou un `400 invalid-hardware` met la LED en `claim-error`, avec un nouvel essai lent (le temps que l'opérateur corrige la config de la station).
 
 ### 5.3 Nouveau composant `led`
 

@@ -365,7 +365,10 @@ that hub and scans it. A scan that isn't its serial is refused (bell, red
 line, nothing validated); a matching one validates it, the hub writes its
 identity and reboots, and the next hub's LED turns steady. Commands, then
 Enter: `r` reprint, `s` skip (to the end of the queue), `f` validate despite
-a failed print (the scan is still required), `q` quit.
+a failed print (the scan is still required), `q` quit -- the hooks still
+running get `hook-timeout` to finish, then are killed. The station checks
+at start that its context is logged in (it asks the platform), and turns
+away any hub whose report isn't plain short identifiers.
 
 ```yaml
 # station.yaml -- relative paths are from this file's directory
@@ -392,7 +395,9 @@ over the file. Each issued serial is printed on stdout; the dashboard is on
 stderr. The journal (one JSON object per transition) is the production
 register -- serial, MACs, BSP serial, machine-id, date, context -- and the
 station's memory: a hub retrying with the same key, or a restarted station,
-gets the identity already issued, never a second serial. Hooks are
+gets the identity already issued, never a second serial -- nothing is
+handed out that the journal hasn't recorded (hubs are told to retry while
+it can't be written). Hooks are
 run-parts style: the executables of `issued.d`, `label.d` (blocking: the
 label can't be validated until they succeed), `labelled.d`, `installed.d`
 and `failed.d`, in lexical order, with the event as `$1`, the claim as JSON
@@ -427,7 +432,8 @@ wic image, and Windows/macOS disk support.
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
-`config`, `convert`, `batch`, `factory` and `station` for remora-etcher, `context`,
+`config`, `convert`, `batch`, `factory`, `station` and `claim` (a hub's side
+of the station, for `station simulate`) for remora-etcher, `context`,
 `channel`, `ota` and `device` for rmra, `update` (and `context`) for both. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each
 is split further into:
