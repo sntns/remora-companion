@@ -8,6 +8,11 @@ use super::error::Result;
 /// reader for a test double without touching the use case.
 pub trait DiskAdapter: Send + Sync {
     fn enumerate(&self) -> Result<Vec<DiskInfo>>;
+    /// The whole disk `path` opens, wherever `path` points: symlinks
+    /// (`/dev/disk/by-id/...`) are followed and the device node is
+    /// identified by its device number, not its name, so the returned
+    /// `DiskInfo::path` is the canonical node -- the one the flash guard
+    /// compares with what it is about to open.
     fn info(&self, path: &Path) -> Result<DiskInfo>;
 }
 

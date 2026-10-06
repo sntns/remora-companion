@@ -10,3 +10,4 @@ publish.workspace = true
 remora-disk = { path = "../disk" }
 error-stack.workspace = true
 async-trait.workspace = true
+tokio.workspace = true

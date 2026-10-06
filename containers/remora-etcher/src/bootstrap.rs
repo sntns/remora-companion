@@ -102,7 +102,10 @@ pub async fn wire() -> Services {
         .expect("BmapAdapterService was just registered");
 
     container
-        .set_type(FlashService::new(FlashControllerImpl::new(bmap_adapter)))
+        .set_type(FlashService::new(FlashControllerImpl::new(
+            disk.clone(),
+            bmap_adapter,
+        )))
         .await;
     let flash = container
         .get_type::<FlashService>()

@@ -8,12 +8,25 @@
 //! byte offset 65536 for 32 KiB, 0xBB at byte offset 6291456 for 16 KiB, zero
 //! elsewhere) — the test never shells out to `bmaptool` itself, it just
 //! reuses the checksums it produced as a trusted fixture.
+//!
+//! The destination is a regular file, which the real disk adapter rightly
+//! refuses to describe, so the disk vertical is a small stub of its one
+//! port that describes whatever disk a test says (same posture as
+//! `context-application`'s platform stub).
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use remora_disk::model::DiskInfo;
+use remora_disk::{
+    application::{DiskService, DiskServiceInterface, Error as DiskError, Result as DiskResult},
+    model::DiskInfo,
+};
 use remora_flash::{
-    adapter::BmapAdapterService, application::FlashServiceInterface, model::FlashRequest,
+    adapter::BmapAdapterService,
+    application::{Error, FlashServiceInterface},
+    model::FlashRequest,
 };
 use remora_flash_adapter_bmap::BmapAdapterImpl;
 use remora_flash_application::FlashControllerImpl;
@@ -41,8 +54,30 @@ const BMAP_XML: &str = r#"<?xml version="1.0" ?>
 </bmap>
 "#;
 
-fn controller() -> FlashControllerImpl {
-    FlashControllerImpl::new(BmapAdapterService::new(BmapAdapterImpl))
+/// Describes every path as `disk`, the way a disk service would describe
+/// the node it resolved a path to.
+struct StubDisk {
+    disk: Option<DiskInfo>,
+}
+
+#[async_trait::async_trait]
+impl DiskServiceInterface for StubDisk {
+    async fn list(&self) -> DiskResult<Vec<DiskInfo>> {
+        Ok(self.disk.clone().into_iter().collect())
+    }
+
+    async fn info(&self, _path: &Path) -> DiskResult<DiskInfo> {
+        self.disk
+            .clone()
+            .ok_or_else(|| error_stack::Report::new(DiskError::Info))
+    }
+}
+
+fn controller(disk: DiskInfo) -> FlashControllerImpl {
+    FlashControllerImpl::new(
+        DiskService::new(StubDisk { disk: Some(disk) }),
+        BmapAdapterService::new(BmapAdapterImpl),
+    )
 }
 
 fn build_source_image() -> Vec<u8> {
@@ -65,9 +100,10 @@ fn tempdir(label: &str) -> PathBuf {
     dir
 }
 
-fn removable_non_system_disk(path: PathBuf) -> DiskInfo {
+/// A disk the guard lets through, at `path`'s canonical node.
+fn removable_non_system_disk(path: &Path) -> DiskInfo {
     DiskInfo {
-        path,
+        path: fs::canonicalize(path).unwrap(),
         size_bytes: IMAGE_SIZE,
         model: None,
         is_removable: true,
@@ -75,16 +111,25 @@ fn removable_non_system_disk(path: PathBuf) -> DiskInfo {
     }
 }
 
-#[tokio::test]
-async fn bmap_copy_only_touches_mapped_ranges() {
-    let dir = tempdir("ok");
+/// Source image, its `.bmap`, and a marker-filled destination in `dir`.
+fn fixture(dir: &Path, image: &[u8]) -> (PathBuf, PathBuf, PathBuf) {
     let image_path = dir.join("src.img");
     let bmap_path = dir.join("src.img.bmap");
     let device_path = dir.join("dest.img");
-
-    fs::write(&image_path, build_source_image()).unwrap();
+    fs::write(&image_path, image).unwrap();
     fs::write(&bmap_path, BMAP_XML).unwrap();
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
+    (image_path, bmap_path, device_path)
+}
+
+fn untouched(device_path: &Path) -> bool {
+    fs::read(device_path).unwrap().iter().all(|&b| b == MARKER)
+}
+
+#[tokio::test]
+async fn bmap_copy_only_touches_mapped_ranges() {
+    let dir = tempdir("ok");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
 
     let request = FlashRequest {
         image: image_path,
@@ -92,10 +137,9 @@ async fn bmap_copy_only_touches_mapped_ranges() {
         device: device_path.clone(),
         force: false,
     };
-    let info = removable_non_system_disk(device_path.clone());
 
-    let outcome = controller()
-        .flash(&request, &info, &OperationContext::noop())
+    let outcome = controller(removable_non_system_disk(&device_path))
+        .flash(&request, &OperationContext::noop())
         .await
         .expect("flash should succeed");
     assert!(outcome.used_bmap);
@@ -133,19 +177,12 @@ async fn bmap_copy_only_touches_mapped_ranges() {
 #[tokio::test]
 async fn bmap_copy_rejects_a_corrupted_image() {
     let dir = tempdir("corrupt");
-    let image_path = dir.join("src.img");
-    let bmap_path = dir.join("src.img.bmap");
-    let device_path = dir.join("dest.img");
-
     let mut corrupted = build_source_image();
     // Flip one byte inside the first mapped range: the .bmap's checksum for
     // that range was computed against the *original* content, so this must
     // be caught rather than silently written.
     corrupted[RANGE_A_OFFSET] = 0xAB;
-
-    fs::write(&image_path, &corrupted).unwrap();
-    fs::write(&bmap_path, BMAP_XML).unwrap();
-    fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
+    let (image_path, bmap_path, device_path) = fixture(&dir, &corrupted);
 
     let request = FlashRequest {
         image: image_path,
@@ -153,15 +190,86 @@ async fn bmap_copy_rejects_a_corrupted_image() {
         device: device_path.clone(),
         force: false,
     };
-    let info = removable_non_system_disk(device_path);
 
-    let result = controller()
-        .flash(&request, &info, &OperationContext::noop())
+    let result = controller(removable_non_system_disk(&device_path))
+        .flash(&request, &OperationContext::noop())
         .await;
     assert!(
         result.is_err(),
         "a corrupted image must fail bmap checksum verification, not be silently written"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn flash_through_a_symlink_writes_the_disk_it_resolves_to() {
+    let dir = tempdir("symlink");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+    let link = dir.join("sdc");
+    std::os::unix::fs::symlink(&device_path, &link).unwrap();
+
+    let request = FlashRequest {
+        image: image_path,
+        bmap: Some(bmap_path),
+        device: link,
+        force: false,
+    };
+    controller(removable_non_system_disk(&device_path))
+        .flash(&request, &OperationContext::noop())
+        .await
+        .expect("flash should succeed");
+
+    assert!(!untouched(&device_path));
+}
+
+#[tokio::test]
+async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
+    let dir = tempdir("mismatch");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+    // The disk service vouches for another node than the one `device` opens.
+    let checked = dir.join("other.img");
+    fs::write(&checked, b"").unwrap();
+
+    let request = FlashRequest {
+        image: image_path,
+        bmap: Some(bmap_path),
+        device: device_path.clone(),
+        force: false,
+    };
+    let err = controller(removable_non_system_disk(&checked))
+        .flash(&request, &OperationContext::noop())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err.current_context(),
+        Error::TargetMismatch { .. }
+    ));
+    assert!(untouched(&device_path));
+}
+
+#[tokio::test]
+async fn flash_refuses_the_system_disk_without_a_separate_preflight() {
+    let dir = tempdir("flash-system-disk");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+
+    let request = FlashRequest {
+        image: image_path,
+        bmap: Some(bmap_path),
+        device: device_path.clone(),
+        force: true,
+    };
+    let disk = DiskInfo {
+        is_system_disk: true,
+        ..removable_non_system_disk(&device_path)
+    };
+    let err = controller(disk)
+        .flash(&request, &OperationContext::noop())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err.current_context(), Error::UnsafeTarget { .. }));
+    assert!(untouched(&device_path));
 }
 
 #[tokio::test]
@@ -170,16 +278,13 @@ async fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
     let device_path = dir.join("dest.img");
     fs::write(&device_path, vec![MARKER; 1024]).unwrap();
 
-    let info = DiskInfo {
-        path: device_path,
-        size_bytes: 1024,
-        model: None,
-        is_removable: true,
+    let disk = DiskInfo {
         is_system_disk: true,
+        ..removable_non_system_disk(&device_path)
     };
 
-    assert!(controller()
-        .preflight(&info, /* force */ true)
+    assert!(controller(disk)
+        .preflight(&device_path, /* force */ true)
         .await
         .is_err());
 }
@@ -190,14 +295,18 @@ async fn preflight_refuses_a_non_removable_disk_without_force() {
     let device_path = dir.join("dest.img");
     fs::write(&device_path, vec![MARKER; 1024]).unwrap();
 
-    let info = DiskInfo {
-        path: device_path,
-        size_bytes: 1024,
-        model: None,
+    let disk = DiskInfo {
         is_removable: false,
-        is_system_disk: false,
+        ..removable_non_system_disk(&device_path)
     };
 
-    assert!(controller().preflight(&info, false).await.is_err());
-    assert!(controller().preflight(&info, true).await.is_ok());
+    assert!(controller(disk.clone())
+        .preflight(&device_path, false)
+        .await
+        .is_err());
+    let checked = controller(disk)
+        .preflight(&device_path, true)
+        .await
+        .unwrap();
+    assert_eq!(checked.path, fs::canonicalize(&device_path).unwrap());
 }
