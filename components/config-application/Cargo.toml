@@ -8,12 +8,12 @@ publish.workspace = true
 
 [dependencies]
 remora-config = { path = "../config" }
-remora-squashfs = { path = "../squashfs" }
 remora-image = { path = "../image" }
 remora-fs-walk = { path = "../fs-walk" }
 remora-scratch = { path = "../scratch" }
 error-stack.workspace = true
 async-trait.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 # Real (not mocked) adapters, for an integration-style test of the use case

@@ -6,6 +6,8 @@ use std::path::PathBuf;
 /// overwrite a disk.
 #[derive(Debug, Clone)]
 pub struct DiskInfo {
+    /// The canonical device node, symlinks resolved: `/dev/sdc` for a
+    /// `/dev/disk/by-id/usb-...` argument.
     pub path: PathBuf,
     pub size_bytes: u64,
     pub model: Option<String>,

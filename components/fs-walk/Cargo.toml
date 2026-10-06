@@ -10,4 +10,10 @@ publish.workspace = true
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
-walkdir = "2.5"
+walkdir = { version = "2.5", optional = true }
+
+[features]
+# The real FsWalkAdapterImpl. Off for a domain crate that only names the
+# port or the entry model (remora-squashfs).
+default = ["walkdir"]
+walkdir = ["dep:walkdir"]

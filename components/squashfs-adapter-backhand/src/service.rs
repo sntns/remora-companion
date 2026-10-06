@@ -13,8 +13,6 @@ use remora_squashfs::{
 fn map_compressor(compression: Compression) -> BackhandCompressor {
     match compression {
         Compression::Gzip => BackhandCompressor::Gzip,
-        Compression::Lzma => BackhandCompressor::Lzma,
-        Compression::Lzo => BackhandCompressor::Lzo,
         Compression::Xz => BackhandCompressor::Xz,
         Compression::Lz4 => BackhandCompressor::Lz4,
         Compression::Zstd => BackhandCompressor::Zstd,
@@ -69,7 +67,7 @@ fn write(
         match &entry.kind {
             EntryKind::Directory => {} // handled above
             EntryKind::File { source } => {
-                let reader = File::open(source).map_err(|_| Error::OpenInput(source.clone()))?;
+                let reader = File::open(source).map_err(|e| Error::OpenInput(source.clone(), e))?;
                 fsw.push_file(reader, &entry.path, node_header(entry.metadata))?;
             }
             EntryKind::Symlink { target } => {

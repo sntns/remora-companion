@@ -14,6 +14,7 @@ remora-scratch = { path = "../scratch" }
 remora-progress = { path = "../progress" }
 error-stack.workspace = true
 async-trait.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 # Real (not mocked) adapters, for an integration-style test of the use case

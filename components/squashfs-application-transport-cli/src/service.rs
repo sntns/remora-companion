@@ -1,11 +1,14 @@
 use std::path::PathBuf;
 
 use clap::ValueEnum;
+use error_stack::ResultExt;
 use remora_format::human_size;
 use remora_squashfs::{
-    application::{Result, SquashfsService},
+    application::SquashfsService,
     model::{BuildOptions, Compression},
 };
+
+use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -48,8 +51,6 @@ pub enum Command {
 #[derive(Clone, Copy, ValueEnum)]
 pub enum CompressionArg {
     Gzip,
-    Lzma,
-    Lzo,
     Xz,
     Lz4,
     Zstd,
@@ -59,8 +60,6 @@ impl From<CompressionArg> for Compression {
     fn from(value: CompressionArg) -> Self {
         match value {
             CompressionArg::Gzip => Compression::Gzip,
-            CompressionArg::Lzma => Compression::Lzma,
-            CompressionArg::Lzo => Compression::Lzo,
             CompressionArg::Xz => Compression::Xz,
             CompressionArg::Lz4 => Compression::Lz4,
             CompressionArg::Zstd => Compression::Zstd,
@@ -88,12 +87,12 @@ pub async fn run(command: Command, service: &SquashfsService) -> Result<()> {
             let follow = remora_tui::follow(stream);
             let ctx = remora_progress::OperationContext::new(
                 sink,
-                tokio_util::sync::CancellationToken::new(),
+                remora_progress::cancelled_by_ctrl_c(),
             );
             let summary = service.build(&inputs, &output, &options, &ctx).await;
             drop(ctx);
             follow.finish(&summary).await;
-            let summary = summary?;
+            let summary = summary.change_context(Error::Build)?;
             remora_tui::success(format!(
                 "Wrote {} {}",
                 remora_tui::accent(output.display()),
@@ -106,7 +105,10 @@ pub async fn run(command: Command, service: &SquashfsService) -> Result<()> {
             Ok(())
         }
         Command::Inspect { image } => {
-            let entries = service.inspect(&image).await?;
+            let entries = service
+                .inspect(&image)
+                .await
+                .change_context(Error::Inspect)?;
             for entry in entries {
                 println!(
                     "{:<5} {:04o} {:>6}:{:<6} {}",
@@ -118,6 +120,36 @@ pub async fn run(command: Command, service: &SquashfsService) -> Result<()> {
                 );
             }
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: Command,
+    }
+
+    fn parse(comp: &str) -> std::result::Result<TestCli, clap::Error> {
+        TestCli::try_parse_from(["squashfs", "build", "in", "-o", "out", "--comp", comp])
+    }
+
+    #[test]
+    fn offers_only_compressions_backhand_can_write() {
+        for comp in ["gzip", "xz", "lz4", "zstd"] {
+            parse(comp).unwrap_or_else(|e| panic!("{comp}: {e}"));
+        }
+        for comp in ["lzma", "lzo"] {
+            let err = parse(comp)
+                .err()
+                .unwrap_or_else(|| panic!("{comp} accepted"));
+            assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
         }
     }
 }

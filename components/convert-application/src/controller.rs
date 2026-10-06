@@ -55,13 +55,7 @@ impl ConvertControllerImpl {
 impl ConvertServiceInterface for ConvertControllerImpl {
     async fn to_raw(&self, image: &Path, output_raw: &Path, ctx: &OperationContext) -> Result<()> {
         match self.adapter_for(format_of(image)) {
-            None => {
-                ctx.sink.phase("copying");
-                fs::copy(image, output_raw).map(|_| ()).map_err(|e| {
-                    Report::new(Error::Copy(image.to_path_buf(), output_raw.to_path_buf()))
-                        .attach(e.to_string())
-                })
-            }
+            None => copy_raw(image, output_raw, ctx).await,
             Some(adapter) => {
                 ctx.sink.phase("decoding");
                 let adapter = adapter.clone();
@@ -94,16 +88,11 @@ impl ConvertServiceInterface for ConvertControllerImpl {
         ctx: &OperationContext,
     ) -> Result<()> {
         match self.adapter_for(format_of(output)) {
-            None => {
-                ctx.sink.phase("copying");
-                fs::copy(raw_image, output).map(|_| ()).map_err(|e| {
-                    Report::new(Error::Copy(raw_image.to_path_buf(), output.to_path_buf()))
-                        .attach(e.to_string())
-                })
-            }
+            None => copy_raw(raw_image, output, ctx).await,
             Some(adapter) => {
                 ctx.sink.phase("encoding");
                 let adapter = adapter.clone();
+                // Only a progress total: 0 reads as "unknown".
                 let input_size = fs::metadata(raw_image).map(|m| m.len()).unwrap_or(0);
                 let raw_image_for_work = raw_image.to_path_buf();
                 let output_for_work = output.to_path_buf();
@@ -118,6 +107,25 @@ impl ConvertServiceInterface for ConvertControllerImpl {
                 }
             }
         }
+    }
+}
+
+/// A plain copy, for a raw image on both sides: multi-gigabyte, so tracked
+/// (and cancellable) like a codec run rather than one blocking `fs::copy`
+/// on a runtime thread.
+async fn copy_raw(from: &Path, to: &Path, ctx: &OperationContext) -> Result<()> {
+    ctx.sink.phase("copying");
+    // Only a progress total: 0 reads as "unknown".
+    let size = fs::metadata(from).map(|m| m.len()).unwrap_or(0);
+    let (from, to) = (from.to_path_buf(), to.to_path_buf());
+    let (from_for_work, to_for_work) = (from.clone(), to.clone());
+    match track_output_file_size(ctx, to.clone(), size, move || {
+        fs::copy(&from_for_work, &to_for_work)
+    })
+    .await
+    {
+        TrackedOutcome::Completed(res) => res.map(|_| ()).change_context(Error::Copy(from, to)),
+        TrackedOutcome::Cancelled => Err(Report::new(Error::Cancelled)),
     }
 }
 

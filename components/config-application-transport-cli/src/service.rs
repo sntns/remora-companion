@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
-use remora_config::application::{ConfigService, Result};
+use error_stack::ResultExt;
+use remora_config::application::ConfigService;
 use remora_format::human_size;
+
+use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -58,7 +61,8 @@ pub async fn run(command: Command, service: &ConfigService) -> Result<()> {
         } => {
             let summary = service
                 .build(&input_dir, &output, size, block_size, label.as_deref())
-                .await?;
+                .await
+                .change_context(Error::Build)?;
             remora_tui::success(format!(
                 "Wrote {} {}",
                 remora_tui::accent(output.display()),
@@ -79,7 +83,8 @@ pub async fn run(command: Command, service: &ConfigService) -> Result<()> {
         } => {
             service
                 .upload(&image, &src, &dest_path, &slot, mode)
-                .await?;
+                .await
+                .change_context(Error::Upload)?;
             remora_tui::success(format!(
                 "Wrote {dest_path} into {}",
                 remora_tui::accent(format!("{}:/remora/{slot}/config", image.display()))

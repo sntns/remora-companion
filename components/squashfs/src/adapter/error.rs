@@ -5,7 +5,7 @@ pub enum Error {
     #[error("backhand error: {0}")]
     Backhand(#[from] backhand::BackhandError),
     #[error("failed to open {0}")]
-    OpenInput(PathBuf),
+    OpenInput(PathBuf, #[source] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

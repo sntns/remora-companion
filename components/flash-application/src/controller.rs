@@ -1,7 +1,10 @@
-use std::fs::{self, File, OpenOptions};
+use std::{
+    fs::{self, File, OpenOptions},
+    path::Path,
+};
 
 use error_stack::{Report, ResultExt};
-use remora_disk::model::DiskInfo;
+use remora_disk::{application::DiskService, model::DiskInfo};
 use remora_flash::{
     adapter::BmapAdapterService,
     application::{Error, FlashServiceInterface, Result},
@@ -11,20 +14,27 @@ use remora_progress::OperationContext;
 
 /// The flash vertical's use case. The actual safety guard (`preflight`) lives
 /// here, not in the adapter — so nothing, CLI or a future GUI, can reach the
-/// raw copy without going through it first.
+/// raw copy without going through it first. It asks the disk vertical about
+/// the target itself rather than trusting a description of it.
 pub struct FlashControllerImpl {
+    disk: DiskService,
     bmap: BmapAdapterService,
 }
 
 impl FlashControllerImpl {
-    pub fn new(bmap: BmapAdapterService) -> Self {
-        Self { bmap }
+    pub fn new(disk: DiskService, bmap: BmapAdapterService) -> Self {
+        Self { disk, bmap }
     }
 }
 
 #[async_trait::async_trait]
 impl FlashServiceInterface for FlashControllerImpl {
-    async fn preflight(&self, info: &DiskInfo, force: bool) -> Result<()> {
+    async fn preflight(&self, device: &Path, force: bool) -> Result<DiskInfo> {
+        let info = self
+            .disk
+            .info(device)
+            .await
+            .change_context_lazy(|| Error::Disk(device.to_path_buf()))?;
         if info.is_system_disk {
             return Err(Report::new(Error::UnsafeTarget {
                 path: info.path.clone(),
@@ -37,16 +47,11 @@ impl FlashServiceInterface for FlashControllerImpl {
                 reason: "target is not marked removable; pass --force to override",
             }));
         }
-        Ok(())
+        Ok(info)
     }
 
-    async fn flash(
-        &self,
-        request: &FlashRequest,
-        info: &DiskInfo,
-        ctx: &OperationContext,
-    ) -> Result<FlashOutcome> {
-        self.preflight(info, request.force).await?;
+    async fn flash(&self, request: &FlashRequest, ctx: &OperationContext) -> Result<FlashOutcome> {
+        let info = self.preflight(&request.device, request.force).await?;
 
         if ctx.cancel.is_cancelled() {
             return Err(Report::new(Error::Cancelled));
@@ -60,20 +65,21 @@ impl FlashServiceInterface for FlashControllerImpl {
         // however long that takes.
         let bmap = self.bmap.clone();
         let request = request.clone();
-        tokio::task::spawn_blocking(move || run_flash(&bmap, &request))
+        tokio::task::spawn_blocking(move || run_flash(&bmap, &request, &info))
             .await
             .expect("flash worker panicked")
     }
 }
 
-fn run_flash(bmap: &BmapAdapterService, request: &FlashRequest) -> Result<FlashOutcome> {
+fn run_flash(
+    bmap: &BmapAdapterService,
+    request: &FlashRequest,
+    checked: &DiskInfo,
+) -> Result<FlashOutcome> {
     let mut image = File::open(&request.image)
         .change_context_lazy(|| Error::OpenImage(request.image.clone()))?;
 
-    let mut device = OpenOptions::new()
-        .write(true)
-        .open(&request.device)
-        .change_context_lazy(|| Error::OpenDevice(request.device.clone()))?;
+    let mut device = open_checked_device(&request.device, checked)?;
 
     if let Some(bmap_path) = &request.bmap {
         let xml = fs::read_to_string(bmap_path)
@@ -87,7 +93,10 @@ fn run_flash(bmap: &BmapAdapterService, request: &FlashRequest) -> Result<FlashO
             used_bmap: true,
         })
     } else {
-        let bytes_written = image.metadata().map(|m| m.len()).unwrap_or(0);
+        let bytes_written = image
+            .metadata()
+            .change_context_lazy(|| Error::OpenImage(request.image.clone()))?
+            .len();
         bmap.copy_without_bmap(&mut image, &mut device)
             .change_context(Error::Bmap)?;
         Ok(FlashOutcome {
@@ -95,4 +104,24 @@ fn run_flash(bmap: &BmapAdapterService, request: &FlashRequest) -> Result<FlashO
             used_bmap: false,
         })
     }
+}
+
+/// Open the disk the guard checked, and only if `device` still resolves to
+/// it: the check was made on `checked.path`, the canonical node, so a
+/// `device` resolving anywhere else (a symlink retargeted since, a disk
+/// service describing another node) is refused rather than written.
+fn open_checked_device(device: &Path, checked: &DiskInfo) -> Result<File> {
+    let resolved =
+        fs::canonicalize(device).change_context_lazy(|| Error::OpenDevice(device.to_path_buf()))?;
+    if resolved != checked.path {
+        return Err(Report::new(Error::TargetMismatch {
+            device: device.to_path_buf(),
+            resolved,
+            checked: checked.path.clone(),
+        }));
+    }
+    OpenOptions::new()
+        .write(true)
+        .open(&checked.path)
+        .change_context_lazy(|| Error::OpenDevice(checked.path.clone()))
 }

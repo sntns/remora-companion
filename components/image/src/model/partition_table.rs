@@ -1,5 +1,3 @@
-use std::fmt;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableKind {
     Mbr,
@@ -119,8 +117,8 @@ pub enum FsKind {
 }
 
 /// How the CLI/caller identifies which partition to act on — always
-/// explicit, never auto-detected, for write operations (see the project
-/// plan's safety notes on partition selection).
+/// explicit, never auto-detected, for write operations: a guessed partition
+/// is a silently corrupted one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PartitionSelector {
@@ -131,39 +129,32 @@ pub enum PartitionSelector {
     Role(PartitionRole),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SelectionError {
+    #[error("selecting partition role {0:?} requires --boot-mode")]
     RoleRequiresBootMode(PartitionRole),
+    #[error("boot mode {1:?} has no {0:?} partition")]
     RoleNotPresentInBootMode(PartitionRole, BootMode),
+    #[error("a {1:?} table has no {0:?} partition")]
     RoleNotPresentInTable(PartitionRole, TableKind),
+    #[error(
+        "boot mode {mode:?} lays out a {expected:?} table, but this image has a {found:?} one"
+    )]
+    BootModeMismatch {
+        mode: BootMode,
+        expected: TableKind,
+        found: TableKind,
+    },
+    #[error("no partition with index {0} in this table")]
     NoSuchPartition(u32),
 }
 
-impl fmt::Display for SelectionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SelectionError::RoleRequiresBootMode(role) => {
-                write!(f, "selecting partition role {role:?} requires --boot-mode")
-            }
-            SelectionError::RoleNotPresentInBootMode(role, mode) => {
-                write!(f, "boot mode {mode:?} has no {role:?} partition")
-            }
-            SelectionError::RoleNotPresentInTable(role, kind) => {
-                write!(f, "a {kind:?} table has no {role:?} partition")
-            }
-            SelectionError::NoSuchPartition(index) => {
-                write!(f, "no partition with index {index} in this table")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SelectionError {}
-
 impl PartitionTable {
     /// Resolve `selector` to a concrete partition already present in this
-    /// table. Never guesses: an index that isn't in the table, or a role
-    /// this boot mode doesn't have, is an error rather than a fallback.
+    /// table. Never guesses: an index that isn't in the table, a role this
+    /// boot mode doesn't have, or a boot mode whose layout is for the other
+    /// table kind (its role indices would name the wrong partitions) is an
+    /// error rather than a fallback.
     pub fn select(
         &self,
         selector: PartitionSelector,
@@ -173,6 +164,13 @@ impl PartitionTable {
             PartitionSelector::Index(index) => index,
             PartitionSelector::Role(role) => {
                 let mode = boot_mode.ok_or(SelectionError::RoleRequiresBootMode(role))?;
+                if mode.table_kind() != self.kind {
+                    return Err(SelectionError::BootModeMismatch {
+                        mode,
+                        expected: mode.table_kind(),
+                        found: self.kind,
+                    });
+                }
                 mode.index_of(role)
                     .ok_or(SelectionError::RoleNotPresentInBootMode(role, mode))?
             }
@@ -228,5 +226,69 @@ mod tests {
         assert_eq!(BootMode::Efi.role_of(5), Some(PartitionRole::Data));
         assert_eq!(BootMode::Bios.role_of(4), Some(PartitionRole::Data));
         assert_eq!(BootMode::Bios.role_of(5), None);
+    }
+
+    fn table(kind: TableKind, count: u32) -> PartitionTable {
+        PartitionTable {
+            kind,
+            sector_size: 512,
+            partitions: (1..=count)
+                .map(|index| PartitionEntry {
+                    index,
+                    label: None,
+                    start_bytes: u64::from(index) * 1024 * 1024,
+                    size_bytes: 1024 * 1024,
+                    partition_type: "83".to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn select_refuses_a_boot_mode_laid_out_for_the_other_table_kind() {
+        // BIOS's `data` is index 4, which on GPT is slotB.
+        let gpt = table(TableKind::Gpt, 5);
+        let err = gpt
+            .select(
+                PartitionSelector::Role(PartitionRole::Data),
+                Some(BootMode::Bios),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SelectionError::BootModeMismatch {
+                mode: BootMode::Bios,
+                expected: TableKind::Mbr,
+                found: TableKind::Gpt,
+            }
+        ));
+
+        let mbr = table(TableKind::Mbr, 4);
+        assert!(matches!(
+            mbr.select(
+                PartitionSelector::Role(PartitionRole::Shared),
+                Some(BootMode::Efi)
+            ),
+            Err(SelectionError::BootModeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn select_resolves_a_role_with_a_matching_boot_mode() {
+        let gpt = table(TableKind::Gpt, 5);
+        let entry = gpt
+            .select(
+                PartitionSelector::Role(PartitionRole::Data),
+                Some(BootMode::Efi),
+            )
+            .unwrap();
+        assert_eq!(entry.index, 5);
+
+        // A raw index needs no boot mode, and ignores a mismatched one.
+        let mbr = table(TableKind::Mbr, 4);
+        let entry = mbr
+            .select(PartitionSelector::Index(2), Some(BootMode::Efi))
+            .unwrap();
+        assert_eq!(entry.index, 2);
     }
 }

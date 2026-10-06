@@ -21,11 +21,22 @@ impl DiskControllerImpl {
 
 #[async_trait::async_trait]
 impl DiskServiceInterface for DiskControllerImpl {
+    // The adapter walks sysfs and stats device nodes, which can block on a
+    // slow or spun-down disk: off the runtime threads.
     async fn list(&self) -> Result<Vec<DiskInfo>> {
-        self.adapter.enumerate().change_context(Error::Enumerate)
+        let adapter = self.adapter.clone();
+        tokio::task::spawn_blocking(move || adapter.enumerate())
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Enumerate)
     }
 
     async fn info(&self, path: &Path) -> Result<DiskInfo> {
-        self.adapter.info(path).change_context(Error::Info)
+        let adapter = self.adapter.clone();
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || adapter.info(&path))
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Info)
     }
 }

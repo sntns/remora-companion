@@ -102,7 +102,10 @@ pub async fn wire() -> Services {
         .expect("BmapAdapterService was just registered");
 
     container
-        .set_type(FlashService::new(FlashControllerImpl::new(bmap_adapter)))
+        .set_type(FlashService::new(FlashControllerImpl::new(
+            disk.clone(),
+            bmap_adapter,
+        )))
         .await;
     let flash = container
         .get_type::<FlashService>()
@@ -137,22 +140,9 @@ pub async fn wire() -> Services {
     let vfat_fs: Arc<dyn remora_image::adapter::partition_fs::PartitionFilesystem> =
         Arc::new(VfatAdapterImpl);
 
-    container
-        .set_type(ImageService::new(ImageControllerImpl::new(
-            partition_table,
-            ext4_fs,
-            vfat_fs,
-            fs_walk.clone(),
-        )))
-        .await;
-    let image = container
-        .get_type::<ImageService>()
-        .await
-        .expect("ImageService was just registered");
-
-    // The config vertical injects Ext4Adapter directly too (not through
-    // PartitionFilesystem) to manipulate a standalone config.ext4 file —
-    // see remora-image's Ext4Adapter doc comment.
+    // The image use case injects Ext4Adapter directly too (not through
+    // PartitionFilesystem) for its standalone ext4 image operations — see
+    // remora-image's Ext4Adapter doc comment.
     container
         .set_type(Ext4AdapterService::new(Ext4AdapterImpl))
         .await;
@@ -160,6 +150,20 @@ pub async fn wire() -> Services {
         .get_type::<Ext4AdapterService>()
         .await
         .expect("Ext4AdapterService was just registered");
+
+    container
+        .set_type(ImageService::new(ImageControllerImpl::new(
+            partition_table,
+            ext4_fs,
+            vfat_fs,
+            fs_walk.clone(),
+            ext4_adapter,
+        )))
+        .await;
+    let image = container
+        .get_type::<ImageService>()
+        .await
+        .expect("ImageService was just registered");
 
     container
         .set_type(SquashfsAdapterService::new(SquashfsAdapterImpl))
@@ -207,7 +211,6 @@ pub async fn wire() -> Services {
 
     container
         .set_type(ConfigService::new(ConfigControllerImpl::new(
-            ext4_adapter,
             fs_walk_for_config,
             image.clone(),
         )))

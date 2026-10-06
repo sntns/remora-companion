@@ -2934,7 +2934,6 @@ dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-squashfs",
  "thiserror 1.0.69",
 ]
 
@@ -2952,7 +2951,6 @@ dependencies = [
  "remora-image-adapter-vfat",
  "remora-image-application",
  "remora-scratch",
- "remora-squashfs",
  "tokio",
 ]
 
@@ -2965,6 +2963,7 @@ dependencies = [
  "remora-config",
  "remora-format",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3080,9 +3079,9 @@ dependencies = [
  "remora-convert",
  "remora-progress",
  "remora-tui",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
- "tokio-util",
 ]
 
 [[package]]
@@ -3159,6 +3158,7 @@ dependencies = [
  "async-trait",
  "error-stack",
  "remora-disk",
+ "tokio",
 ]
 
 [[package]]
@@ -3171,6 +3171,7 @@ dependencies = [
  "remora-disk",
  "remora-format",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3347,7 +3348,6 @@ dependencies = [
  "remora-tui",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -3418,6 +3418,7 @@ dependencies = [
  "remora-format",
  "remora-identity",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3489,7 +3490,6 @@ dependencies = [
  "remora-tui",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -3631,8 +3631,8 @@ dependencies = [
  "remora-progress",
  "remora-squashfs",
  "remora-tui",
+ "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]

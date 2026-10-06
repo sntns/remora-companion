@@ -20,6 +20,8 @@ pub enum Error {
     ReadTempImage(PathBuf),
     #[error("failed to access the image's shared partition")]
     Image,
+    #[error("failed to create a scratch directory")]
+    Scratch,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

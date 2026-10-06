@@ -28,7 +28,7 @@ impl WindowedFile {
             .read(true)
             .write(true)
             .open(path)
-            .map_err(|_| Error::Open(path.to_path_buf()))?;
+            .map_err(|e| Error::Io(path.to_path_buf(), e))?;
         Ok(Self {
             file,
             offset,
@@ -88,14 +88,20 @@ impl Seek for WindowedFile {
     }
 }
 
+/// `image`'s size in bytes, a block device's included: its metadata length
+/// is 0, only seeking to its end tells its capacity.
+fn image_len(image: &Path) -> std::result::Result<u64, Error> {
+    File::open(image)
+        .and_then(|mut file| file.seek(SeekFrom::End(0)))
+        .map_err(|e| Error::Io(image.to_path_buf(), e))
+}
+
 fn mount_window(
     image: &Path,
     offset: u64,
     size: u64,
 ) -> std::result::Result<fatfs::FileSystem<fatfs::StdIoWrapper<WindowedFile>>, Error> {
-    let image_len = std::fs::metadata(image)
-        .map_err(|_| Error::Open(image.to_path_buf()))?
-        .len();
+    let image_len = image_len(image)?;
     let window_end = offset.checked_add(size).filter(|&end| end <= image_len);
     if window_end.is_none() {
         return Err(Error::OutOfWindow {
@@ -134,7 +140,13 @@ fn write_file(
     let mut file = root.create_file(relative(dest_path)).map_err(Error::Fat)?;
     file.truncate().map_err(Error::Fat)?;
     file.write_all(contents).map_err(|e| Error::Fat(e.into()))?;
-    Ok(())
+    // fatfs flushes a file's directory entry and unmounts on drop too, but
+    // only logs a failure there: a write that never reached the disk would
+    // pass for a success.
+    file.flush().map_err(|e| Error::Fat(e.into()))?;
+    drop(file);
+    drop(root);
+    fs.unmount().map_err(Error::Fat)
 }
 
 /// Create directory `dest_path` (parent directory must already exist)
@@ -151,7 +163,9 @@ fn create_dir(
     let fs = mount_window(image, offset, size)?;
     let root = fs.root_dir();
     root.create_dir(relative(dest_path)).map_err(Error::Fat)?;
-    Ok(())
+    drop(root);
+    // Explicitly, not on drop: see `write_file`.
+    fs.unmount().map_err(Error::Fat)
 }
 
 /// Read the whole content of `dest_path` inside the vfat filesystem
