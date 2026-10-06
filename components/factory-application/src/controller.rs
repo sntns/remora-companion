@@ -8,11 +8,11 @@ use remora_context::{
 use remora_factory::{
     adapter::{
         credential::CredentialWriterAdapterService,
-        key::{self, DeviceKeyAdapterService},
+        key::{self, DeviceKey, DeviceKeyAdapterService},
         provisioning::{FactoryProvisioningAdapterService, ProvisionedIdentity},
     },
     application::{Error, FactoryServiceInterface, Result},
-    model::{DeviceSerial, FactoryCredential, ProvisionedDevice, VerifiedCsr},
+    model::{DeviceSerial, FactoryCredential, PrivateKey, ProvisionedDevice, VerifiedCsr},
 };
 use remora_progress::OperationContext;
 
@@ -79,6 +79,27 @@ impl FactoryControllerImpl {
         }
         Ok(identity)
     }
+
+    /// `remora-factory.yaml` for `identity`, signed for `private_key`'s CSR.
+    async fn write(
+        &self,
+        private_key: PrivateKey,
+        identity: ProvisionedIdentity,
+        output: &Path,
+    ) -> Result<()> {
+        let access_url = identity.access_url;
+        let credential = FactoryCredential {
+            private_key,
+            certificate_der: identity.certificate_der,
+            certificate_authority_der: identity.certificate_authority_der,
+            server_certificate_authority_der: identity.server_certificate_authority_der,
+            key_id: identity.key_id,
+        };
+        self.credentials
+            .write(&credential, &access_url, output)
+            .await
+            .change_context_lazy(|| Error::WriteOutput(output.to_path_buf()))
+    }
 }
 
 #[async_trait::async_trait]
@@ -120,23 +141,11 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             .await?;
 
         let device = ProvisionedDevice {
-            serial_number: identity.serial_number,
-            factory_device_name: identity.factory_device_name,
+            serial_number: identity.serial_number.clone(),
+            factory_device_name: identity.factory_device_name.clone(),
         };
-        let access_url = identity.access_url;
-        let credential = FactoryCredential {
-            private_key: key.private_key,
-            certificate_der: identity.certificate_der,
-            certificate_authority_der: identity.certificate_authority_der,
-            server_certificate_authority_der: identity.server_certificate_authority_der,
-            key_id: identity.key_id,
-        };
-
         ctx.sink.phase("writing remora-factory.yaml");
-        self.credentials
-            .write(&credential, &access_url, output)
-            .await
-            .change_context_lazy(|| Error::WriteOutput(output.to_path_buf()))?;
+        self.write(key.private_key, identity, output).await?;
 
         ctx.sink.phase("done");
         Ok(device)
@@ -158,7 +167,20 @@ impl FactoryServiceInterface for FactoryControllerImpl {
             .await
             .map_err(|report| match report.current_context() {
                 key::Error::InvalidCsr => report.change_context(Error::InvalidCsr),
-                _ => report.change_context(Error::Keygen),
+                _ => report.change_context(Error::VerifyCsr),
             })
+    }
+
+    async fn generate_device_key(&self) -> Result<DeviceKey> {
+        self.keys.generate(None).await.change_context(Error::Keygen)
+    }
+
+    async fn write_credential(
+        &self,
+        private_key: PrivateKey,
+        identity: ProvisionedIdentity,
+        output: &Path,
+    ) -> Result<()> {
+        self.write(private_key, identity, output).await
     }
 }

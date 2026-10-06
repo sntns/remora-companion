@@ -5,8 +5,8 @@ use remora_progress::OperationContext;
 
 use super::error::Result;
 use crate::{
-    adapter::provisioning::ProvisionedIdentity,
-    model::{DeviceSerial, ProvisionedDevice, VerifiedCsr},
+    adapter::{key::DeviceKey, provisioning::ProvisionedIdentity},
+    model::{DeviceSerial, PrivateKey, ProvisionedDevice, VerifiedCsr},
 };
 
 /// The factory vertical's application-facing port: manufacture a device --
@@ -76,6 +76,21 @@ pub trait FactoryServiceInterface: Send + Sync {
     /// Checks a CSR the way `provision_csr` does, without provisioning:
     /// PKCS#10, a P-256 key, a valid self-signature.
     async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr>;
+
+    /// A new device keypair and its CSR, for a caller that plays a device
+    /// keeping its own key (a hub claiming from a station): the CSR goes
+    /// out, the key stays opaque until `write_credential`.
+    async fn generate_device_key(&self) -> Result<DeviceKey>;
+
+    /// Writes the `remora-factory.yaml` of a device whose identity was
+    /// issued elsewhere (by a station, for `private_key`'s CSR) to
+    /// `output`, exactly as `provision` writes its own.
+    async fn write_credential(
+        &self,
+        private_key: PrivateKey,
+        identity: ProvisionedIdentity,
+        output: &Path,
+    ) -> Result<()>;
 }
 
 /// Injectable handle to whatever `FactoryServiceInterface` implementation

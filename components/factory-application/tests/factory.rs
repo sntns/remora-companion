@@ -453,3 +453,28 @@ async fn provision_csr_has_no_override_for_an_empty_access_url() {
         .unwrap_err();
     assert!(matches!(report.current_context(), Error::MissingAccessUrl));
 }
+
+/// A device keeping its own key (a hub claiming from a station): its key
+/// made here, its identity issued for the CSR elsewhere, its
+/// `remora-factory.yaml` written exactly as `provision` writes one.
+#[tokio::test]
+async fn a_device_held_key_and_an_identity_issued_elsewhere_make_its_credential() {
+    let factory = controller(FakeProvisioning);
+    let key = factory.generate_device_key().await.unwrap();
+    let identity = factory
+        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .await
+        .unwrap();
+    let output = temp_path("claimed");
+    factory
+        .write_credential(key.private_key, identity, &output)
+        .await
+        .unwrap();
+    let yaml = fs::read_to_string(&output).unwrap();
+    let _ = fs::remove_file(&output);
+    assert!(
+        yaml.contains("key-id: \"test:kms:certificate:hubs-1H7Z\""),
+        "{yaml}"
+    );
+    assert!(yaml.contains("BEGIN EC PRIVATE KEY"), "{yaml}");
+}

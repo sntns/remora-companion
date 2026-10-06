@@ -47,40 +47,51 @@ impl DeviceKeyAdapter for DeviceKeyAdapterImpl {
     }
 
     async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr> {
-        verify(csr_der).map_err(|reason| Report::new(Error::InvalidCsr).attach(reason))
+        verify(csr_der).map_err(|error| Report::new(error).change_context(Error::InvalidCsr))
     }
 }
 
+/// Which check of `verify` failed.
+#[derive(Debug, thiserror::Error)]
+enum CsrError {
+    #[error("not a DER PKCS#10 CSR")]
+    NotPkcs10(#[source] x509_cert::der::Error),
+    #[error("unreadable public key")]
+    UnreadableKey(#[source] x509_cert::der::Error),
+    #[error("not a P-256 public key")]
+    NotP256(#[source] p256::pkcs8::spki::Error),
+    #[error("signed with {0}, not ecdsa-with-SHA256")]
+    Algorithm(ObjectIdentifier),
+    #[error("malformed signature")]
+    MalformedSignature,
+    #[error("unreadable request info")]
+    UnreadableInfo(#[source] x509_cert::der::Error),
+    #[error("the self-signature does not verify")]
+    BadSignature,
+}
+
 /// The checks behind `verify_csr`, each failure saying which one failed.
-fn verify(csr_der: &[u8]) -> std::result::Result<VerifiedCsr, String> {
-    let request = CertReq::from_der(csr_der).map_err(|e| format!("not a DER PKCS#10 CSR: {e}"))?;
+fn verify(csr_der: &[u8]) -> std::result::Result<VerifiedCsr, CsrError> {
+    let request = CertReq::from_der(csr_der).map_err(CsrError::NotPkcs10)?;
     let spki_der = request
         .info
         .public_key
         .to_der()
-        .map_err(|e| format!("unreadable public key: {e}"))?;
+        .map_err(CsrError::UnreadableKey)?;
     // Checks the id-ecPublicKey algorithm and the secp256r1 curve too.
-    let key = p256::PublicKey::from_public_key_der(&spki_der)
-        .map_err(|e| format!("not a P-256 public key: {e}"))?;
+    let key = p256::PublicKey::from_public_key_der(&spki_der).map_err(CsrError::NotP256)?;
     if request.algorithm.oid != ECDSA_WITH_SHA256 {
-        return Err(format!(
-            "signed with {}, not ecdsa-with-SHA256",
-            request.algorithm.oid
-        ));
+        return Err(CsrError::Algorithm(request.algorithm.oid));
     }
     let signature = request
         .signature
         .as_bytes()
-        .ok_or("the signature is not a whole number of bytes")
-        .and_then(|bytes| DerSignature::try_from(bytes).map_err(|_| "malformed signature"))
-        .map_err(str::to_string)?;
-    let signed = request
-        .info
-        .to_der()
-        .map_err(|e| format!("unreadable request info: {e}"))?;
+        .and_then(|bytes| DerSignature::try_from(bytes).ok())
+        .ok_or(CsrError::MalformedSignature)?;
+    let signed = request.info.to_der().map_err(CsrError::UnreadableInfo)?;
     VerifyingKey::from(key)
         .verify(&signed, &signature)
-        .map_err(|_| "the self-signature does not verify".to_string())?;
+        .map_err(|_| CsrError::BadSignature)?;
     Ok(VerifiedCsr {
         public_key_fingerprint: Sha256::digest(&spki_der)
             .iter()

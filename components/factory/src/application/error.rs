@@ -6,6 +6,8 @@ pub enum Error {
     Keygen,
     #[error("invalid certificate signing request")]
     InvalidCsr,
+    #[error("failed to check the certificate signing request")]
+    VerifyCsr,
     #[error("failed to provision a factory device credential")]
     Provision,
     #[error(
