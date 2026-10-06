@@ -6,6 +6,11 @@
 //! these constants come into play for cluster addressing.
 
 pub(crate) const MAGIC: [u8; 4] = *b"QFI\xfb";
+
+/// The cluster sizes QEMU itself accepts (512 B..=2 MiB): anything else is
+/// a corrupt or hostile header, not an image to size buffers from.
+pub(crate) const MIN_CLUSTER_BITS: u32 = 9;
+pub(crate) const MAX_CLUSTER_BITS: u32 = 21;
 pub(crate) const V2_HEADER_LEN: usize = 72;
 pub(crate) const V3_HEADER_LEN: usize = 104;
 
@@ -31,6 +36,7 @@ pub(crate) struct Header {
     pub l1_table_offset: u64,
     pub refcount_table_offset: u64,
     pub refcount_table_clusters: u32,
+    pub nb_snapshots: u32,
     pub incompatible_features: u64,
     pub refcount_order: u32,
 }
@@ -67,6 +73,7 @@ impl Header {
             l1_table_offset: u64_at(40),
             refcount_table_offset: u64_at(48),
             refcount_table_clusters: u32_at(56),
+            nb_snapshots: u32_at(60),
             incompatible_features: 0,
             refcount_order: 4,
         };
@@ -95,7 +102,7 @@ impl Header {
         buf[40..48].copy_from_slice(&self.l1_table_offset.to_be_bytes());
         buf[48..56].copy_from_slice(&self.refcount_table_offset.to_be_bytes());
         buf[56..60].copy_from_slice(&self.refcount_table_clusters.to_be_bytes());
-        buf[60..64].copy_from_slice(&0u32.to_be_bytes()); // nb_snapshots
+        buf[60..64].copy_from_slice(&self.nb_snapshots.to_be_bytes());
         buf[64..72].copy_from_slice(&0u64.to_be_bytes()); // snapshots_offset
         buf[72..80].copy_from_slice(&self.incompatible_features.to_be_bytes());
         buf[80..88].copy_from_slice(&0u64.to_be_bytes()); // compatible_features
@@ -126,6 +133,7 @@ mod tests {
             l1_table_offset: 65536,
             refcount_table_offset: 131072,
             refcount_table_clusters: 1,
+            nb_snapshots: 0,
             incompatible_features: 0,
             refcount_order: 4,
         };
