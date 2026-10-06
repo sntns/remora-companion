@@ -2846,7 +2846,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -3293,8 +3292,6 @@ dependencies = [
  "remora-factory",
  "remora-progress",
  "remora-tui",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]

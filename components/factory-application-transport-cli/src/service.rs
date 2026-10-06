@@ -75,7 +75,7 @@ pub async fn run(
                 .map_err(|e| Report::new(Error::InvalidSerial(e)))?;
             let (sink, stream) = remora_progress::channel();
             let follow = remora_tui::follow(stream);
-            let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
+            let ctx = OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
             let result = service
                 .provision(over, &serial, access_url.as_deref(), &output, &ctx)
                 .await;
