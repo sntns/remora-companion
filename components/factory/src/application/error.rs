@@ -2,8 +2,6 @@
 pub enum Error {
     #[error("{0}")]
     Context(String),
-    #[error("{0}")]
-    InvalidSerial(crate::model::DeviceSerialError),
     #[error("failed to generate a device keypair and CSR")]
     Keygen,
     #[error("failed to provision a factory device credential")]

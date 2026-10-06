@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 
-use error_stack::Report;
+use error_stack::ResultExt;
 use remora_context::model::ContextOverride;
-use remora_factory::{
-    application::{Error, FactoryService, Result},
-    model::DeviceSerial,
-};
+use remora_factory::{application::FactoryService, model::DeviceSerial};
 use remora_progress::OperationContext;
+
+use crate::error::{provision_error, Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -72,7 +71,7 @@ pub async fn run(
             access_url,
         } => {
             let serial = DeviceSerial::from_parts(device_name, serial_policy, force)
-                .map_err(|e| Report::new(Error::InvalidSerial(e)))?;
+                .change_context(Error::InvalidSerial)?;
             let (sink, stream) = remora_progress::channel();
             let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
@@ -81,7 +80,7 @@ pub async fn run(
                 .await;
             drop(ctx);
             follow.finish(&result).await;
-            let device = result?;
+            let device = result.map_err(provision_error)?;
 
             // The serial alone on stdout, so a label printer (or a script)
             // can consume it; the human-readable summary goes to stderr.

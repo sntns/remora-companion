@@ -3308,6 +3308,7 @@ dependencies = [
  "remora-factory",
  "remora-progress",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
