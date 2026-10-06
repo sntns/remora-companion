@@ -4,8 +4,8 @@ pub enum Error {
     Request,
     #[error("{0} was already manufactured (pass --force to re-sign it and revoke its old IDevID)")]
     AlreadyExists(String),
-    #[error("factory-device provisioning was refused: {0}")]
-    Refused(String),
+    #[error("factory-device provisioning was refused")]
+    Refused,
     #[error("failed to parse the platform's response")]
     ParseResponse,
 }
