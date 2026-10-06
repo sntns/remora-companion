@@ -92,6 +92,17 @@ pub fn warning(message: impl std::fmt::Display) {
     }
 }
 
+/// Something the operator must not miss: the terminal bell, then the
+/// message as an error line -- though nothing failed in the program.
+pub fn alert(message: impl std::fmt::Display) {
+    eprint!("\x07");
+    if decorated() {
+        let _ = cliclack::log::error(style(message).red().bold());
+    } else {
+        eprintln!("alert: {message}");
+    }
+}
+
 /// A titled block of detail lines, e.g. a context's settings.
 pub fn note(title: impl std::fmt::Display, body: impl std::fmt::Display) {
     if decorated() {

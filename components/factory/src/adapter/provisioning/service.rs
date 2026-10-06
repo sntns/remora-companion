@@ -6,7 +6,7 @@ use crate::model::DeviceSerial;
 /// What the platform's factory-device call hands back, before the
 /// locally-generated private key is added at the application layer (see
 /// `crate::model::FactoryCredential`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionedIdentity {
     /// The serial actually issued -- allocated by the platform for
     /// `DeviceSerial::FromPolicy`, echoed back for `Explicit`. Also the

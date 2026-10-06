@@ -1,5 +1,5 @@
 use super::error::Result;
-use crate::model::PrivateKey;
+use crate::model::{PrivateKey, VerifiedCsr};
 
 /// A freshly generated device keypair, as far as provisioning needs it: the
 /// CSR to send to the platform, and the private key to keep. No `Clone`:
@@ -20,6 +20,12 @@ pub trait DeviceKeyAdapter: Send + Sync {
     /// when given (the platform ignores the subject; it only keeps the
     /// artifacts readable) and empty otherwise.
     async fn generate(&self, common_name: Option<&str>) -> Result<DeviceKey>;
+
+    /// Checks a CSR made elsewhere (a device that keeps its own key) the
+    /// way the platform will: a DER PKCS#10 request for a P-256 key,
+    /// self-signed by that key. Anything else is `Error::InvalidCsr`, with
+    /// what was wrong attached.
+    async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr>;
 }
 
 /// Injectable handle to whatever `DeviceKeyAdapter` was wired at startup.

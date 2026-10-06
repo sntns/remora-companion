@@ -1,0 +1,15 @@
+[package]
+name = "remora-station-application"
+description = "Use-case implementation for the station vertical: claims, idempotence, quota, the labelling queue, presence and hooks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-station = { path = "../station" }
+remora-context = { path = "../context" }
+remora-factory = { path = "../factory" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true

@@ -348,6 +348,65 @@ The resulting `remora-factory.yaml` is bundled into an image with
 `identity create`. As a `factory-provision` batch step, `"context"` picks
 the context, else the batch's own.
 
+### Run a provisioning station
+
+```
+remora-etcher -c factory station serve --config station.yaml
+```
+
+For hubs made by cloning one SD card: each one boots on the workshop
+network, claims an identity from the station (`POST /v1/claims` on port
+8484, plain HTTP, the CSR of a key it keeps), and gets one at once from
+the platform, as the selected context -- the same permissions as `factory
+provision`, a dedicated access-key context recommended. Labelling is one
+hub at a time: the station activates the oldest one, whose LED turns
+steady, its `label.d` hooks print the label, and the operator sticks it on
+that hub and scans it. A scan that isn't its serial is refused (bell, red
+line, nothing validated); a matching one validates it, the hub writes its
+identity and reboots, and the next hub's LED turns steady. Commands, then
+Enter: `r` reprint, `s` skip (to the end of the queue), `f` validate despite
+a failed print (the scan is still required), `q` quit.
+
+```yaml
+# station.yaml -- relative paths are from this file's directory
+listen: 0.0.0.0:8484
+journal: ./station.jsonl          # reloaded at start
+hooks: ./station.d                # <event>.d/ directories; must exist
+max-claims: 50                    # optional: at most this many per run
+confirm: scan                     # scan | key (Enter alone: bench only)
+presence-timeout: 10s             # an active hub this silent is requeued
+hook-timeout: 60s
+boards:                           # any other board is refused
+  hub-v2:
+    create-factory-device:
+      serial-number-policy: hubs-v2
+  hub-v1:
+    create-factory-device:
+      device-name: "{bsp_serial}"  # or {eth_mac}, {temp_hostname}, {board}
+```
+
+Every key has its option (`--listen`, `--journal`, `--hooks`,
+`--max-claims`, `--confirm`, `--presence-timeout`, `--hook-timeout`,
+`--serial-policy BOARD=POLICY`, `--device-name BOARD=TEMPLATE`), which wins
+over the file. Each issued serial is printed on stdout; the dashboard is on
+stderr. The journal (one JSON object per transition) is the production
+register -- serial, MACs, BSP serial, machine-id, date, context -- and the
+station's memory: a hub retrying with the same key, or a restarted station,
+gets the identity already issued, never a second serial. Hooks are
+run-parts style: the executables of `issued.d`, `label.d` (blocking: the
+label can't be validated until they succeed), `labelled.d`, `installed.d`
+and `failed.d`, in lexical order, with the event as `$1`, the claim as JSON
+on stdin and as `REMORA_*` variables (`REMORA_SERIAL`, `REMORA_BOARD`,
+`REMORA_ETH_MAC`, `REMORA_ATTEMPT`...).
+
+```
+remora-etcher station simulate --url http://127.0.0.1:8484 --board hub-virtual --output remora-factory.yaml
+```
+
+Plays a hub against a station: a key, a claim, the LED on stderr, and
+once labelled its `remora-factory.yaml` (as `factory provision` writes it)
+and the acknowledgement.
+
 ### Convert between image formats
 
 ```
@@ -368,7 +427,7 @@ wic image, and Windows/macOS disk support.
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
-`config`, `convert`, `batch` and `factory` for remora-etcher, `context`,
+`config`, `convert`, `batch`, `factory` and `station` for remora-etcher, `context`,
 `channel`, `ota` and `device` for rmra, `update` (and `context`) for both. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each
 is split further into:

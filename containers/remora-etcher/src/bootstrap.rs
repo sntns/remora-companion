@@ -48,6 +48,17 @@ use remora_image_application::ImageControllerImpl;
 use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
 use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
 use remora_squashfs_application::SquashfsControllerImpl;
+use remora_station::{
+    adapter::{
+        hooks::HookRunnerAdapterService, journal::JournalAdapterService,
+        operator::OperatorAdapterService,
+    },
+    application::StationService,
+};
+use remora_station_adapter_hooks_process::ProcessHookRunnerImpl;
+use remora_station_adapter_jsonl::JsonlJournalImpl;
+use remora_station_adapter_operator_tui::TuiOperatorImpl;
+use remora_station_application::StationControllerImpl;
 use remora_update::{
     adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},
     application::UpdateService,
@@ -70,6 +81,11 @@ pub struct Services {
     pub convert: ConvertService,
     pub batch: BatchService,
     pub factory: FactoryService,
+    pub station: StationService,
+    /// The factory's own key and credential adapters, which `station
+    /// simulate` uses as a hub would its own code.
+    pub device_keys: DeviceKeyAdapterService,
+    pub credential_writer: CredentialWriterAdapterService,
     pub update: UpdateService,
 }
 
@@ -327,15 +343,56 @@ pub async fn wire() -> Services {
     container
         .set_type(FactoryService::new(FactoryControllerImpl::new(
             context.clone(),
-            device_keys,
+            device_keys.clone(),
             provisioning,
-            credential_writer,
+            credential_writer.clone(),
         )))
         .await;
     let factory = container
         .get_type::<FactoryService>()
         .await
         .expect("FactoryService was just registered");
+
+    // The provisioning station issues through the factory vertical, as the
+    // context its `serve` selects; its journal, hooks and operator console
+    // are its own.
+    container
+        .set_type(JournalAdapterService::new(JsonlJournalImpl::new()))
+        .await;
+    let journal = container
+        .get_type::<JournalAdapterService>()
+        .await
+        .expect("JournalAdapterService was just registered");
+
+    container
+        .set_type(HookRunnerAdapterService::new(ProcessHookRunnerImpl))
+        .await;
+    let hooks = container
+        .get_type::<HookRunnerAdapterService>()
+        .await
+        .expect("HookRunnerAdapterService was just registered");
+
+    container
+        .set_type(OperatorAdapterService::new(TuiOperatorImpl::new()))
+        .await;
+    let operator = container
+        .get_type::<OperatorAdapterService>()
+        .await
+        .expect("OperatorAdapterService was just registered");
+
+    container
+        .set_type(StationService::new(StationControllerImpl::new(
+            context.clone(),
+            factory.clone(),
+            journal,
+            hooks,
+            operator,
+        )))
+        .await;
+    let station = container
+        .get_type::<StationService>()
+        .await
+        .expect("StationService was just registered");
 
     // Pure orchestration over the other verticals' already-wired services:
     // no adapter of its own.
@@ -397,6 +454,9 @@ pub async fn wire() -> Services {
         convert,
         batch,
         factory,
+        station,
+        device_keys,
+        credential_writer,
         update,
     }
 }

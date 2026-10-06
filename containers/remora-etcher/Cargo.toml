@@ -58,6 +58,12 @@ remora-context-adapter-grpc = { path = "../../components/context-adapter-grpc" }
 remora-context-application-transport-cli = { path = "../../components/context-application-transport-cli" }
 remora-factory-application = { path = "../../components/factory-application" }
 remora-factory-application-transport-cli = { path = "../../components/factory-application-transport-cli" }
+remora-station = { path = "../../components/station" }
+remora-station-application = { path = "../../components/station-application" }
+remora-station-adapter-jsonl = { path = "../../components/station-adapter-jsonl" }
+remora-station-adapter-hooks-process = { path = "../../components/station-adapter-hooks-process" }
+remora-station-adapter-operator-tui = { path = "../../components/station-adapter-operator-tui" }
+remora-station-application-transport-cli = { path = "../../components/station-application-transport-cli" }
 remora-update = { path = "../../components/update" }
 remora-update-application = { path = "../../components/update-application" }
 remora-update-adapter-github = { path = "../../components/update-adapter-github" }
@@ -71,6 +77,19 @@ busybody.workspace = true
 tokio.workspace = true
 clap.workspace = true
 tracing = "0.1"
+
+[dev-dependencies]
+# `station serve` and `station simulate` end to end, as shipped, against
+# the in-process fake gateway; the resulting remora-factory.yaml is read
+# the way remora-edge reads it.
+remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["net", "process", "io-util", "macros"] }
+tempfile.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+yaml_serde.workspace = true
+p256.workspace = true
+pem.workspace = true
 
 [dependencies.tracing-subscriber]
 version = "0.3"

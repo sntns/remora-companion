@@ -4,6 +4,8 @@ pub enum Error {
     Context(String),
     #[error("failed to generate a device keypair and CSR")]
     Keygen,
+    #[error("invalid certificate signing request")]
+    InvalidCsr,
     #[error("failed to provision a factory device credential")]
     Provision,
     #[error(

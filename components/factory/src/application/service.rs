@@ -4,7 +4,10 @@ use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use super::error::Result;
-use crate::model::{DeviceSerial, ProvisionedDevice};
+use crate::{
+    adapter::provisioning::ProvisionedIdentity,
+    model::{DeviceSerial, ProvisionedDevice, VerifiedCsr},
+};
 
 /// The factory vertical's application-facing port: manufacture a device --
 /// generate a local keypair + CSR, request a factory-device credential
@@ -55,6 +58,24 @@ pub trait FactoryServiceInterface: Send + Sync {
         output: &Path,
         ctx: &OperationContext,
     ) -> Result<ProvisionedDevice>;
+
+    /// Manufactures a device that generated its own key: `csr_der` is its
+    /// DER PKCS#10 request, checked first (see `verify_csr`) so a bad one
+    /// is refused as `Error::InvalidCsr` without a platform call. Nothing
+    /// is written: the identity goes back to the caller, whose device
+    /// holds the private key. Its `access_url` is never empty -- an empty
+    /// one from the platform fails as `Error::MissingAccessUrl`, there
+    /// being no override here.
+    async fn provision_csr(
+        &self,
+        over: Option<&ContextOverride>,
+        serial: &DeviceSerial,
+        csr_der: &[u8],
+    ) -> Result<ProvisionedIdentity>;
+
+    /// Checks a CSR the way `provision_csr` does, without provisioning:
+    /// PKCS#10, a P-256 key, a valid self-signature.
+    async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr>;
 }
 
 /// Injectable handle to whatever `FactoryServiceInterface` implementation
