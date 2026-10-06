@@ -2,20 +2,14 @@
 pub enum Error {
     #[error("{0}")]
     Context(String),
-    #[error("{0}")]
-    InvalidSerial(crate::model::DeviceSerialError),
-    #[error("failed to generate a device keypair")]
+    #[error("failed to generate a device keypair and CSR")]
     Keygen,
-    #[error("failed to build a certificate signing request")]
-    Csr,
     #[error("failed to provision a factory device credential")]
     Provision,
     #[error(
         "the platform did not return an access URL for this deployment, and no --access-url override was given"
     )]
     MissingAccessUrl,
-    #[error("failed to render remora-factory.yaml")]
-    Render,
     #[error("failed to write {0}")]
     WriteOutput(std::path::PathBuf),
     #[error("factory provisioning was cancelled")]

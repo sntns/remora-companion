@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use error_stack::{Report, ResultExt};
+use error_stack::ResultExt;
 use remora_batch::{application::BatchService, model::BatchStep};
 use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
@@ -30,14 +30,14 @@ pub async fn run(
     match command {
         Command::Run { recipe } => {
             let contents = std::fs::read_to_string(&recipe)
-                .map_err(|_| Report::new(Error::ReadRecipe(recipe.clone())))?;
+                .change_context_lazy(|| Error::ReadRecipe(recipe.clone()))?;
             let steps: Vec<BatchStep> = serde_json::from_str(&contents)
-                .map_err(|_| Report::new(Error::ParseRecipe(recipe.clone())))?;
+                .change_context_lazy(|| Error::ParseRecipe(recipe.clone()))?;
             let step_count = steps.len();
 
             let (sink, stream) = remora_progress::channel();
             let follow = remora_tui::follow(stream);
-            let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
+            let ctx = OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
             let result = service.run(steps, over, &ctx).await;
             drop(ctx);
             follow.finish(&result).await;
@@ -96,6 +96,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("failed to read recipe file"));
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::NotFound),
+            "the io error is kept as the cause"
+        );
     }
 
     #[tokio::test]
@@ -112,6 +118,11 @@ mod tests {
         .await
         .unwrap_err();
         assert!(format!("{err:?}").contains("as a batch recipe"));
+        // The parser's own error is kept as the cause: it says where.
+        let cause = err
+            .downcast_ref::<serde_json::Error>()
+            .expect("the serde error is kept as the cause");
+        assert_eq!((cause.line(), cause.column()), (1, 2));
         let _ = std::fs::remove_file(&recipe);
     }
 

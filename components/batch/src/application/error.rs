@@ -2,6 +2,8 @@
 pub enum Error {
     #[error("step {index} ({kind}) failed")]
     Step { index: usize, kind: &'static str },
+    #[error("step {index} ({kind}) is invalid")]
+    InvalidStep { index: usize, kind: &'static str },
     #[error("batch was cancelled")]
     Cancelled,
 }

@@ -2,6 +2,8 @@
 pub enum Error {
     #[error("{0}")]
     Update(String),
+    #[error("this build's version {0:?} is not a release version, so it can't be compared to one")]
+    Version(String),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

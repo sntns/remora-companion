@@ -12,16 +12,14 @@ remora-progress = { path = "../progress" }
 remora-context = { path = "../context" }
 error-stack.workspace = true
 async-trait.workspace = true
-rcgen.workspace = true
-p256.workspace = true
-pem.workspace = true
 
 [dev-dependencies]
-# Only to *verify* a real platform-issued certificate set in one
-# integration test (chain, SAN, EKU, key match) -- production code never
-# parses/verifies these certificates itself, the device does that later.
-x509-parser = { version = "0.18", features = ["verify"] }
-base64.workspace = true
+# The real local adapters (keypair + CSR, remora-factory.yaml): the use case
+# runs end to end, only the platform call is stubbed. Rendering details are
+# tested in the adapter crate itself.
+remora-factory-adapter-local = { path = "../factory-adapter-local" }
+p256.workspace = true
+pem.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }

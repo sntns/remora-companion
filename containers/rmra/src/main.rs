@@ -137,13 +137,16 @@ async fn run() {
             args,
             "Contexts, devices, releases and deployments complete with Tab.",
         ),
-        Commands::Update(args) => {
-            let app = remora_update::model::App::running(PROGRAM, env!("CARGO_PKG_VERSION"));
-            exit_on_error(
-                remora_update_application_transport_cli::run(args, &services.update, &app).await,
-                verbose,
+        Commands::Update(args) => exit_on_error(
+            remora_update_application_transport_cli::run(
+                args,
+                &services.update,
+                PROGRAM,
+                env!("CARGO_PKG_VERSION"),
             )
-        }
+            .await,
+            verbose,
+        ),
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
             verbose,

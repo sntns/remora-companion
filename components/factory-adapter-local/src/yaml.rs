@@ -1,7 +1,7 @@
 use error_stack::Report;
 use p256::pkcs8::DecodePrivateKey;
 use p256::SecretKey;
-use remora_factory::{application::Error, model::FactoryCredential};
+use remora_factory::{adapter::credential::Error, model::FactoryCredential};
 
 /// Render a `remora-factory.yaml` matching `remora-edge`'s actual parser
 /// (`FactoryIdentity` in `access-application/src/configuration.rs`, which
@@ -20,7 +20,7 @@ pub(crate) fn render(
     credential: &FactoryCredential,
     access_url: &str,
 ) -> Result<String, Report<Error>> {
-    let key_pem = sec1_pem(&credential.private_key_der)?;
+    let key_pem = sec1_pem(credential.private_key.pkcs8_der())?;
     let certificate_pem = encode_certificate_pem(&credential.certificate_der);
     let authority_pem = encode_certificate_pem(&credential.certificate_authority_der);
     let server_authority_pem = encode_certificate_pem(&credential.server_certificate_authority_der);

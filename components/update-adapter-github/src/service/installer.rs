@@ -24,7 +24,7 @@ impl DistInstallerImpl {
     /// `repo` is `owner/name` of the releases repo.
     pub fn new(repo: &str) -> Self {
         Self {
-            client: crate::feed::client(),
+            client: super::feed::client(),
             downloads: format!("https://github.com/{repo}/releases/download"),
             receipts: None,
         }
@@ -33,7 +33,7 @@ impl DistInstallerImpl {
     /// Against another download root and receipt directory, e.g. in tests.
     pub fn with_locations(downloads: &str, receipts: PathBuf) -> Self {
         Self {
-            client: crate::feed::client(),
+            client: super::feed::client(),
             downloads: downloads.trim_end_matches('/').to_owned(),
             receipts: Some(receipts),
         }

@@ -1,7 +1,3 @@
-mod error;
-mod service;
-
-pub use error::{Error, Result};
-pub use service::{
-    FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity,
-};
+pub mod credential;
+pub mod key;
+pub mod provisioning;

@@ -131,10 +131,7 @@ impl BatchServiceInterface for BatchControllerImpl {
                     output,
                 } => {
                     let serial = DeviceSerial::from_parts(device_name, serial_number_policy, force)
-                        .map_err(|e| {
-                            Report::new(remora_factory::application::Error::InvalidSerial(e))
-                        })
-                        .change_context(Error::Step { index, kind })?;
+                        .change_context(Error::InvalidStep { index, kind })?;
                     let step_over = context.map(|name| ContextOverride {
                         name,
                         source: Selection::Flag,

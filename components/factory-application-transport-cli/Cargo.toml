@@ -13,5 +13,4 @@ remora-factory = { path = "../factory" }
 remora-progress = { path = "../progress" }
 clap.workspace = true
 error-stack.workspace = true
-tokio.workspace = true
-tokio-util.workspace = true
+thiserror.workspace = true
