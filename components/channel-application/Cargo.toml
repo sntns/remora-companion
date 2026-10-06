@@ -13,10 +13,10 @@ async-trait.workspace = true
 error-stack.workspace = true
 ssh-key.workspace = true
 rand_core.workspace = true
-tempfile.workspace = true
 
 [dev-dependencies]
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 remora-channel-adapter-openssh = { path = "../channel-adapter-openssh" }
 tokio.workspace = true
+tempfile.workspace = true

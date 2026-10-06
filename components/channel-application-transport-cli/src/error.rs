@@ -2,8 +2,6 @@
 pub enum Error {
     #[error("{0}")]
     Channel(String),
-    #[error("the {0:?} profile is a datagram channel, which this version cannot relay yet")]
-    Datagram(String),
     #[error("the connection to {0} was lost")]
     Relay(String),
     #[error("the channel did not finish within {0} s of a hangup")]

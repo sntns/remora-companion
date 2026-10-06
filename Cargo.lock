@@ -2857,8 +2857,8 @@ dependencies = [
  "busybody",
  "error-stack",
  "remora-context",
- "tempfile",
  "thiserror 1.0.69",
+ "zeroize",
 ]
 
 [[package]]
@@ -2883,6 +2883,7 @@ dependencies = [
  "error-stack",
  "libc",
  "remora-channel",
+ "tempfile",
  "tokio",
 ]
 

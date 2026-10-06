@@ -89,42 +89,50 @@ pub struct SshCommand {
     pub arguments: Vec<String>,
 }
 
-/// An ssh session ready to run: certified, its key material written to a
-/// private temporary directory that is removed when this is dropped --
-/// however the session ends.
+/// A session's key material: the throwaway private key, the certificate
+/// the platform issued for it, and the device host authority to trust.
+/// Values, not files: writing them where the client can read them -- and
+/// removing them however the session ends -- is the ssh client port's job.
+///
+/// No `Debug`: it holds a private key, and error reports print with `{:?}`.
+/// The key is wiped from memory when this drops.
+pub struct SshKeys {
+    private_key: zeroize::Zeroizing<String>,
+    /// The user certificate, OpenSSH format.
+    pub certificate: String,
+    /// `@cert-authority` lines pinning the device's host certificate.
+    pub known_hosts: String,
+}
+
+impl SshKeys {
+    pub fn new(
+        private_key: zeroize::Zeroizing<String>,
+        certificate: String,
+        known_hosts: String,
+    ) -> Self {
+        Self {
+            private_key,
+            certificate,
+            known_hosts,
+        }
+    }
+
+    /// The private key, OpenSSH PEM.
+    pub fn private_key(&self) -> &str {
+        &self.private_key
+    }
+}
+
+/// An ssh session ready to run: certified, its pinned command line built.
+/// The key material travels with it, for the ssh client port to hand over.
 pub struct PreparedSsh {
     pub context: String,
     pub device: String,
     pub login: String,
     pub host_key_alias: String,
     pub role: SshRole,
+    /// The client and its arguments, without the key material's own
+    /// options (identity, certificate, known hosts): the port adds them.
     pub command: SshCommand,
-    workdir: tempfile::TempDir,
-}
-
-impl PreparedSsh {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        context: String,
-        device: String,
-        login: String,
-        host_key_alias: String,
-        role: SshRole,
-        command: SshCommand,
-        workdir: tempfile::TempDir,
-    ) -> Self {
-        Self {
-            context,
-            device,
-            login,
-            host_key_alias,
-            role,
-            command,
-            workdir,
-        }
-    }
-
-    pub fn workdir(&self) -> &std::path::Path {
-        self.workdir.path()
-    }
+    pub keys: SshKeys,
 }

@@ -161,6 +161,8 @@ comfy-table = "7"
 ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 tempfile = "3"
+# The throwaway ssh key's PEM, wiped from memory once a session is over.
+zeroize = "1"
 
 # am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
 # aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes

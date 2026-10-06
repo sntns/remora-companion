@@ -1,11 +1,10 @@
 use std::{path::PathBuf, sync::Arc};
 
-use error_stack::{Report, ResultExt};
+use error_stack::ResultExt;
 use remora_channel::{
     application::ChannelService,
     model::{
-        ChannelKind, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshRequest,
-        SshRole, SSH_PROFILE,
+        PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshRequest, SshRole, SSH_PROFILE,
     },
 };
 use remora_context::model::ContextOverride;
@@ -94,9 +93,8 @@ pub struct ScpArgs {
     #[arg(value_hint = clap::ValueHint::ExecutablePath)]
     binary: PathBuf,
     /// scp's own arguments: options (-r, -p, -l ...), then the files, the
-    /// device side written [user@]DEVICE:path. One device per copy. `-c` and
-    /// `-v` are rmra's own (--context, --verbose); for scp's, pass them after
-    /// `--`. -J, -F, -S and
+    /// device side written [user@]DEVICE:path. One device per copy. `-v` is
+    /// rmra's own --verbose; for scp's, pass it after `--`. -J, -F, -S and
     /// -o ProxyCommand/ProxyJump are refused: they would bypass the channel
     /// or the host pinning.
     #[arg(
@@ -126,11 +124,13 @@ impl From<Role> for SshRole {
 
 /// Runs a `channel` subcommand; returns the process exit code.
 ///
-/// `verbose` adds debug detail on stderr (see [`run_ssh`]).
+/// `program` is the running binary's name, for the line a quiet `open`
+/// fails with; `verbose` adds debug detail on stderr (see [`run_ssh`]).
 pub async fn run(
     command: Command,
     service: &ChannelService,
     over: Option<&ContextOverride>,
+    program: &str,
     verbose: bool,
 ) -> Result<i32> {
     match command {
@@ -143,11 +143,9 @@ pub async fn run(
             match opened {
                 Ok(()) => Ok(0),
                 // As a ProxyCommand, this process shares the terminal with
-                // ssh, which has put it in raw mode: decorated multi-line
-                // output would stair-step across the screen. One plain line,
-                // with explicit carriage returns, reads right either way.
+                // ssh, which has put it in raw mode.
                 Err(report) if quiet => {
-                    eprint!("\r\nrmra: {}\r\n", tui::one_line(&report, verbose));
+                    tui::raw_error(program, tui::one_line(&report, verbose));
                     Ok(255)
                 }
                 Err(report) => Err(report),
@@ -169,9 +167,6 @@ async fn open(
         .open(over, device, profile)
         .await
         .map_err(channel_error)?;
-    if channel.opened.kind == ChannelKind::Datagram {
-        return Err(Report::new(Error::Datagram(profile.to_owned())));
-    }
     if !quiet {
         tui::success(format!(
             "Channel open to {} {}",
@@ -188,8 +183,8 @@ async fn open(
 /// Silent on success: a spinner while the key is certified, cleared before
 /// ssh takes the terminal, so the session starts on a clean screen like
 /// plain `ssh`. `verbose` prints what the session was set up with instead
-/// (context, role, login, host alias, key directory, the ssh command line),
-/// for when a login doesn't go through.
+/// (context, role, login, host alias, the ssh command line), for when a
+/// login doesn't go through.
 pub async fn run_ssh(
     args: SshArgs,
     service: &ChannelService,
@@ -293,20 +288,19 @@ async fn run_prepared(
     drop(spinner);
 
     if verbose {
-        let debug = |label: &str, value: &str| {
-            eprintln!("{} {label:<9} {value}", tui::dim("debug:"));
-        };
-        debug("context", &prepared.context);
-        debug("device", &prepared.device);
-        debug("role", prepared.role.as_str());
-        debug(
+        tui::debug("context", &prepared.context);
+        tui::debug("device", &prepared.device);
+        tui::debug("role", prepared.role.as_str());
+        tui::debug(
             "login",
-            &format!("{}@{}", prepared.login, prepared.host_key_alias),
+            format!("{}@{}", prepared.login, prepared.host_key_alias),
         );
-        debug("keys", &prepared.workdir().display().to_string());
-        debug(
+        // The key material's own options (-i, CertificateFile,
+        // UserKnownHostsFile) go first, once the client port has written it.
+        tui::debug(
             "command",
-            &std::iter::once(prepared.command.program.display().to_string())
+            std::iter::once(prepared.command.program.display().to_string())
+                .chain(["-i <throwaway key> …".to_owned()])
                 .chain(prepared.command.arguments.iter().map(|a| quote(a)))
                 .collect::<Vec<_>>()
                 .join(" "),

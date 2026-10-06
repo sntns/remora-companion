@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use error_stack::{Report, ResultExt};
 use remora_channel::{
     adapter::{
@@ -8,8 +6,8 @@ use remora_channel::{
     },
     application::{ChannelServiceInterface, Error, Result},
     model::{
-        PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate, SshCommand,
-        SshRequest, SshRole,
+        ChannelKind, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate,
+        SshCommand, SshKeys, SshRequest, SshRole,
     },
 };
 use remora_context::{
@@ -42,11 +40,12 @@ impl ChannelControllerImpl {
         }
     }
 
-    /// What every ssh-family session needs: a throwaway ed25519 key in a
-    /// private directory, certified for `role` on `device`, and the options
-    /// that pin ssh to the device's channel, host authority and that
-    /// certificate -- followed by the caller's own `-o` options, which come
-    /// after so ssh (first value wins) never lets them loosen the pinning.
+    /// What every ssh-family session needs: a throwaway ed25519 key,
+    /// certified for `role` on `device`, and the options that pin ssh to the
+    /// device's channel, host authority and that certificate -- followed by
+    /// the caller's own `-o` options, which come after so ssh (first value
+    /// wins) never lets them loosen the pinning. The key material's own
+    /// options are the ssh client port's, which writes it.
     async fn certify(
         &self,
         over: Option<&ContextOverride>,
@@ -57,46 +56,21 @@ impl ChannelControllerImpl {
     ) -> Result<Session> {
         let context = self.resolve(over).await?;
 
-        // 0700 and removed when the PreparedSsh drops: it holds a private
-        // key, even if one that is worthless in a few minutes.
-        let mut builder = tempfile::Builder::new();
-        builder.prefix("rmra-ssh-");
-        // Explicitly: tempfile only applies the umask, which is 0775 for
-        // many users.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            builder.permissions(std::fs::Permissions::from_mode(0o700));
-        }
-        let workdir = builder.tempdir().change_context(Error::Workdir)?;
-
         let key =
             PrivateKey::random(&mut OsRng, Algorithm::Ed25519).change_context(Error::Keygen)?;
         let public_key = key
             .public_key()
             .to_openssh()
             .change_context(Error::Keygen)?;
-        let identity = workdir.path().join("id_ed25519");
         let private_pem = key
             .to_openssh(LineEnding::LF)
             .change_context(Error::Keygen)?;
-        write_private(&identity, private_pem.as_bytes())?;
 
         let certified = self
             .gateway
             .sign_ssh_certificate(&context, device, &public_key, role)
             .await
             .change_context_lazy(|| Error::Certify(device.to_owned()))?;
-        let certificate = workdir.path().join("id_ed25519-cert.pub");
-        write_private(
-            &certificate,
-            format!("{}\n", certified.certificate.trim_end()).as_bytes(),
-        )?;
-        let known_hosts = workdir.path().join("known_hosts");
-        write_private(
-            &known_hosts,
-            format!("{}\n", certified.known_hosts.trim_end()).as_bytes(),
-        )?;
 
         let proxy_command = proxy_command(&ProxyTarget {
             context: &context.context.name,
@@ -107,12 +81,6 @@ impl ChannelControllerImpl {
             format!("ProxyCommand={proxy_command}"),
             "-o".to_owned(),
             "IdentitiesOnly=yes".to_owned(),
-            "-i".to_owned(),
-            identity.display().to_string(),
-            "-o".to_owned(),
-            format!("CertificateFile={}", certificate.display()),
-            "-o".to_owned(),
-            format!("UserKnownHostsFile={}", known_hosts.display()),
             "-o".to_owned(),
             format!("GlobalKnownHostsFile={}", null_device()),
             "-o".to_owned(),
@@ -123,11 +91,16 @@ impl ChannelControllerImpl {
         for option in options {
             pinning.extend(["-o".to_owned(), option]);
         }
+        let keys = SshKeys::new(
+            private_pem,
+            certified.certificate.clone(),
+            certified.known_hosts.clone(),
+        );
         Ok(Session {
             context: context.context.name,
             certified,
             pinning,
-            workdir,
+            keys,
         })
     }
 
@@ -148,10 +121,17 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         profile: &str,
     ) -> Result<Channel> {
         let context = self.resolve(over).await?;
-        self.gateway
+        let channel = self
+            .gateway
             .open(&context, device, profile)
             .await
-            .change_context_lazy(|| Error::Open(device.to_owned()))
+            .change_context_lazy(|| Error::Open(device.to_owned()))?;
+        // Which kind a profile is, only the device knows; a datagram channel
+        // is closed (dropped) as soon as it is known to be one.
+        if channel.opened.kind == ChannelKind::Datagram {
+            return Err(Report::new(Error::Datagram(profile.to_owned())));
+        }
+        Ok(channel)
     }
 
     async fn prepare_ssh(&self, request: SshRequest) -> Result<PreparedSsh> {
@@ -179,18 +159,18 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         arguments.push(format!("{login}@{}", session.certified.host_key_alias));
         arguments.extend(split.command);
 
-        Ok(PreparedSsh::new(
-            session.context,
-            request.device,
+        Ok(PreparedSsh {
+            context: session.context,
+            device: request.device,
             login,
-            session.certified.host_key_alias,
-            request.role,
-            SshCommand {
+            host_key_alias: session.certified.host_key_alias,
+            role: request.role,
+            command: SshCommand {
                 program: request.binary,
                 arguments,
             },
-            session.workdir,
-        ))
+            keys: session.keys,
+        })
     }
 
     async fn prepare_scp(&self, request: ScpRequest) -> Result<PreparedSsh> {
@@ -256,28 +236,25 @@ impl ChannelServiceInterface for ChannelControllerImpl {
             Operand::Remote { path, .. } => format!("{login}@{alias}:{path}"),
         }));
 
-        Ok(PreparedSsh::new(
-            session.context,
+        Ok(PreparedSsh {
+            context: session.context,
             device,
             login,
-            alias,
-            request.role,
-            SshCommand {
+            host_key_alias: alias,
+            role: request.role,
+            command: SshCommand {
                 program: request.binary,
                 arguments,
             },
-            session.workdir,
-        ))
+            keys: session.keys,
+        })
     }
 
     async fn run_ssh(&self, prepared: PreparedSsh) -> Result<i32> {
-        let code = self
-            .ssh
-            .run(&prepared.command)
+        self.ssh
+            .run(&prepared.command, &prepared.keys)
             .await
-            .change_context(Error::Ssh)?;
-        drop(prepared);
-        Ok(code)
+            .change_context(Error::Ssh)
     }
 }
 
@@ -286,7 +263,7 @@ struct Session {
     context: String,
     certified: SshCertificate,
     pinning: Vec<String>,
-    workdir: tempfile::TempDir,
+    keys: SshKeys,
 }
 
 fn check_options(options: &[String]) -> Result<()> {
@@ -295,22 +272,6 @@ fn check_options(options: &[String]) -> Result<()> {
             .map_err(|reason| Report::new(Error::RefusedArgument(reason)))?;
     }
     Ok(())
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options
-        .open(path)
-        .and_then(|mut file| file.write_all(bytes))
-        .change_context(Error::Workdir)
-        .attach_with(|| path.display().to_string())
 }
 
 fn null_device() -> &'static str {
@@ -323,7 +284,10 @@ fn null_device() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
 
     use remora_channel::model::ScpRequest;
     use remora_channel::{
@@ -372,8 +336,25 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ChannelGatewayAdapter for Gateway {
-        async fn open(&self, _: &ResolvedContext, _: &str, _: &str) -> gateway::Result<Channel> {
-            Err(Report::new(gateway::Error::NotConnected))
+        /// Only a "datagram" profile opens, as a channel that carries
+        /// nothing.
+        async fn open(
+            &self,
+            _: &ResolvedContext,
+            device: &str,
+            profile: &str,
+        ) -> gateway::Result<Channel> {
+            if profile != "datagram" {
+                return Err(Report::new(gateway::Error::NotConnected));
+            }
+            Ok(Channel {
+                opened: remora_channel::model::OpenedChannel {
+                    device_urn: format!("urn:device:{device}"),
+                    kind: ChannelKind::Datagram,
+                },
+                sender: Box::new(Nothing),
+                receiver: Box::new(Nothing),
+            })
         }
 
         async fn sign_ssh_certificate(
@@ -390,6 +371,25 @@ mod tests {
                 host_key_alias: device.to_lowercase(),
                 known_hosts: "@cert-authority *.devices ssh-ed25519 HOSTCA".into(),
             })
+        }
+    }
+
+    struct Nothing;
+
+    #[async_trait::async_trait]
+    impl gateway::ChannelSender for Nothing {
+        async fn send(&mut self, _: Vec<u8>) -> gateway::Result<()> {
+            Ok(())
+        }
+        async fn close_write(&mut self) -> gateway::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl gateway::ChannelReceiver for Nothing {
+        async fn recv(&mut self) -> gateway::Result<Option<Vec<u8>>> {
+            Ok(None)
         }
     }
 
@@ -488,22 +488,30 @@ mod tests {
             ["-t", "operator@525400c0ffee", "uptime"]
         );
 
-        // The key the platform certified is the one written for ssh.
+        // The key the platform certified is the one handed to ssh, with
+        // what the platform answered.
         let certified = gateway.0.lock().unwrap().clone();
         assert_eq!(certified.len(), 1);
         assert_eq!(certified[0].1, SshRole::Admin);
         assert!(certified[0].0.starts_with("ssh-ed25519 "));
-        let identity = prepared.workdir().join("id_ed25519");
-        let key = PrivateKey::read_openssh_file(&identity).unwrap();
+        let key = PrivateKey::from_openssh(prepared.keys.private_key()).unwrap();
         assert_eq!(key.public_key().to_openssh().unwrap(), certified[0].0);
+        assert_eq!(
+            prepared.keys.certificate,
+            "ssh-ed25519-cert-v01@openssh.com CERT 525400C0FFEE"
+        );
+        assert!(prepared.keys.known_hosts.starts_with("@cert-authority "));
+    }
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode(prepared.workdir()), 0o700);
-            assert_eq!(mode(&identity), 0o600);
-        }
+    #[tokio::test]
+    async fn a_datagram_channel_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let channel = controller(root.path(), Gateway::default()).await;
+        let report = match channel.open(None, "525400C0FFEE", "datagram").await {
+            Ok(_) => panic!("a datagram channel must be refused"),
+            Err(report) => report,
+        };
+        assert!(matches!(report.current_context(), Error::Datagram(_)));
     }
 
     #[tokio::test]
@@ -610,11 +618,16 @@ mod tests {
     async fn runs_ssh_and_removes_the_key_material_afterwards() {
         let root = tempfile::tempdir().unwrap();
         let channel = controller(root.path(), Gateway::default()).await;
-        // A stand-in "ssh" that fails unless the key file it was given exists.
+        // A stand-in "ssh" that fails unless the key file it was given
+        // exists, and says where it was.
         let fake = root.path().join("fake-ssh");
+        let seen = root.path().join("seen");
         std::fs::write(
             &fake,
-            "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -i ] && test -f \"$2\" && exit 7; shift; done\nexit 1\n",
+            format!(
+                "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -i ] && test -f \"$2\" && echo \"$2\" > {} && exit 7; shift; done\nexit 1\n",
+                seen.display()
+            ),
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -624,9 +637,9 @@ mod tests {
             .prepare_ssh(request(&[], fake.to_str().unwrap()))
             .await
             .unwrap();
-        let workdir = prepared.workdir().to_path_buf();
         assert_eq!(channel.run_ssh(prepared).await.unwrap(), 7);
-        assert!(!workdir.exists());
+        let identity = std::fs::read_to_string(seen).unwrap();
+        assert!(!Path::new(identity.trim_end()).exists());
     }
 
     #[tokio::test]

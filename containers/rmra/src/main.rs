@@ -121,7 +121,7 @@ async fn run() {
         ),
         // ssh's own convention: 255 when the connection itself failed.
         Commands::Channel(command) => {
-            channel::run(command, &services.channel, over, verbose)
+            channel::run(command, &services.channel, over, PROGRAM, verbose)
                 .await
                 .unwrap_or_else(|report| fail(report, verbose, 255))
         }

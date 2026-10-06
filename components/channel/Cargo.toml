@@ -12,4 +12,4 @@ busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
-tempfile.workspace = true
+zeroize.workspace = true

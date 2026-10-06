@@ -9,7 +9,8 @@ use crate::{
 /// The channel vertical's application-facing port.
 #[async_trait::async_trait]
 pub trait ChannelServiceInterface: Send + Sync {
-    /// Opens `profile` on `device` under the selected context.
+    /// Opens `profile` on `device` under the selected context. Only a
+    /// stream channel: a datagram one is refused, as nothing relays it yet.
     async fn open(
         &self,
         over: Option<&ContextOverride>,
@@ -19,8 +20,7 @@ pub trait ChannelServiceInterface: Send + Sync {
 
     /// Everything before ssh runs: checks the arguments (refusing those that
     /// would bypass the channel or the host pinning), generates a throwaway
-    /// key, has it certified, and writes key, certificate and known_hosts
-    /// to a private directory. Split from [`Self::run_ssh`] so a transport
+    /// key and has it certified. Split from [`Self::run_ssh`] so a transport
     /// can report these steps before handing the terminal to ssh.
     async fn prepare_ssh(&self, request: SshRequest) -> Result<PreparedSsh>;
 
@@ -31,8 +31,7 @@ pub trait ChannelServiceInterface: Send + Sync {
     async fn prepare_scp(&self, request: ScpRequest) -> Result<PreparedSsh>;
 
     /// Runs a prepared ssh or scp session; returns the client's exit code.
-    /// The session's files are removed when `prepared` drops, at the end of
-    /// this call.
+    /// The key material is on disk only while the client runs.
     async fn run_ssh(&self, prepared: PreparedSsh) -> Result<i32>;
 }
 
