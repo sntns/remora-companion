@@ -161,7 +161,14 @@ mod tests {
             CredentialStoreAdapterService::new(FileCredentialStoreImpl::new(dir.path())),
             PlatformSessionAdapterService::new(Platform),
         );
-        contexts.create(resolved.context, false).await.unwrap();
+        contexts
+            .create(
+                resolved.context,
+                remora_context::model::RoleOverride::Keep,
+                false,
+            )
+            .await
+            .unwrap();
         contexts
             .login(None, resolved.credentials, RoleOverride::Keep)
             .await

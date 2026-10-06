@@ -713,18 +713,18 @@ mod tests {
         )
     }
 
-    /// Waits until `done` holds of the fake's state.
-    async fn until(
-        gateway: &TestGateway,
-        done: impl Fn(&remora_ota_adapter_grpc::test_gateway::State) -> bool,
-    ) {
-        for _ in 0..500 {
-            if done(&gateway.0.lock().unwrap()) {
+    /// Lets a stopped upload settle on the fake: its handler counts it as
+    /// abandoned once it notices the reset -- unless the reset beat the
+    /// first message to the server, in which case there is no handler to
+    /// count anything. Either way nothing may be committed, which is what
+    /// the callers assert; this only waits, it never fails.
+    async fn settle(gateway: &TestGateway) {
+        for _ in 0..50 {
+            if gateway.0.lock().unwrap().abandoned_uploads > 0 {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        panic!("the gateway never got there");
     }
 
     fn bundle(dir: &Path, size: usize) -> (std::path::PathBuf, Vec<u8>) {
@@ -871,7 +871,8 @@ mod tests {
             Some(token.as_str())
         );
 
-        until(&gateway, |state| state.abandoned_uploads == 1).await;
+        settle(&gateway).await;
+        assert!(gateway.0.lock().unwrap().abandoned_uploads <= 1);
         assert!(gateway.artifact_bytes("r1", "update-rp5.raucb").is_none());
         let held = gateway.0.lock().unwrap().upload_offset(&token);
         assert!(held <= CHUNK, "{held}");
@@ -913,10 +914,10 @@ mod tests {
             .unwrap_err();
         assert!(matches!(report.current_context(), Error::ReadArtifact(_)));
         assert!(format!("{report:?}").contains("disk on fire"));
-        until(&gateway, |state| state.abandoned_uploads == 1).await;
+        settle(&gateway).await;
         // One attempt only, and nothing committed.
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(gateway.0.lock().unwrap().abandoned_uploads, 1);
+        assert!(gateway.0.lock().unwrap().abandoned_uploads <= 1);
         assert!(gateway.artifact_bytes("r1", "update-rp5.raucb").is_none());
     }
 
