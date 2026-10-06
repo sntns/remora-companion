@@ -1,12 +1,10 @@
 use std::{fs, path::Path};
 
 use error_stack::{Report, ResultExt};
-use remora_config::application::{ConfigServiceInterface, Error, Result};
-use remora_fs_walk::{FsWalkAdapterService, WalkEntryKind};
-use remora_image::{
-    adapter::ext4::Ext4AdapterService, application::ImageService, model::PartitionRole,
-};
-use remora_squashfs::application::BuildSummary;
+use remora_config::application::{BuildSummary, ConfigServiceInterface, Error, Result};
+use remora_fs_walk::{FsWalkAdapterService, WalkEntry, WalkEntryKind};
+use remora_image::{application::ImageService, model::PartitionRole};
+use remora_scratch::ScratchDir;
 
 /// Default size/block-size for a freshly-built `config.ext4`, matching
 /// `remora-config.bbclass`'s own `dd if=/dev/zero ... bs=8M count=1`.
@@ -14,44 +12,30 @@ const DEFAULT_CONFIG_SIZE_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_CONFIG_BLOCK_SIZE: u32 = 1024;
 
 /// The config vertical's use case: `build` walks a host directory (via the
-/// injected `FsWalkAdapterService`) and populates a fresh ext4 image with it
-/// (via the injected `Ext4AdapterService`, addressed at `offset = 0` since
-/// the image *is* the whole filesystem, not a partition inside one).
-/// `upload` composes `build` with the injected `ImageService` (the config
-/// vertical's cross-vertical dependency) to read/write `config.ext4` as a
-/// regular file living on the image's shared partition.
+/// injected `FsWalkAdapterService`) and populates a fresh standalone ext4
+/// image with it, and `upload` composes `build` with reading/writing
+/// `config.ext4` as a regular file living on the image's shared partition.
+/// Every ext4 operation, standalone or in a partition, goes through the
+/// injected `ImageService` (the config vertical's cross-vertical
+/// dependency).
 pub struct ConfigControllerImpl {
-    ext4: Ext4AdapterService,
     fs_walk: FsWalkAdapterService,
     image: ImageService,
 }
 
 impl ConfigControllerImpl {
-    pub fn new(
-        ext4: Ext4AdapterService,
-        fs_walk: FsWalkAdapterService,
-        image: ImageService,
-    ) -> Self {
-        Self {
-            ext4,
-            fs_walk,
-            image,
-        }
+    pub fn new(fs_walk: FsWalkAdapterService, image: ImageService) -> Self {
+        Self { fs_walk, image }
     }
 
     /// `upload` only ever guarantees the config image's own root exists (a
     /// fresh one is seeded with just `tzdata/`) -- a caller uploading to a
     /// nested path like `/c/coder1.json` needs `/c` created first, same
-    /// "narrow surface" rule `write_file`'s own doc comment states. Create
-    /// whatever ancestor directories of `dest_relative_path` don't exist yet
-    /// (mkdir -p semantics), so `upload` itself doesn't inherit that
-    /// restriction for callers that don't need it.
-    fn ensure_parent_dirs(
-        &self,
-        local_image: &Path,
-        local_size: u64,
-        dest_relative_path: &str,
-    ) -> Result<()> {
+    /// "narrow surface" rule `ext4_file_write`'s own doc comment states.
+    /// Create whatever ancestor directories of `dest_relative_path` don't
+    /// exist yet (mkdir -p semantics), so `upload` itself doesn't inherit
+    /// that restriction for callers that don't need it.
+    async fn ensure_parent_dirs(&self, local_image: &Path, dest_relative_path: &str) -> Result<()> {
         let mut components: Vec<&str> = dest_relative_path
             .split('/')
             .filter(|c| !c.is_empty())
@@ -63,12 +47,14 @@ impl ConfigControllerImpl {
             current.push('/');
             current.push_str(component);
             let exists = self
-                .ext4
-                .exists(local_image, 0, local_size, &current)
+                .image
+                .ext4_file_exists(local_image, &current)
+                .await
                 .change_context_lazy(|| Error::Populate(local_image.to_path_buf()))?;
             if !exists {
-                self.ext4
-                    .create_dir(local_image, 0, local_size, &current, 0o755)
+                self.image
+                    .ext4_file_mkdir(local_image, &current, 0o755)
+                    .await
                     .change_context_lazy(|| Error::Populate(local_image.to_path_buf()))?;
             }
         }
@@ -86,40 +72,30 @@ impl ConfigServiceInterface for ConfigControllerImpl {
         block_size: u32,
         label: Option<&str>,
     ) -> Result<BuildSummary> {
-        self.ext4
-            .format(output, size_bytes, block_size, label)
-            .change_context(Error::Format(output.to_path_buf()))?;
+        self.image
+            .ext4_file_format(output, size_bytes, block_size, label)
+            .await
+            .change_context_lazy(|| Error::Format(output.to_path_buf()))?;
 
-        let walked = self
-            .fs_walk
-            .walk_dir(source_dir)
-            .change_context(Error::Walk(source_dir.to_path_buf()))?;
+        let fs_walk = self.fs_walk.clone();
+        let source = source_dir.to_path_buf();
+        let tree = blocking(move || read_tree(&fs_walk, &source)).await?;
 
         let mut entry_count = 0usize;
         let mut bytes_written = 0u64;
-
-        for entry in walked {
+        for (entry, contents) in tree {
             let dest_path = to_ext4_path(&entry.path);
             let mode = entry.metadata.permissions;
-
-            match &entry.kind {
-                WalkEntryKind::Directory => {
-                    self.ext4
-                        .create_dir(output, 0, size_bytes, &dest_path, mode)
-                        .change_context_lazy(|| Error::Populate(output.to_path_buf()))?;
-                }
-                WalkEntryKind::File { source } => {
-                    let contents = fs::read(source)
-                        .map_err(|_| Report::new(Error::ReadFile(source.clone())))?;
+            let populated = match contents {
+                None => self.image.ext4_file_mkdir(output, &dest_path, mode).await,
+                Some(contents) => {
                     bytes_written += contents.len() as u64;
-                    self.ext4
-                        .write_file(output, 0, size_bytes, &dest_path, &contents, mode)
-                        .change_context_lazy(|| Error::Populate(output.to_path_buf()))?;
+                    self.image
+                        .ext4_file_write(output, &dest_path, &contents, mode)
+                        .await
                 }
-                WalkEntryKind::Symlink { .. } => {
-                    return Err(Report::new(Error::UnsupportedEntry(entry.path)));
-                }
-            }
+            };
+            populated.change_context_lazy(|| Error::Populate(output.to_path_buf()))?;
             entry_count += 1;
         }
 
@@ -139,8 +115,11 @@ impl ConfigServiceInterface for ConfigControllerImpl {
     ) -> Result<()> {
         let config_path = format!("/remora/{slot}/config");
 
-        let contents =
-            fs::read(source).map_err(|_| Report::new(Error::ReadSource(source.to_path_buf())))?;
+        let source = source.to_path_buf();
+        let contents = blocking(move || {
+            fs::read(&source).change_context_lazy(|| Error::ReadSource(source.clone()))
+        })
+        .await?;
 
         // `/remora`/`/remora/<slot>` are created at Yocto build time by
         // remora-identity.bbclass/remora-config.bbclass on a real image, but
@@ -159,7 +138,10 @@ impl ConfigServiceInterface for ConfigControllerImpl {
             .await
             .change_context(Error::Image)?;
 
-        let local_image = remora_scratch::unique_path("remora-config-local");
+        // Removed, with the local copy of config.ext4 in it, however this
+        // returns.
+        let scratch = ScratchDir::new("remora-config").change_context(Error::Scratch)?;
+        let local_image = scratch.join("config.ext4");
         let config_exists = self
             .image
             .exists_by_role(image, PartitionRole::Shared, &config_path)
@@ -172,12 +154,15 @@ impl ConfigServiceInterface for ConfigControllerImpl {
                 .read_file_by_role(image, PartitionRole::Shared, &config_path)
                 .await
                 .change_context(Error::Image)?;
-            fs::write(&local_image, &existing)
-                .map_err(|_| Report::new(Error::WriteTempImage(local_image.clone())))?;
+            let local = local_image.clone();
+            blocking(move || {
+                fs::write(&local, &existing).change_context_lazy(|| Error::WriteTempImage(local))
+            })
+            .await?;
         } else {
-            let seed_dir = remora_scratch::unique_path("remora-config-seed");
+            let seed_dir = scratch.join("seed");
             fs::create_dir_all(seed_dir.join("tzdata"))
-                .map_err(|_| Report::new(Error::WriteTempImage(seed_dir.clone())))?;
+                .change_context_lazy(|| Error::WriteTempImage(seed_dir.clone()))?;
             self.build(
                 &seed_dir,
                 &local_image,
@@ -186,34 +171,57 @@ impl ConfigServiceInterface for ConfigControllerImpl {
                 Some("config"),
             )
             .await?;
-            let _ = fs::remove_dir_all(&seed_dir);
         }
 
-        let local_size = fs::metadata(&local_image)
-            .map_err(|_| Report::new(Error::ReadTempImage(local_image.clone())))?
-            .len();
-        self.ensure_parent_dirs(&local_image, local_size, dest_relative_path)?;
-        self.ext4
-            .write_file(
-                &local_image,
-                0,
-                local_size,
-                dest_relative_path,
-                &contents,
-                mode,
-            )
+        self.ensure_parent_dirs(&local_image, dest_relative_path)
+            .await?;
+        self.image
+            .ext4_file_write(&local_image, dest_relative_path, &contents, mode)
+            .await
             .change_context_lazy(|| Error::Populate(local_image.clone()))?;
 
-        let updated = fs::read(&local_image)
-            .map_err(|_| Report::new(Error::ReadTempImage(local_image.clone())))?;
+        let local = local_image.clone();
+        let updated =
+            blocking(move || fs::read(&local).change_context_lazy(|| Error::ReadTempImage(local)))
+                .await?;
         self.image
             .inject_by_role(image, PartitionRole::Shared, &config_path, &updated, 0o644)
             .await
-            .change_context(Error::Image)?;
-
-        let _ = fs::remove_file(&local_image);
-        Ok(())
+            .change_context(Error::Image)
     }
+}
+
+/// Run `op` on the blocking pool, off the runtime threads.
+async fn blocking<T: Send + 'static>(op: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(op)
+        .await
+        .expect("config worker panicked")
+}
+
+/// Every entry under `root`, with its content for a file (`None` for a
+/// directory). Symlinks are refused.
+fn read_tree(
+    fs_walk: &FsWalkAdapterService,
+    root: &Path,
+) -> Result<Vec<(WalkEntry, Option<Vec<u8>>)>> {
+    let walked = fs_walk
+        .walk_dir(root)
+        .change_context_lazy(|| Error::Walk(root.to_path_buf()))?;
+    walked
+        .into_iter()
+        .map(|entry| {
+            let contents = match &entry.kind {
+                WalkEntryKind::Directory => None,
+                WalkEntryKind::File { source } => {
+                    Some(fs::read(source).change_context_lazy(|| Error::ReadFile(source.clone()))?)
+                }
+                WalkEntryKind::Symlink { .. } => {
+                    return Err(Report::new(Error::UnsupportedEntry(entry.path)));
+                }
+            };
+            Ok((entry, contents))
+        })
+        .collect()
 }
 
 /// `rel_path` joined with `/` regardless of host path-separator conventions
@@ -242,9 +250,11 @@ mod tests {
             Arc::new(remora_image_adapter_ext4::Ext4AdapterImpl),
             Arc::new(remora_image_adapter_vfat::VfatAdapterImpl),
             FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+            remora_image::adapter::ext4::Ext4AdapterService::new(
+                remora_image_adapter_ext4::Ext4AdapterImpl,
+            ),
         ));
         ConfigControllerImpl::new(
-            Ext4AdapterService::new(remora_image_adapter_ext4::Ext4AdapterImpl),
             FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
             image,
         )

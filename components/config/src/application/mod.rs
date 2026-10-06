@@ -2,4 +2,4 @@ mod error;
 mod service;
 
 pub use error::{Error, Result};
-pub use service::{ConfigService, ConfigServiceInterface};
+pub use service::{BuildSummary, ConfigService, ConfigServiceInterface};

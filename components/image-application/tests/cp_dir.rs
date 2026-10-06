@@ -22,7 +22,9 @@ use std::{
 use remora_fs_walk::FsWalkAdapterService;
 use remora_image::{
     adapter::{
-        ext4::Ext4Adapter, partition_table::PartitionTableAdapterService, vfat::VfatAdapter,
+        ext4::{Ext4Adapter, Ext4AdapterService},
+        partition_table::PartitionTableAdapterService,
+        vfat::VfatAdapter,
     },
     application::ImageService,
     model::{CpDirRequest, PartitionSelector},
@@ -43,6 +45,7 @@ fn controller() -> ImageService {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ))
 }
 

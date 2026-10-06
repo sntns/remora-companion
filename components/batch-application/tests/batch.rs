@@ -217,6 +217,7 @@ fn controller() -> BatchControllerImpl {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ));
 
     let identity = IdentityService::new(IdentityControllerImpl::new(
@@ -229,7 +230,6 @@ fn controller() -> BatchControllerImpl {
     ));
 
     let config = ConfigService::new(ConfigControllerImpl::new(
-        Ext4AdapterService::new(Ext4AdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
         image.clone(),
     ));
@@ -450,6 +450,7 @@ async fn runs_a_factory_provision_step() {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ));
     let identity = IdentityService::new(IdentityControllerImpl::new(
         remora_identity::adapter::KeygenAdapterService::new(KeygenAdapterImpl),
@@ -460,7 +461,6 @@ async fn runs_a_factory_provision_step() {
         image.clone(),
     ));
     let config = ConfigService::new(ConfigControllerImpl::new(
-        Ext4AdapterService::new(Ext4AdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
         image.clone(),
     ));

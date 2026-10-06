@@ -2,8 +2,16 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("failed to create {0}")]
-    CreateScratchDir(PathBuf),
+    #[error("failed to create a scratch directory")]
+    CreateScratchDir,
+    #[error(
+        "the inputs supply {present} but not {missing}: supply both halves of the SSH \
+         host keypair, or neither to have one generated"
+    )]
+    HalfSshHostKeypair {
+        present: &'static str,
+        missing: &'static str,
+    },
     #[error("failed to write {0}")]
     WriteScratchFile(PathBuf),
     #[error("failed to build identity.squashfs")]

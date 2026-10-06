@@ -50,9 +50,9 @@ fn controller() -> ConfigControllerImpl {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ));
     ConfigControllerImpl::new(
-        Ext4AdapterService::new(Ext4AdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
         image,
     )

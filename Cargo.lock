@@ -2933,7 +2933,6 @@ dependencies = [
  "async-trait",
  "busybody",
  "error-stack",
- "remora-squashfs",
  "thiserror 1.0.69",
 ]
 
@@ -2951,7 +2950,6 @@ dependencies = [
  "remora-image-adapter-vfat",
  "remora-image-application",
  "remora-scratch",
- "remora-squashfs",
  "tokio",
 ]
 
@@ -3489,7 +3487,6 @@ dependencies = [
  "remora-tui",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]

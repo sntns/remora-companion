@@ -7,7 +7,6 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-remora-squashfs = { path = "../squashfs" }
 async-trait.workspace = true
 busybody.workspace = true
 error-stack.workspace = true

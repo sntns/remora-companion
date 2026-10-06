@@ -1,6 +1,6 @@
 [package]
 name = "remora-scratch"
-description = "Shared unique-scratch-path generator, used by any vertical that needs a throwaway temp file/dir (identity, config, ...)"
+description = "Shared private scratch directory (exclusive, 0700, removed on drop), used by any vertical that needs throwaway temp files (identity, config, ...)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

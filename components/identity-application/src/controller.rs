@@ -9,10 +9,14 @@ use remora_identity::{
     application::{Error, IdentityServiceInterface, Result},
 };
 use remora_image::{application::ImageService, model::PartitionRole};
+use remora_scratch::ScratchDir;
 use remora_squashfs::{
     application::{BuildSummary, SquashfsService},
     model::BuildOptions,
 };
+
+const SSH_HOST_KEY: &str = "ssh_host_ed25519_key";
+const SSH_HOST_KEY_PUB: &str = "ssh_host_ed25519_key.pub";
 
 /// The identity vertical's use case: fills in whichever of
 /// hostname/machine-id/SSH-host-keypair `inputs` doesn't already supply,
@@ -49,45 +53,32 @@ impl IdentityServiceInterface for IdentityControllerImpl {
         machine_id: Option<&str>,
         output: &Path,
     ) -> Result<BuildSummary> {
-        let scratch = remora_scratch::unique_path("remora-identity");
-        let mut wrote_any = false;
-
-        if !already_provides(inputs, "hostname") {
-            let value = hostname.unwrap_or("remora");
-            write_scratch_file(&scratch, "hostname", format!("{value}\n").as_bytes())?;
-            wrote_any = true;
-        }
-        if !already_provides(inputs, "machine-id") {
-            let value = machine_id
-                .map(str::to_string)
-                .unwrap_or_else(|| self.keygen.machine_id());
-            write_scratch_file(&scratch, "machine-id", format!("{value}\n").as_bytes())?;
-            wrote_any = true;
-        }
-        if !(already_provides(inputs, "ssh_host_ed25519_key")
-            && already_provides(inputs, "ssh_host_ed25519_key.pub"))
-        {
-            let (private_key, public_key) = self
-                .keygen
-                .ssh_host_keypair()
-                .change_context(Error::Keygen)?;
-            write_scratch_file(&scratch, "ssh_host_ed25519_key", private_key.as_bytes())?;
-            restrict_to_owner_only(&scratch.join("ssh_host_ed25519_key"))?;
-            write_scratch_file(&scratch, "ssh_host_ed25519_key.pub", public_key.as_bytes())?;
-            wrote_any = true;
-        }
+        let keygen = self.keygen.clone();
+        let (inputs_owned, hostname, machine_id) = (
+            inputs.to_vec(),
+            hostname.map(str::to_string),
+            machine_id.map(str::to_string),
+        );
+        // Holds the generated files, the SSH host private key among them,
+        // until it's dropped at the end of this function, however it ends.
+        let generated = blocking(move || {
+            generate_missing(
+                &keygen,
+                &inputs_owned,
+                hostname.as_deref(),
+                machine_id.as_deref(),
+            )
+        })
+        .await?;
 
         let mut all_inputs = inputs.to_vec();
-        if wrote_any {
-            all_inputs.push(scratch.clone());
-        }
+        all_inputs.extend(generated.as_ref().map(|s| s.path().to_path_buf()));
 
         let options = BuildOptions {
             root_mode: 0o755,
             ..Default::default()
         };
-        let result = self
-            .squashfs
+        self.squashfs
             .build(
                 &all_inputs,
                 output,
@@ -95,12 +86,7 @@ impl IdentityServiceInterface for IdentityControllerImpl {
                 &remora_progress::OperationContext::noop(),
             )
             .await
-            .change_context(Error::Squashfs);
-
-        if wrote_any {
-            let _ = fs::remove_dir_all(&scratch);
-        }
-        result
+            .change_context(Error::Squashfs)
     }
 
     async fn create(
@@ -110,13 +96,16 @@ impl IdentityServiceInterface for IdentityControllerImpl {
         machine_id: Option<&str>,
         image: &Path,
     ) -> Result<u64> {
-        let temp = remora_scratch::unique_path("remora-identity-create");
-        self.build(inputs, hostname, machine_id, &temp).await?;
+        let scratch =
+            ScratchDir::new("remora-identity-create").change_context(Error::CreateScratchDir)?;
+        let built = scratch.join("identity.squashfs");
+        self.build(inputs, hostname, machine_id, &built).await?;
 
-        let contents =
-            fs::read(&temp).map_err(|_| Report::new(Error::ReadBuiltImage(temp.clone())));
-        let _ = fs::remove_file(&temp);
-        let contents = contents?;
+        let contents = blocking(move || {
+            fs::read(&built).change_context_lazy(|| Error::ReadBuiltImage(built.clone()))
+        })
+        .await?;
+        drop(scratch);
 
         self.image
             .ensure_dir_by_role(image, PartitionRole::Shared, "/remora", 0o755)
@@ -137,6 +126,64 @@ impl IdentityServiceInterface for IdentityControllerImpl {
     }
 }
 
+/// Run `op` on the blocking pool, off the runtime threads.
+async fn blocking<T: Send + 'static>(op: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(op)
+        .await
+        .expect("identity worker panicked")
+}
+
+/// A scratch directory holding whichever identity files `inputs` doesn't
+/// supply, or `None` if it supplies them all.
+fn generate_missing(
+    keygen: &KeygenAdapterService,
+    inputs: &[PathBuf],
+    hostname: Option<&str>,
+    machine_id: Option<&str>,
+) -> Result<Option<ScratchDir>> {
+    let has_key = already_provides(inputs, SSH_HOST_KEY);
+    let has_key_pub = already_provides(inputs, SSH_HOST_KEY_PUB);
+    // A generated pair would put a second file of the supplied half's name
+    // in the squashfs root, and wouldn't match it anyway: a lone half is
+    // refused rather than guessed around.
+    if has_key != has_key_pub {
+        let (present, missing) = if has_key {
+            (SSH_HOST_KEY, SSH_HOST_KEY_PUB)
+        } else {
+            (SSH_HOST_KEY_PUB, SSH_HOST_KEY)
+        };
+        return Err(Report::new(Error::HalfSshHostKeypair { present, missing }));
+    }
+    let has_hostname = already_provides(inputs, "hostname");
+    let has_machine_id = already_provides(inputs, "machine-id");
+    if has_key && has_hostname && has_machine_id {
+        return Ok(None);
+    }
+
+    let scratch = ScratchDir::new("remora-identity").change_context(Error::CreateScratchDir)?;
+    if !has_hostname {
+        let value = hostname.unwrap_or("remora");
+        write_scratch_file(&scratch, "hostname", format!("{value}\n").as_bytes())?;
+    }
+    if !has_machine_id {
+        let value = machine_id
+            .map(str::to_string)
+            .unwrap_or_else(|| keygen.machine_id());
+        write_scratch_file(&scratch, "machine-id", format!("{value}\n").as_bytes())?;
+    }
+    if !has_key {
+        let (private_key, public_key) = keygen.ssh_host_keypair().change_context(Error::Keygen)?;
+        // 0600 from creation on, never briefly readable under the umask's
+        // mode -- and SSH refuses a group/world-readable host key anyway,
+        // matching `bootstrap-localdev.bb`'s own `install -m 600`.
+        scratch
+            .write_private(SSH_HOST_KEY, private_key.as_bytes())
+            .change_context_lazy(|| Error::WriteScratchFile(scratch.join(SSH_HOST_KEY)))?;
+        write_scratch_file(&scratch, SSH_HOST_KEY_PUB, public_key.as_bytes())?;
+    }
+    Ok(Some(scratch))
+}
+
 /// Whether one of `inputs` already supplies a root-level file named
 /// `file_name` — a directory input contributing it directly, or a file
 /// input that *is* it.
@@ -150,25 +197,9 @@ fn already_provides(inputs: &[PathBuf], file_name: &str) -> bool {
     })
 }
 
-fn write_scratch_file(scratch: &Path, name: &str, contents: &[u8]) -> Result<()> {
-    fs::create_dir_all(scratch)
-        .map_err(|_| Report::new(Error::CreateScratchDir(scratch.to_path_buf())))?;
+fn write_scratch_file(scratch: &ScratchDir, name: &str, contents: &[u8]) -> Result<()> {
     let path = scratch.join(name);
-    fs::write(&path, contents).map_err(|_| Report::new(Error::WriteScratchFile(path)))
-}
-
-/// `chmod 600` — SSH refuses to use a host key file that's group/world
-/// readable, matching `bootstrap-localdev.bb`'s own `install -m 600`.
-#[cfg(unix)]
-fn restrict_to_owner_only(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .map_err(|_| Report::new(Error::WriteScratchFile(path.to_path_buf())))
-}
-
-#[cfg(not(unix))]
-fn restrict_to_owner_only(_path: &Path) -> Result<()> {
-    Ok(())
+    fs::write(&path, contents).change_context_lazy(|| Error::WriteScratchFile(path))
 }
 
 #[cfg(test)]
@@ -192,6 +223,9 @@ mod tests {
             Arc::new(remora_image_adapter_ext4::Ext4AdapterImpl),
             Arc::new(remora_image_adapter_vfat::VfatAdapterImpl),
             remora_fs_walk::FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+            remora_image::adapter::ext4::Ext4AdapterService::new(
+                remora_image_adapter_ext4::Ext4AdapterImpl,
+            ),
         ));
         IdentityControllerImpl::new(
             KeygenAdapterService::new(remora_identity_adapter_keygen::KeygenAdapterImpl),
@@ -246,6 +280,43 @@ mod tests {
             .unwrap();
 
         // hostname (user-supplied) + machine-id + ssh_host_ed25519_key(.pub) (generated).
+        assert_eq!(summary.entry_count, 4);
+    }
+
+    #[tokio::test]
+    async fn refuses_half_an_ssh_host_keypair() {
+        for half in [SSH_HOST_KEY, SSH_HOST_KEY_PUB] {
+            let dir = tempdir();
+            fs::write(dir.join(half), b"supplied\n").unwrap();
+
+            let output = dir.join("../identity-half.squashfs");
+            let err = controller()
+                .build(std::slice::from_ref(&dir), None, None, &output)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err.current_context(),
+                    Error::HalfSshHostKeypair { present, .. } if *present == half
+                ),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn keeps_a_whole_supplied_ssh_host_keypair() {
+        let dir = tempdir();
+        fs::write(dir.join(SSH_HOST_KEY), b"private\n").unwrap();
+        fs::write(dir.join(SSH_HOST_KEY_PUB), b"public\n").unwrap();
+
+        let output = dir.join("../identity-pair.squashfs");
+        let summary = controller()
+            .build(std::slice::from_ref(&dir), None, None, &output)
+            .await
+            .unwrap();
+
+        // The supplied pair + generated hostname and machine-id.
         assert_eq!(summary.entry_count, 4);
     }
 

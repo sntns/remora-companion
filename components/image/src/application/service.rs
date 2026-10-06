@@ -84,6 +84,37 @@ pub trait ImageServiceInterface: Send + Sync {
         role: PartitionRole,
         dest_path: &str,
     ) -> Result<Vec<u8>>;
+
+    /// Create (or truncate) `image` as exactly `size_bytes` of fresh ext4.
+    ///
+    /// The `ext4_file_*` operations act on a *standalone* ext4 image: the
+    /// file is the filesystem, at offset 0 and its whole length, not a disk
+    /// image with a partition table (e.g. the config vertical's
+    /// `config.ext4`, itself a file on the shared partition).
+    async fn ext4_file_format(
+        &self,
+        image: &Path,
+        size_bytes: u64,
+        block_size: u32,
+        label: Option<&str>,
+    ) -> Result<()>;
+
+    /// Write `contents` to `dest_path` in a standalone ext4 image, replacing
+    /// it if present. Its parent directory must already exist.
+    async fn ext4_file_write(
+        &self,
+        image: &Path,
+        dest_path: &str,
+        contents: &[u8],
+        mode: u16,
+    ) -> Result<()>;
+
+    /// Create directory `dest_path` in a standalone ext4 image. Not
+    /// recursive, and an existing one is an error.
+    async fn ext4_file_mkdir(&self, image: &Path, dest_path: &str, mode: u16) -> Result<()>;
+
+    /// Whether `dest_path` exists in a standalone ext4 image.
+    async fn ext4_file_exists(&self, image: &Path, dest_path: &str) -> Result<bool>;
 }
 
 /// Injectable handle to whatever `ImageServiceInterface` implementation was
