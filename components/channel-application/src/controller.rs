@@ -413,6 +413,7 @@ mod tests {
                     assumed_role: None,
                     login: None,
                 },
+                remora_context::model::RoleOverride::Keep,
                 false,
             )
             .await

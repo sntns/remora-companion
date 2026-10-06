@@ -1,6 +1,6 @@
 [package]
 name = "remora-context-application-transport-cli"
-description = "clap subcommands for the context application service: context ls/create/inspect/use/rm/show, login, logout, whoami"
+description = "clap subcommands for the context application service: context ls/create/inspect/use/rm/rename/show and context role ls/add/rm/assume/drop, login, logout, whoami, and the first-level --context option"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

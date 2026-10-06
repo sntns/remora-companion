@@ -11,7 +11,6 @@ use serde::Serialize;
 use crate::{
     error::{context_error, prompt_error, Error, Result},
     login::RoleArgs,
-    program,
 };
 
 /// The production gateway a fresh `login` suggests.
@@ -117,13 +116,17 @@ pub enum Format {
     Json,
 }
 
+/// Runs a `context` subcommand. `program` is the running binary's name,
+/// for the commands its messages suggest: several binaries mount these
+/// commands, on the same contexts.
 pub async fn run(
     command: Command,
     service: &ContextService,
     over: Option<&ContextOverride>,
+    program: &str,
 ) -> Result<()> {
     match command {
-        Command::List { format, quiet } => list(service, format, quiet).await,
+        Command::List { format, quiet } => list(service, format, quiet, program).await,
         Command::Create {
             name,
             from: Some(base),
@@ -206,20 +209,21 @@ pub async fn run(
                     },
                 },
                 roles: Default::default(),
-                // `--assume-role <urn>`: the context acts as that role,
-                // verified when it logs in.
-                assumed_role: match role.choice() {
-                    remora_context::model::RoleOverride::Assume(role) => Some(role),
-                    _ => None,
-                },
+                // Settled by the service, from `role` and what it replaces.
+                assumed_role: None,
                 login: None,
             };
             let address = context.endpoint.address.clone();
-            let role = context.assumed_role.clone();
             service
-                .create(context, force)
+                .create(context, role.choice(), force)
                 .await
                 .map_err(context_error)?;
+            let role = service
+                .inspect(&name)
+                .await
+                .map_err(context_error)?
+                .context
+                .assumed_role;
             if make_current {
                 service.use_context(&name).await.map_err(context_error)?;
             }
@@ -236,7 +240,7 @@ pub async fn run(
             }
             tui::step(format!(
                 "Log in with {}",
-                tui::accent(login_hint(&name, make_current))
+                tui::accent(login_hint(program, &name, make_current))
             ));
             Ok(())
         }
@@ -299,11 +303,11 @@ pub async fn run(
             println!("{}", selected_name(service, over).await?);
             Ok(())
         }
-        Command::Role(command) => crate::role::run(command, service, over).await,
+        Command::Role(command) => crate::role::run(command, service, over, program).await,
     }
 }
 
-async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<()> {
+async fn list(service: &ContextService, format: Format, quiet: bool, program: &str) -> Result<()> {
     let contexts = service.list().await.map_err(context_error)?;
     if quiet {
         for summary in &contexts {
@@ -322,7 +326,7 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
         Format::Table if contexts.is_empty() => {
             tui::info(format!(
                 "No context yet. Start with {}",
-                tui::accent(format!("{} login", program()))
+                tui::accent(format!("{program} login"))
             ));
         }
         Format::Table => {
@@ -366,17 +370,21 @@ async fn list(service: &ContextService, format: Format, quiet: bool) -> Result<(
 async fn selected_name(service: &ContextService, over: Option<&ContextOverride>) -> Result<String> {
     match service.selected(over).await.map_err(context_error)? {
         Some((name, _)) => Ok(name),
-        None => Err(Report::new(Error::Context(
-            remora_context::application::Error::NoContext.to_string(),
-        ))),
+        None => Err(no_context()),
     }
 }
 
-fn login_hint(name: &str, current: bool) -> String {
+/// The service's own "no context" failure, for when the transport is the
+/// one finding there's none: it reads, and is hinted, alike.
+pub(crate) fn no_context() -> Report<Error> {
+    context_error(Report::new(remora_context::application::Error::NoContext))
+}
+
+fn login_hint(program: &str, name: &str, current: bool) -> String {
     if current {
-        format!("{} login", program())
+        format!("{program} login")
     } else {
-        format!("{} --context {name} login", program())
+        format!("{program} --context {name} login")
     }
 }
 
@@ -391,14 +399,15 @@ pub(crate) fn describe_selection(selection: Selection) -> &'static str {
 }
 
 /// `context inspect`'s JSON: the stored context plus what isn't in it.
-/// Never any secret -- only the kind of login.
+/// Never any secret -- only the kind of credentials, under a key of its own
+/// (the context's `login` is the context whose login it shares).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Inspected {
     #[serde(flatten)]
     context: Context,
     current: bool,
-    login: Option<String>,
+    credentials: Option<String>,
 }
 
 impl From<ContextSummary> for Inspected {
@@ -406,7 +415,38 @@ impl From<ContextSummary> for Inspected {
         Self {
             context: summary.context,
             current: summary.current,
-            login: summary.credentials.map(|kind| kind.to_string()),
+            credentials: summary.credentials.map(|kind| kind.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use remora_context::model::{CredentialKind, Endpoint, Tls};
+
+    use super::*;
+
+    #[test]
+    fn inspected_names_each_key_once() {
+        let inspected = Inspected::from(ContextSummary {
+            context: Context {
+                name: "acme".into(),
+                description: None,
+                endpoint: Endpoint {
+                    address: "gateway:50051".into(),
+                    tls: Tls::default(),
+                },
+                roles: Default::default(),
+                assumed_role: None,
+                login: Some("eu2".into()),
+            },
+            current: false,
+            credentials: Some(CredentialKind::AccessKey),
+        });
+        let json = serde_json::to_string(&inspected).unwrap();
+        assert_eq!(json.matches("\"login\"").count(), 1, "{json}");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["login"], "eu2");
+        assert_eq!(value["credentials"], "access key");
     }
 }

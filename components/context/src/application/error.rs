@@ -1,3 +1,6 @@
+/// What went wrong, binary-neutral: several binaries mount the context
+/// commands, so what to run about it is each transport's to say (see
+/// `remora-context-application-transport-cli`'s `hint`).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid context name {0:?}: use letters, digits, '.', '_', '+' or '-', starting with a letter or digit")]
@@ -6,17 +9,15 @@ pub enum Error {
     AlreadyExists(String),
     #[error("context {0:?} does not exist")]
     NotFound(String),
-    #[error(
-        "no context selected: create one with `rmra context create`, or log in with `rmra login`"
-    )]
+    #[error("no context selected")]
     NoContext,
-    #[error("several contexts exist and none is current: pick one with `rmra context use <name>` or --context")]
+    #[error("several contexts exist and none is current")]
     Ambiguous,
-    #[error("not logged in to context {0:?}: run `rmra login`")]
+    #[error("not logged in to context {0:?}")]
     NotLoggedIn(String),
     #[error("failed to verify the credentials with the platform")]
     Verify,
-    #[error("no role {0:?} in this context: add it with `rmra context role add {0} <role-urn>`, or give the role's URN")]
+    #[error("no role {0:?} in this context")]
     UnknownRole(String),
     #[error("{0:?} is not a role URN (urn:…:role:…)")]
     InvalidRoleUrn(String),

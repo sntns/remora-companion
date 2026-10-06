@@ -1,4 +1,4 @@
-use clap::parser::ValueSource;
+use clap::{parser::ValueSource, FromArgMatches};
 use remora_completion::Candidate;
 use remora_context::{
     application::ContextService,
@@ -34,26 +34,27 @@ impl ContextArgs {
     }
 }
 
-/// `--context`/`-c` as typed on the line being completed (the shell hands
-/// the whole line to the binary), else the environment variable, else
-/// none: the current context.
-pub fn context_on_command_line() -> Option<ContextOverride> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut found = None;
-    for (index, arg) in args.iter().enumerate() {
-        if let Some(value) = arg.strip_prefix("--context=") {
-            found = Some(value.to_owned());
-        } else if arg == "--context" || arg == "-c" {
-            found = args.get(index + 1).cloned();
-        } else if let Some(value) = arg.strip_prefix("-c").filter(|v| !v.is_empty()) {
-            found = Some(value.to_owned());
-        }
-    }
-    match found.filter(|name| !name.is_empty()) {
-        Some(name) => Some(ContextOverride {
-            name,
-            source: Selection::Flag,
-        }),
+/// The context the line being completed runs against: its `--context`/
+/// `-c`, else the environment variable, else none (the current context).
+/// `command` is the binary's own: the line is parsed the way it will be
+/// run, so only a first-level `-c` counts -- in `scp -c aes128-ctr …` it is
+/// scp's cipher, not a context.
+pub fn context_on_command_line(command: clap::Command) -> Option<ContextOverride> {
+    context_in(command, remora_completion::command_line())
+}
+
+fn context_in(
+    command: clap::Command,
+    line: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Option<ContextOverride> {
+    // A line being completed is unfinished by nature: parse what's there.
+    let parsed = command
+        .ignore_errors(true)
+        .try_get_matches_from(line)
+        .ok()
+        .and_then(|matches| Some((ContextArgs::from_arg_matches(&matches).ok()?, matches)));
+    match parsed {
+        Some((args, matches)) => args.over(&matches),
         None => std::env::var(CONTEXT_ENV)
             .ok()
             .filter(|name| !name.is_empty())
@@ -86,7 +87,7 @@ pub async fn complete_roles(
     service: &ContextService,
     over: Option<&ContextOverride>,
 ) -> Vec<Candidate> {
-    let Ok((_, roles)) = service.roles(over).await else {
+    let Ok((_, roles, _)) = service.roles(over).await else {
         return Vec::new();
     };
     roles
@@ -99,4 +100,49 @@ pub async fn complete_roles(
             Candidate::new(role.alias).help(help)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser};
+
+    use super::*;
+
+    /// A binary's shape: the context first-level, a command taking its
+    /// own options through.
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        context: ContextArgs,
+        #[arg(short, long)]
+        verbose: bool,
+        #[command(subcommand)]
+        command: Commands,
+    }
+
+    #[derive(clap::Subcommand)]
+    enum Commands {
+        Scp {
+            #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+            arguments: Vec<String>,
+        },
+    }
+
+    fn context(line: &str) -> Option<String> {
+        let words = std::iter::once("bin")
+            .chain(line.split(' '))
+            .map(std::ffi::OsString::from);
+        context_in(Cli::command(), words).map(|over| over.name)
+    }
+
+    #[test]
+    fn only_a_first_level_context_counts() {
+        assert_eq!(context("-c eu2 scp ./a ").as_deref(), Some("eu2"));
+        assert_eq!(context("-v --context=eu2 scp ").as_deref(), Some("eu2"));
+        assert_eq!(context("-ceu2 scp -c aes128-ctr ").as_deref(), Some("eu2"));
+        if std::env::var_os(CONTEXT_ENV).is_none() {
+            assert_eq!(context("scp -c aes128-ctr "), None);
+            assert_eq!(context("-c "), None);
+        }
+    }
 }

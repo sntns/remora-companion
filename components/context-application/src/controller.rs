@@ -6,7 +6,7 @@ use remora_context::{
     },
     application::{ContextServiceInterface, Error, Result},
     model::{
-        AssumedRole, Context, ContextOverride, ContextSummary, Credentials, Principal,
+        is_role_urn, AssumedRole, Context, ContextOverride, ContextSummary, Credentials, Principal,
         ResolvedContext, RoleOverride, RoleSummary, Selection,
     },
 };
@@ -80,7 +80,7 @@ impl ContextControllerImpl {
     }
 
     fn validate_role_urn(urn: &str) -> Result<()> {
-        if urn.starts_with("urn:") && urn.contains(":role:") {
+        if is_role_urn(urn) {
             Ok(())
         } else {
             Err(Report::new(Error::InvalidRoleUrn(urn.to_owned())))
@@ -151,24 +151,34 @@ impl ContextServiceInterface for ContextControllerImpl {
         })
     }
 
-    async fn create(&self, mut context: Context, replace: bool) -> Result<()> {
+    async fn create(&self, mut context: Context, role: RoleOverride, replace: bool) -> Result<()> {
         Self::validate(&context.name)?;
-        if let Some(choice) = &context.assumed_role {
-            // Checked as a reference only: no credentials yet to verify it
-            // with the platform -- the login does that.
-            Self::role_named(&context, choice)?;
+        let existing = self.store.get(&context.name).change_context(Error::Store)?;
+        if existing.is_some() && !replace {
+            return Err(Report::new(Error::AlreadyExists(context.name)));
         }
-        if let Some(existing) = self.store.get(&context.name).change_context(Error::Store)? {
-            if !replace {
-                return Err(Report::new(Error::AlreadyExists(context.name)));
-            }
-            // Replacing moves the endpoint; like the login, the roles stay.
+        // Replacing moves the endpoint; the login stays -- its own
+        // credentials are keyed by name already, a shared one is this link
+        // -- and so do the roles.
+        let kept = existing.map(|existing| {
             if context.roles.is_empty() {
                 context.roles = existing.roles;
             }
-            if context.assumed_role.is_none() {
-                context.assumed_role = existing.assumed_role;
+            if context.login.is_none() {
+                context.login = existing.login;
             }
+            existing.assumed_role
+        });
+        context.assumed_role = match role {
+            RoleOverride::Keep => kept.flatten(),
+            RoleOverride::Assume(choice) => Some(choice),
+            RoleOverride::Drop => None,
+        };
+        if let Some(choice) = &context.assumed_role {
+            // Against the roles it ends up with, and as a reference only:
+            // no credentials yet to verify it with the platform -- the
+            // login does that.
+            Self::role_named(&context, choice)?;
         }
         self.store.put(&context).change_context(Error::Store)
     }
@@ -277,7 +287,7 @@ impl ContextServiceInterface for ContextControllerImpl {
     }
 
     async fn remove(&self, name: &str) -> Result<()> {
-        let context = self.existing(name)?;
+        self.existing(name)?;
         let users: Vec<_> = self
             .store
             .list()
@@ -289,12 +299,12 @@ impl ContextServiceInterface for ContextControllerImpl {
         if !users.is_empty() {
             return Err(Report::new(Error::InUse(name.to_owned(), users.join(", "))));
         }
-        // A declined context shares its base's login: that one stays.
-        if context.login.is_none() {
-            self.credentials
-                .delete(name)
-                .change_context(Error::Credentials)?;
-        }
+        // Only what is stored under its own name: a declined context's
+        // login is its base's, which stays (anything under its name is a
+        // leftover of a login it had before being declined).
+        self.credentials
+            .delete(name)
+            .change_context(Error::Credentials)?;
         self.store.delete(name).change_context(Error::Store)?;
         if self
             .store
@@ -418,7 +428,10 @@ impl ContextServiceInterface for ContextControllerImpl {
         Ok((resolved, principal, acting))
     }
 
-    async fn roles(&self, over: Option<&ContextOverride>) -> Result<(String, Vec<RoleSummary>)> {
+    async fn roles(
+        &self,
+        over: Option<&ContextOverride>,
+    ) -> Result<(String, Vec<RoleSummary>, Option<AssumedRole>)> {
         let (context, _) = self.select(over)?;
         let assumed = context
             .assumed_role
@@ -433,7 +446,7 @@ impl ContextServiceInterface for ContextControllerImpl {
                 assumed: assumed.as_ref().is_some_and(|role| &role.urn == urn),
             })
             .collect();
-        Ok((context.name, roles))
+        Ok((context.name, roles, assumed))
     }
 
     async fn add_role(&self, over: Option<&ContextOverride>, alias: &str, urn: &str) -> Result<()> {
@@ -575,14 +588,17 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
         for bad in ["", "-x", "../etc", "a/b", "é"] {
-            let report = contexts.create(context(bad), false).await.unwrap_err();
+            let report = contexts
+                .create(context(bad), RoleOverride::Keep, false)
+                .await
+                .unwrap_err();
             assert!(
                 matches!(report.current_context(), Error::InvalidName(_)),
                 "{bad:?}"
             );
         }
         contexts
-            .create(context("eu2-prod.v1"), false)
+            .create(context("eu2-prod.v1"), RoleOverride::Keep, false)
             .await
             .unwrap();
     }
@@ -593,13 +609,19 @@ mod tests {
         let contexts = controller(root.path());
         assert!(contexts.selected(None).await.unwrap().is_none());
 
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         assert_eq!(
             contexts.selected(None).await.unwrap(),
             Some(("eu2".into(), Selection::Only))
         );
 
-        contexts.create(context("dev"), false).await.unwrap();
+        contexts
+            .create(context("dev"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         let report = contexts.selected(None).await.unwrap_err();
         assert!(matches!(report.current_context(), Error::Ambiguous));
 
@@ -620,7 +642,10 @@ mod tests {
     async fn login_stores_only_verified_credentials() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
 
         let report = contexts
             .login(None, token("bad"), RoleOverride::Keep)
@@ -659,7 +684,10 @@ mod tests {
     async fn remove_forgets_credentials_and_current() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts.use_context("eu2").await.unwrap();
         contexts
             .login(None, token("good"), RoleOverride::Keep)
@@ -671,7 +699,10 @@ mod tests {
         assert!(contexts.selected(None).await.unwrap().is_none());
 
         // Re-creating the name must not resurrect the old login.
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         let report = contexts.resolve(None).await.unwrap_err();
         assert!(matches!(report.current_context(), Error::NotLoggedIn(_)));
     }
@@ -680,18 +711,27 @@ mod tests {
     async fn replacing_a_context_keeps_its_login() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts
             .login(None, token("good"), RoleOverride::Keep)
             .await
             .unwrap();
 
-        let report = contexts.create(context("eu2"), false).await.unwrap_err();
+        let report = contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap_err();
         assert!(matches!(report.current_context(), Error::AlreadyExists(_)));
 
         let mut moved = context("eu2");
         moved.endpoint.address = "elsewhere:50051".into();
-        contexts.create(moved, true).await.unwrap();
+        contexts
+            .create(moved, RoleOverride::Keep, true)
+            .await
+            .unwrap();
         let summary = contexts.inspect("eu2").await.unwrap();
         assert_eq!(summary.context.endpoint.address, "elsewhere:50051");
         assert!(summary.credentials.is_some());
@@ -704,7 +744,10 @@ mod tests {
     async fn roles_are_remembered_and_validated() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
 
         contexts.add_role(None, "ops", OPS).await.unwrap();
         let report = contexts.add_role(None, "ops", OPS).await.unwrap_err();
@@ -717,13 +760,16 @@ mod tests {
         let report = contexts.add_role(None, "urn:x", OPS).await.unwrap_err();
         assert!(matches!(report.current_context(), Error::InvalidName(_)));
 
-        let (name, roles) = contexts.roles(None).await.unwrap();
+        let (name, roles, _) = contexts.roles(None).await.unwrap();
         assert_eq!(name, "eu2");
         assert_eq!(roles.len(), 1);
         assert!(!roles[0].assumed);
 
         // Replacing the context keeps its roles, like its login.
-        contexts.create(context("eu2"), true).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, true)
+            .await
+            .unwrap();
         assert_eq!(contexts.roles(None).await.unwrap().1.len(), 1);
 
         contexts.remove_role(None, "ops").await.unwrap();
@@ -734,7 +780,10 @@ mod tests {
     async fn an_assumed_role_applies_until_dropped() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts
             .login(None, token("good"), RoleOverride::Keep)
             .await
@@ -779,7 +828,10 @@ mod tests {
     async fn the_role_is_part_of_the_login() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts.add_role(None, "ops", OPS).await.unwrap();
 
         // A refused role refuses the whole login: nothing is stored.
@@ -821,13 +873,30 @@ mod tests {
     async fn a_context_can_be_created_with_its_role() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        let mut with_role = context("acme");
-        with_role.assumed_role = Some(OPS.into());
-        contexts.create(with_role, false).await.unwrap();
-        let mut unknown = context("bad");
-        unknown.assumed_role = Some("no-such-alias".into());
-        let report = contexts.create(unknown, false).await.unwrap_err();
+        contexts
+            .create(context("acme"), RoleOverride::Assume(OPS.into()), false)
+            .await
+            .unwrap();
+        let report = contexts
+            .create(
+                context("bad"),
+                RoleOverride::Assume("no-such-alias".into()),
+                false,
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(report.current_context(), Error::UnknownRole(_)));
+
+        // A URN without an alias is what the context acts as, all the same.
+        let (_, roles, assumed) = contexts.roles(None).await.unwrap();
+        assert!(roles.is_empty());
+        assert_eq!(
+            assumed,
+            Some(AssumedRole {
+                alias: None,
+                urn: OPS.into()
+            })
+        );
 
         // The login verifies it.
         let (_, _, assumed) = contexts
@@ -838,10 +907,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replacing_a_context_settles_its_role_against_the_roles_it_keeps() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
+        contexts.add_role(None, "ops", OPS).await.unwrap();
+
+        // An alias the replaced context has is known to its replacement.
+        contexts
+            .create(context("eu2"), RoleOverride::Assume("ops".into()), true)
+            .await
+            .unwrap();
+        let assumed = contexts.roles(None).await.unwrap().2.unwrap();
+        assert_eq!(assumed.alias.as_deref(), Some("ops"));
+
+        // Keep keeps it; Drop drops it.
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, true)
+            .await
+            .unwrap();
+        assert!(contexts.roles(None).await.unwrap().2.is_some());
+        contexts
+            .create(context("eu2"), RoleOverride::Drop, true)
+            .await
+            .unwrap();
+        assert!(contexts.roles(None).await.unwrap().2.is_none());
+    }
+
+    #[tokio::test]
+    async fn replacing_a_declined_context_keeps_its_shared_login() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
+        contexts
+            .login(None, token("good"), RoleOverride::Keep)
+            .await
+            .unwrap();
+        contexts
+            .derive("eu2", "acme", None, RoleOverride::Drop, false)
+            .await
+            .unwrap();
+
+        let mut moved = context("acme");
+        moved.endpoint.address = "elsewhere:50051".into();
+        contexts
+            .create(moved, RoleOverride::Keep, true)
+            .await
+            .unwrap();
+        let acme = contexts.inspect("acme").await.unwrap();
+        assert_eq!(acme.context.endpoint.address, "elsewhere:50051");
+        assert_eq!(acme.context.login.as_deref(), Some("eu2"));
+        assert!(contexts.resolve(Some(&flag("acme"))).await.is_ok());
+    }
+
+    #[tokio::test]
     async fn a_context_derives_from_another_with_a_role() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts.add_role(None, "ops", OPS).await.unwrap();
 
         // The source must be logged in: its login is what's reused.
@@ -956,8 +1088,14 @@ mod tests {
     async fn renames_a_context_with_its_login_and_declined_contexts() {
         let root = tempfile::tempdir().unwrap();
         let contexts = controller(root.path());
-        contexts.create(context("eu2"), false).await.unwrap();
-        contexts.create(context("dev"), false).await.unwrap();
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
+        contexts
+            .create(context("dev"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
         contexts.use_context("eu2").await.unwrap();
         contexts
             .login(None, token("good"), RoleOverride::Keep)
