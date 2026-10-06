@@ -1,6 +1,6 @@
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use remora_context::model::ContextOverride;
-use remora_device::{application::DeviceService, model::Labels};
+use remora_device::{application::DeviceService, model::parse_labels};
 use remora_tui as tui;
 use serde_json::json;
 
@@ -41,7 +41,9 @@ pub async fn run(
             format,
             quiet,
         } => {
-            let filter = parse_labels(&labels)?;
+            let filter = parse_labels(&labels)
+                .map_err(Report::new)
+                .change_context(Error::Labels)?;
             let spinner = (!quiet).then(|| tui::Spinner::start("Listing devices"));
             let devices = match service.list(over, &filter, !quiet).await {
                 Ok(devices) => devices,
@@ -86,14 +88,4 @@ pub async fn run(
             Ok(())
         }
     }
-}
-
-fn parse_labels(pairs: &[String]) -> Result<Labels> {
-    pairs
-        .iter()
-        .map(|pair| match pair.split_once('=') {
-            Some((key, value)) if !key.is_empty() => Ok((key.to_owned(), value.to_owned())),
-            _ => Err(Report::new(Error::Label(pair.clone()))),
-        })
-        .collect()
 }
