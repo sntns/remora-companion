@@ -6,15 +6,15 @@ pub const MAX_BLOCK_SIZE: u32 = 1_048_576;
 /// Default squashfs block size (128 KiB), matching `mksquashfs`'s own default.
 pub const DEFAULT_BLOCK_SIZE: u32 = 131_072;
 
-/// Compression algorithm for a squashfs image.
+/// Compression algorithm for a squashfs image: the ones `backhand` can
+/// write with its default features. mksquashfs's lzma and lzo aren't
+/// offered, since every build with them would fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Compression {
     /// Matches `mksquashfs`'s own default when no `-comp` flag is given.
     #[default]
     Gzip,
-    Lzma,
-    Lzo,
     Xz,
     Lz4,
     Zstd,

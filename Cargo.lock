@@ -2962,6 +2962,7 @@ dependencies = [
  "remora-config",
  "remora-format",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3077,9 +3078,9 @@ dependencies = [
  "remora-convert",
  "remora-progress",
  "remora-tui",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
- "tokio-util",
 ]
 
 [[package]]
@@ -3416,6 +3417,7 @@ dependencies = [
  "remora-format",
  "remora-identity",
  "remora-tui",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3628,8 +3630,8 @@ dependencies = [
  "remora-progress",
  "remora-squashfs",
  "remora-tui",
+ "thiserror 1.0.69",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
