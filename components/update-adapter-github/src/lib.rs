@@ -1,8 +1,6 @@
-mod feed;
-mod installer;
+mod service;
 
-pub use feed::GithubReleaseFeedImpl;
-pub use installer::DistInstallerImpl;
+pub use service::{DistInstallerImpl, GithubReleaseFeedImpl};
 
 /// Where rmra and remora-etcher are published: this repository's own
 /// GitHub releases (see dist-workspace.toml).
