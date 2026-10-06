@@ -1,0 +1,15 @@
+[package]
+name = "remora-station"
+description = "Domain crate for the station vertical: claims from devices booting a cloned image, the labelling queue, and the journal, hook runner and operator ports of a provisioning station"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+remora-factory = { path = "../factory" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

@@ -103,6 +103,18 @@ impl DeviceSerial {
     }
 }
 
+/// A CSR that passed verification: PKCS#10, a P-256 key, and a valid
+/// self-signature -- what the platform will accept, checked before it is
+/// asked. Carries what a caller may need to recognise the key again
+/// without parsing the CSR itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedCsr {
+    /// Lowercase hex SHA-256 of the CSR's DER `SubjectPublicKeyInfo`: the
+    /// same key always gives the same fingerprint, whatever the CSR's
+    /// subject or signature nonce.
+    pub public_key_fingerprint: String,
+}
+
 /// What a successful `provision` reports back to its caller: the serial
 /// actually issued (to print on the label -- also the certificate's CN) and
 /// the device's URN (the certificate's URI SAN).

@@ -1,9 +1,22 @@
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
+use p256::{
+    ecdsa::{signature::Verifier, DerSignature, VerifyingKey},
+    pkcs8::DecodePublicKey,
+};
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use remora_factory::{
     adapter::key::{DeviceKey, DeviceKeyAdapter, Error, Result},
-    model::PrivateKey,
+    model::{PrivateKey, VerifiedCsr},
 };
+use sha2::{Digest, Sha256};
+use x509_cert::{
+    der::{oid::ObjectIdentifier, Decode, Encode},
+    request::CertReq,
+};
+
+/// `ecdsa-with-SHA256` (RFC 5758): how a P-256 key signs its CSR, and the
+/// only signature the platform's factory authority takes alongside it.
+const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
 /// A P-256 keypair (rcgen's default, what the platform's factory authority
 /// signs) and a PKCS#10 CSR for it. Milliseconds of CPU, so done inline
@@ -32,6 +45,59 @@ impl DeviceKeyAdapter for DeviceKeyAdapterImpl {
             private_key: PrivateKey::from_pkcs8_der(key_pair.serialize_der()),
         })
     }
+
+    async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr> {
+        verify(csr_der).map_err(|error| Report::new(error).change_context(Error::InvalidCsr))
+    }
+}
+
+/// Which check of `verify` failed.
+#[derive(Debug, thiserror::Error)]
+enum CsrError {
+    #[error("not a DER PKCS#10 CSR")]
+    NotPkcs10(#[source] x509_cert::der::Error),
+    #[error("unreadable public key")]
+    UnreadableKey(#[source] x509_cert::der::Error),
+    #[error("not a P-256 public key")]
+    NotP256(#[source] p256::pkcs8::spki::Error),
+    #[error("signed with {0}, not ecdsa-with-SHA256")]
+    Algorithm(ObjectIdentifier),
+    #[error("malformed signature")]
+    MalformedSignature,
+    #[error("unreadable request info")]
+    UnreadableInfo(#[source] x509_cert::der::Error),
+    #[error("the self-signature does not verify")]
+    BadSignature,
+}
+
+/// The checks behind `verify_csr`, each failure saying which one failed.
+fn verify(csr_der: &[u8]) -> std::result::Result<VerifiedCsr, CsrError> {
+    let request = CertReq::from_der(csr_der).map_err(CsrError::NotPkcs10)?;
+    let spki_der = request
+        .info
+        .public_key
+        .to_der()
+        .map_err(CsrError::UnreadableKey)?;
+    // Checks the id-ecPublicKey algorithm and the secp256r1 curve too.
+    let key = p256::PublicKey::from_public_key_der(&spki_der).map_err(CsrError::NotP256)?;
+    if request.algorithm.oid != ECDSA_WITH_SHA256 {
+        return Err(CsrError::Algorithm(request.algorithm.oid));
+    }
+    let signature = request
+        .signature
+        .as_bytes()
+        .and_then(|bytes| DerSignature::try_from(bytes).ok())
+        .ok_or(CsrError::MalformedSignature)?;
+    let signed = request.info.to_der().map_err(CsrError::UnreadableInfo)?;
+    VerifyingKey::from(key)
+        .verify(&signed, &signature)
+        .map_err(|_| CsrError::BadSignature)?;
+    Ok(VerifiedCsr {
+        public_key_fingerprint: Sha256::digest(&spki_der)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    })
 }
 
 #[cfg(test)]
@@ -75,6 +141,81 @@ mod tests {
         let key = DeviceKeyAdapterImpl.generate(None).await.unwrap();
         let (_, csr) = X509CertificationRequest::from_der(&key.csr_der).unwrap();
         assert!(common_names(&csr).is_empty());
+    }
+
+    fn csr_for(key_pair: &KeyPair, common_name: &str) -> Vec<u8> {
+        let mut params = CertificateParams::default();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, common_name);
+        params
+            .serialize_request(key_pair)
+            .unwrap()
+            .der()
+            .as_ref()
+            .to_vec()
+    }
+
+    fn reason(report: &Report<Error>) -> String {
+        assert!(matches!(report.current_context(), Error::InvalidCsr));
+        format!("{report:?}")
+    }
+
+    #[tokio::test]
+    async fn accepts_its_own_csr_and_names_the_key_not_the_request() {
+        let key_pair = KeyPair::generate().unwrap();
+        let first = DeviceKeyAdapterImpl
+            .verify_csr(&csr_for(&key_pair, "first"))
+            .await
+            .unwrap();
+        let second = DeviceKeyAdapterImpl
+            .verify_csr(&csr_for(&key_pair, "second"))
+            .await
+            .unwrap();
+        assert_eq!(first, second, "same key, same fingerprint");
+        assert_eq!(first.public_key_fingerprint.len(), 64);
+
+        let other = DeviceKeyAdapterImpl
+            .verify_csr(&csr_for(&KeyPair::generate().unwrap(), "first"))
+            .await
+            .unwrap();
+        assert_ne!(first, other);
+
+        let generated = DeviceKeyAdapterImpl.generate(None).await.unwrap();
+        DeviceKeyAdapterImpl
+            .verify_csr(&generated.csr_der)
+            .await
+            .expect("generate's own CSR verifies");
+    }
+
+    #[tokio::test]
+    async fn refuses_garbage_another_curve_and_a_broken_signature() {
+        let report = DeviceKeyAdapterImpl
+            .verify_csr(b"not a csr")
+            .await
+            .unwrap_err();
+        assert!(reason(&report).contains("not a DER PKCS#10 CSR"));
+
+        let p384 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).unwrap();
+        let report = DeviceKeyAdapterImpl
+            .verify_csr(&csr_for(&p384, "1H7Z"))
+            .await
+            .unwrap_err();
+        assert!(reason(&report).contains("not a P-256 public key"));
+
+        // Flip a byte of the subject: still a well-formed request, but no
+        // longer the one the key signed.
+        let mut tampered = csr_for(&KeyPair::generate().unwrap(), "1H7Z");
+        let at = tampered
+            .windows(4)
+            .position(|window| window == b"1H7Z")
+            .unwrap();
+        tampered[at] = b'2';
+        let report = DeviceKeyAdapterImpl
+            .verify_csr(&tampered)
+            .await
+            .unwrap_err();
+        assert!(reason(&report).contains("does not verify"));
     }
 
     #[tokio::test]

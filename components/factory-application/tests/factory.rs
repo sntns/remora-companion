@@ -407,3 +407,74 @@ fn from_parts_rejects_what_the_platform_would() {
         })
     );
 }
+
+/// A device's own CSR is checked before the platform hears of it: a bad
+/// one costs no serial.
+#[tokio::test]
+async fn provision_csr_refuses_a_bad_csr_without_calling_the_platform() {
+    use remora_factory::application::Error;
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let report = controller(RecordingProvisioning { seen: seen.clone() })
+        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), b"garbage")
+        .await
+        .unwrap_err();
+    assert!(matches!(report.current_context(), Error::InvalidCsr));
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn provision_csr_returns_the_identity_for_a_device_held_key() {
+    use remora_factory::adapter::key::DeviceKeyAdapter;
+
+    // The device's key, generated "on the device": only its CSR travels.
+    let key = DeviceKeyAdapterImpl.generate(None).await.unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let identity = controller(RecordingProvisioning { seen: seen.clone() })
+        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .await
+        .unwrap();
+    assert_eq!(identity.serial_number, "hubs-1H7Z");
+    assert_eq!(
+        identity.access_url,
+        "https://remora.access.eu2.sntns.io/access/v1"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn provision_csr_has_no_override_for_an_empty_access_url() {
+    use remora_factory::{adapter::key::DeviceKeyAdapter, application::Error};
+
+    let key = DeviceKeyAdapterImpl.generate(None).await.unwrap();
+    let report = controller(EmptyAccessUrlProvisioning)
+        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .await
+        .unwrap_err();
+    assert!(matches!(report.current_context(), Error::MissingAccessUrl));
+}
+
+/// A device keeping its own key (a hub claiming from a station): its key
+/// made here, its identity issued for the CSR elsewhere, its
+/// `remora-factory.yaml` written exactly as `provision` writes one.
+#[tokio::test]
+async fn a_device_held_key_and_an_identity_issued_elsewhere_make_its_credential() {
+    let factory = controller(FakeProvisioning);
+    let key = factory.generate_device_key().await.unwrap();
+    let identity = factory
+        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .await
+        .unwrap();
+    let output = temp_path("claimed");
+    factory
+        .write_credential(key.private_key, identity, &output)
+        .await
+        .unwrap();
+    let yaml = fs::read_to_string(&output).unwrap();
+    let _ = fs::remove_file(&output);
+    assert!(
+        yaml.contains("key-id: \"test:kms:certificate:hubs-1H7Z\""),
+        "{yaml}"
+    );
+    assert!(yaml.contains("BEGIN EC PRIVATE KEY"), "{yaml}");
+}

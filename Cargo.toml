@@ -43,6 +43,17 @@ members = [
     "components/factory-adapter-local",
     "components/factory-application",
     "components/factory-application-transport-cli",
+    "components/station",
+    "components/station-application",
+    "components/station-adapter-jsonl",
+    "components/station-adapter-hooks-process",
+    "components/station-adapter-operator-tui",
+    "components/station-application-transport-http",
+    "components/station-application-transport-cli",
+    "components/station-protocol",
+    "components/claim",
+    "components/claim-application",
+    "components/claim-adapter-http",
     "components/platform-grpc",
     "components/tui",
     "components/completion",
@@ -126,6 +137,13 @@ tokio-util = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# The provisioning station: its HTTP server (axum, already under tonic),
+# station.yaml (the same YAML crate as remora-edge's configuration), and
+# its durations and journal timestamps.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
+yaml_serde = "0.10"
+humantime = "2"
+
 # HTTP client of remora-update-adapter-github (release feed, installers).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
@@ -140,6 +158,12 @@ rcgen = "0.14"
 # PKCS8->SEC1 format conversion of a key rcgen already generated.
 p256 = { version = "0.14", features = ["pkcs8", "std"] }
 pem = "4.0"
+# Checking a CSR a device made itself (the provisioning station's claims):
+# PKCS#10 parsing, and the SHA-256 of its public key that names the claim.
+# The same der/spki generation as p256 0.14, so the key parses straight
+# from the request's SubjectPublicKeyInfo.
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.11"
 
 # rmra's gRPC client to sntns-platform's public gateways (remora channel,
 # iam). The .proto files are vendored under components/platform-grpc/proto

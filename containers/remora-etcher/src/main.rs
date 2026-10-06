@@ -15,7 +15,8 @@ struct Options {
     #[command(subcommand)]
     command: Commands,
 
-    /// Before the command: the context it runs against (factory, batch).
+    /// Before the command: the context it runs against (factory, batch,
+    /// station).
     #[command(flatten)]
     context: remora_context_application_transport_cli::ContextArgs,
 
@@ -88,6 +89,11 @@ enum Commands {
     /// image with `identity create`.
     #[command(subcommand)]
     Factory(remora_factory_application_transport_cli::Command),
+
+    /// Run a provisioning station for hubs claiming their identity at
+    /// first boot (`serve`), or play such a hub (`simulate`).
+    #[command(subcommand)]
+    Station(remora_station_application_transport_cli::Command),
 
     /// Update remora-etcher itself to its latest release.
     Update(remora_update_application_transport_cli::Args),
@@ -173,6 +179,16 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
         ),
         Commands::Factory(cmd) => exit_on_error(
             remora_factory_application_transport_cli::run(cmd, &services.factory, over).await,
+            verbose,
+        ),
+        Commands::Station(cmd) => exit_on_error(
+            remora_station_application_transport_cli::run(
+                cmd,
+                &services.station,
+                &services.claim,
+                over,
+            )
+            .await,
             verbose,
         ),
         Commands::Update(args) => exit_on_error(

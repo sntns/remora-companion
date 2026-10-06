@@ -10,9 +10,12 @@ publish.workspace = true
 remora-factory = { path = "../factory" }
 async-trait.workspace = true
 error-stack.workspace = true
+thiserror.workspace = true
 rcgen.workspace = true
 p256.workspace = true
 pem.workspace = true
+x509-cert.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 

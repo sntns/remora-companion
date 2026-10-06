@@ -51,6 +51,9 @@ impl FactoryProvisioningAdapter for FactoryGatewayAdapterImpl {
                         Report::new(Error::AlreadyExists(device_name.clone())).attach(summary)
                     }
                     (tonic::Code::Unavailable, _) => Report::new(Error::Request).attach(summary),
+                    (tonic::Code::Unauthenticated, _) => {
+                        Report::new(Error::Unauthenticated).attach(summary)
+                    }
                     _ => Report::new(Error::Refused).attach(summary),
                 }
             })?

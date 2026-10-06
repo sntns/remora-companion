@@ -4,6 +4,8 @@ pub enum Error {
     Keygen,
     #[error("failed to build a certificate signing request")]
     Csr,
+    #[error("invalid certificate signing request")]
+    InvalidCsr,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

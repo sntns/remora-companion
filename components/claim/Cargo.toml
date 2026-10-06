@@ -1,0 +1,17 @@
+[package]
+name = "remora-claim"
+description = "Domain crate for the claim vertical: a device claiming its factory identity from a provisioning station -- the station client port and the claim application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The claim's own types are the station's (a request, a status, an ack):
+# both ends of one protocol, named once.
+remora-station = { path = "../station" }
+remora-progress = { path = "../progress" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

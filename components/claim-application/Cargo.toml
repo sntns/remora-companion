@@ -1,0 +1,31 @@
+[package]
+name = "remora-claim-application"
+description = "Use-case implementation for the claim vertical: key, claim with retries, the labelling queue followed, the credential written and acknowledged"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-claim = { path = "../claim" }
+remora-station = { path = "../station" }
+remora-factory = { path = "../factory" }
+remora-progress = { path = "../progress" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# The real factory use case and local adapters (the key, the yaml); the
+# station is the one stub, being the network port.
+remora-factory-application = { path = "../factory-application" }
+remora-factory-adapter-local = { path = "../factory-adapter-local" }
+remora-factory-adapter-grpc = { path = "../factory-adapter-grpc" }
+remora-context = { path = "../context" }
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+remora-context-adapter-grpc = { path = "../context-adapter-grpc" }
+tempfile.workspace = true
+tokio-stream.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

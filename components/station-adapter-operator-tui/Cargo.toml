@@ -1,0 +1,11 @@
+[package]
+name = "remora-station-adapter-operator-tui"
+description = "OperatorAdapter implementation: the station's labelling console on the terminal -- the dashboard on stderr, issued serials on stdout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-station = { path = "../station" }
+remora-tui = { path = "../tui" }

@@ -3,8 +3,8 @@
 DDD-style workspace, matching [remora-edge](https://github.com/sntns/remora-edge)'s
 convention. One `components/<vertical>` crate group per bounded context
 (currently `disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
-`convert`, `batch`, `factory` for remora-etcher; `channel`, `ota`, `device`
-for rmra; `context` and `update` for both), plus shared utility crates with
+`convert`, `batch`, `factory`, `station`, `claim` for remora-etcher;
+`channel`, `ota`, `device` for rmra; `context` and `update` for both), plus shared utility crates with
 no vertical prefix, plus the binaries in `containers/` (`remora-etcher`,
 `rmra`). Components are
 generic, not owned by one binary: the directory is `components/<vertical>`
@@ -80,8 +80,22 @@ completion: value kinds, the provider registry, the `completion` command,
 the remote-values `Cache` and `command_line()` for providers),
 `remora-progress` (progress events, `OperationContext`, and
 `cancelled_by_ctrl_c()`: the token every transport hands a long operation,
-so Ctrl-C stops it between steps), `remora-format`, and
-`remora-platform-grpc` (the vendored protos and the gateway connection).
+so Ctrl-C stops it between steps), `remora-format`,
+`remora-platform-grpc` (the vendored protos and the gateway connection), and
+`remora-station-protocol` (the provisioning station's HTTP wire types and
+error codes: one definition, used by the station's HTTP transport and by
+`claim-adapter-http`).
+
+`station` is the provisioning station (`remora-etcher station serve`): it
+relays SD-cloned hubs' identity requests to the platform through
+`FactoryService`, queues them for labelling and runs the operator's hooks.
+`claim` is the hub's side of that contract, used by `station simulate`
+through `ClaimService` only. The station is stateful by nature: its use
+case holds the claims in memory, journals them through a port, and tracks
+hook runs; the console loop (stdin, tick, Ctrl-C) lives in the transport,
+which drives the port's `handle`/`tick` and calls `shutdown` (draining hook
+runs, flushing the journal) before the process exits. `OperatorAdapter` is
+display only.
 
 ## File names inside a crate
 
@@ -220,7 +234,9 @@ lives in `remora-ota-adapter-grpc`'s `test_gateway` module behind the
 adapter's, the use case's and the binary's tests share one fake (`cargo run
 -p remora-ota-adapter-grpc --features test-gateway --example fake-gateway`
 serves it for trying the commands by hand). The same fake backs
-`device-adapter-grpc`'s and `factory-adapter-grpc`'s tests. Like the
+`device-adapter-grpc`'s and `factory-adapter-grpc`'s tests; it also serves
+IAM `whoami` and can revoke credentials (the station checks its login at
+start and answers 503 once it's revoked). Like the
 platform, it commits an upload only when its stream ends cleanly; tonic
 hands a client reset to a handler as a clean end, so the fake yields once
 to let hyper drop the handler first. An application crate that needs

@@ -1,0 +1,34 @@
+[package]
+name = "remora-station-application"
+description = "Use-case implementation for the station vertical: claims, idempotence, quota, the labelling queue, presence and hooks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-station = { path = "../station" }
+remora-context = { path = "../context" }
+remora-factory = { path = "../factory" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# The whole use case, as `serve` wires it, against the in-process fake
+# gateway: the real journal, hook runner (real scripts in a temporary
+# directory), factory and context verticals. Only the operator console is
+# a stub (see the tests).
+remora-station-adapter-jsonl = { path = "../station-adapter-jsonl" }
+remora-station-adapter-hooks-process = { path = "../station-adapter-hooks-process" }
+remora-factory-application = { path = "../factory-application" }
+remora-factory-adapter-grpc = { path = "../factory-adapter-grpc" }
+remora-factory-adapter-local = { path = "../factory-adapter-local" }
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+remora-context-adapter-grpc = { path = "../context-adapter-grpc" }
+remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+rcgen.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
