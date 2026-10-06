@@ -3,8 +3,10 @@
 DDD-style workspace, matching [remora-edge](https://github.com/sntns/remora-edge)'s
 convention. One `components/<vertical>` crate group per bounded context
 (currently `disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
-`convert`, `batch`, `factory`), plus shared utility crates with no vertical
-prefix, plus the binaries in `containers/` (`remora-etcher`). Components are
+`convert`, `batch`, `factory` for remora-etcher; `channel`, `ota`, `device`
+for rmra; `context` and `update` for both), plus shared utility crates with
+no vertical prefix, plus the binaries in `containers/` (`remora-etcher`,
+`rmra`). Components are
 generic, not owned by one binary: the directory is `components/<vertical>`
 and the package is `remora-<vertical>` (lib `remora_<vertical>`), exactly
 like remora-edge — never prefix a component with a binary's name. Before
@@ -40,7 +42,8 @@ Each vertical is (at least) four crates, never one:
   (e.g. `-adapter-ext4` wraps `am-fs-ext4`). One crate per real backend, not
   per OS: cross-platform dispatch (`linux.rs`/`macos.rs`/`windows.rs` behind
   `#[cfg(target_os = "...")]`) stays *inside* one adapter crate (see
-  `remora-disk-adapter-native`) — only genuinely alternate backends
+  `remora-disk-adapter-native`, where only `linux.rs` exists yet and other
+  platforms are refused as unsupported) — only genuinely alternate backends
   (ext4 vs. vfat, GPT vs. MBR within one reader) get split further, and GPT/
   MBR specifically stay as internal modules of one `-adapter-partition-table`
   crate because they're always tried together (`read()` falls back from one
@@ -59,13 +62,26 @@ that isn't itself a bounded context:
   swapping backends *and* faking behavior in tests both possible; with a
   single backend and only the second need applying, one crate is enough
   (same reasoning as remora-edge's own `components/store`/`config`).
-- `remora-scratch` — a plain function (`unique_path`) generating a
-  unique temp path. **Not** wrapped in a port/DI seam: which directory
-  scratch files live in isn't a business decision any test needs to
-  substitute, so the ceremony would be pure overhead. Contrast this
-  deliberately with `fs-walk`, which *is* seamed — its I/O behavior actually
-  needs faking; a temp path generator's doesn't. When adding a new
-  cross-vertical helper, ask which case it is before defaulting to a port.
+  Its `walkdir`-backed implementation sits behind a default `walkdir`
+  feature, so a domain crate can name its model types with
+  `default-features = false` without pulling the behavior in.
+- `remora-scratch` — `ScratchDir`, a private scratch directory (random name,
+  created exclusively with mode 0700, removed on drop) and `write_private`
+  (0600, `create_new`) for secrets that must briefly touch the disk.
+  **Not** wrapped in a port/DI seam: where scratch files live isn't a
+  business decision any test needs to substitute. Contrast this deliberately
+  with `fs-walk`, which *is* seamed — its I/O behavior actually needs
+  faking; a scratch directory's doesn't. When adding a new cross-vertical
+  helper, ask which case it is before defaulting to a port.
+
+The other unseamed utility crates, same reasoning: `remora-tui` (all
+terminal presentation, see below), `remora-completion` (dynamic shell
+completion: value kinds, the provider registry, the `completion` command,
+the remote-values `Cache` and `command_line()` for providers),
+`remora-progress` (progress events, `OperationContext`, and
+`cancelled_by_ctrl_c()`: the token every transport hands a long operation,
+so Ctrl-C stops it between steps), `remora-format`, and
+`remora-platform-grpc` (the vendored protos and the gateway connection).
 
 ## File names inside a crate
 
@@ -86,8 +102,13 @@ Mirrors remora-edge exactly:
   private helpers it needs (these stay as plain `std::result::Result<T,
   Error>` internally, wrapped in `Report::new`/`.change_context(...)` only
   at the trait-impl method boundary — see `remora-image-adapter-ext4`
-  for the pattern). Inside a **transport-cli crate**: `service.rs` holds the
-  `Command` enum and `run()`.
+  for the pattern; a helper's error may carry the underlying `io::Error` as a
+  `#[source]` field, which `Report::new` keeps in the chain). Inside a
+  **transport-cli crate**: `service.rs` holds the `Command` enum and
+  `run()`, and `error.rs` the transport's own error layer — a transport
+  never returns another layer's `Result`. A transport with several
+  top-level commands may hold one module per command instead (`ota`:
+  `release.rs`, `deployment.rs`, plus `shared.rs`).
 
 ## Dependency injection
 
@@ -102,37 +123,55 @@ collision with another value of the same generic shape (see `ext4_fs`/
 `vfat_fs: Arc<dyn PartitionFilesystem>` in `bootstrap.rs` — both are the
 same type, so only one could ever live in the container at a time).
 
-`busybody`'s API is async (so it can support resolvers that need to await
-something), which is the *only* reason this binary depends on `tokio` at
-all — `bootstrap::wire()` runs inside a throwaway `tokio::runtime::Runtime`
-in `main()`, and every use case downstream stays plain synchronous Rust.
-Don't let async leak past `wire()`.
+Both binaries are async end to end: application ports (`*ServiceInterface`)
+are `#[async_trait]`, transports' `run` are `async fn`, and `main()` builds
+one multi-thread runtime by hand (not `#[tokio::main]`: shell completion
+must answer before it, since a completion provider runs a runtime of its
+own and runtimes don't nest). rmra is network I/O throughout; remora-etcher
+shares transports and verticals with it (`context`, `factory`, `update`) and
+drives progress rendering concurrently with each operation. What must not
+happen is blocking work of any size on a runtime thread: a use case or
+adapter doing real file or device I/O runs it in
+`tokio::task::spawn_blocking` (see `flash`, `squashfs`, `image`,
+`convert`). Cheap synchronous adapters stay synchronous behind their port
+(`context-adapter-file`); `ota-adapter-file` is async (`tokio::fs`) because
+it streams a whole bundle alongside an upload.
 
-`rmra` is the exception, by nature rather than by habit: everything it does
-is network I/O (gRPC to sntns-platform, a bidirectional channel relayed to
-stdio, an ssh child whose signals it relays), so its ports, use cases and
-transports are async end to end on one `#[tokio::main]` runtime. Its
-blocking local-file adapters (`context-adapter-file`) stay synchronous, as
-everywhere else.
+## Both binaries
+
+- **stdout is output, stderr is everything else.** Tables, JSON, a
+  channel's bytes and a manufactured serial go to stdout; status lines,
+  spinners, progress, prompts and errors go to stderr through `remora-tui`
+  (clack-style, via cliclack, degrading to plain lines when stderr isn't a
+  terminal; `raw_error`/`debug` for ssh's raw-mode terminal and
+  `--verbose` lines). `rmra channel open` is an ssh ProxyCommand: one stray
+  byte on its stdout corrupts the session. Transports never `println!`
+  decoration and never draw with cliclack directly — add what's missing to
+  `remora-tui` so every command looks alike.
+- **Secrets never reach a `Debug`.** `Credentials`, `remora-platform-grpc`'s
+  connection types, the channel's `SshKeys` and factory's `PrivateKey`
+  redact or don't implement `Debug`, because error-stack reports print with
+  `{:?}`. Keep it that way for any new type holding a token, a password or
+  a private key. A secret written to disk is written 0600 (`write_private`,
+  factory's credential writer) and, when temporary, removed on every path.
+- **Contexts are shared.** Both binaries mount the same context commands
+  (`login`, `logout`, `whoami`, `context …` incl. `rename` and `role`) on
+  the same store, and take `-c/--context` (`ContextArgs`) before the
+  command, never after. The role a context acts as is the context's
+  setting only — no command takes a role of its own.
+- **Domain errors don't name a binary.** A domain error says what is wrong
+  ("not logged in to context \"eu2\""); the context transport's
+  `with_hint` attaches what to run, with the program name the composition
+  root passes in. Every binary's top-level error handler calls it.
 
 ## rmra specifics
 
-- **stdout is output, stderr is everything else.** Tables, JSON and a
-  channel's bytes go to stdout; status lines, spinners, prompts and errors
-  go to stderr through `remora-tui` (clack-style, via cliclack, degrading
-  to plain lines when stderr isn't a terminal). `rmra channel open` is an
-  ssh ProxyCommand: one stray byte on its stdout corrupts the session.
-  Transports never `println!` decoration and never draw with cliclack
-  directly — add what's missing to `remora-tui` so every command looks alike.
-- **Secrets never reach a `Debug`.** `Credentials` and `remora-platform-
-  grpc`'s connection types redact or don't implement `Debug`, because
-  error-stack reports print with `{:?}`. Keep it that way for any new type
-  holding a token, a password or a private key.
 - **Vendored protos.** `components/platform-grpc/proto` holds client-side
   subsets of sntns-platform's gateway APIs (see its README for what was
-  stripped and why it's wire-safe). Re-copy from upstream rather than
-  editing; package, service, message names and field numbers must stay
-  upstream's.
+  stripped and why it's wire-safe: each upstream `*_service`/`*_model` pair
+  is merged into one file, and the README records the upstream commit of
+  each RPC kept). Re-copy from upstream rather than editing; package,
+  service, message names and field numbers must stay upstream's.
 - **The platform contract is upstream's.** The remora channel's behavior
   (half-close as `eof_response`, the 5 s hangup grace, refused ssh options,
   the ssh pinning options) mirrors sntns-platform's Go client
@@ -146,16 +185,15 @@ application/adapter layer defines its own small `thiserror` `Error` enum
 (see "File names" above) and converts across a layer boundary with
 `.change_context(Error::Variant)` (or `.change_context_lazy(|| ...)` when
 building the new variant needs an owned value, e.g. a cloned `PathBuf`) —
-never a blanket `From` impl chaining unrelated layers' errors together.
+never a blanket `From` impl chaining unrelated layers' errors together, and
+never `map_err(|_| Report::new(..))`, which throws the cause away.
 `Report::new(Error::Variant)` starts a fresh chain at a leaf (e.g. wrapping
 a raw `std::io::Error` whose value you don't want to keep). At the very top,
-`containers/remora-etcher/src/main.rs` prints the error via `{:?}` (Debug),
-not `{}` (Display) — Display only shows the outermost context's message,
-while Debug walks the whole `error-stack` chain with a file:line per hop,
-which is almost always what you actually want to see. `rmra` renders the
-same chain for an operator instead (`remora_tui::render_report`: each
-context and printable attachment on its own line, outermost first), and
-the full `{:?}` with `--verbose`.
+Display (`{}`) would only show the outermost context's message, while Debug
+(`{:?}`) walks the whole `error-stack` chain with a file:line per hop —
+which both binaries print with `-v`/`--verbose`. By default they render the
+chain for an operator instead (`remora_tui::render_report`: each context
+and printable attachment on its own line, outermost first, hints included).
 
 ## Testing
 
@@ -181,6 +219,10 @@ lives in `remora-ota-adapter-grpc`'s `test_gateway` module behind the
 `test-gateway` feature, enabled from `[dev-dependencies]` only, so the
 adapter's, the use case's and the binary's tests share one fake (`cargo run
 -p remora-ota-adapter-grpc --features test-gateway --example fake-gateway`
-serves it for trying the commands by hand). An application crate that needs
+serves it for trying the commands by hand). The same fake backs
+`device-adapter-grpc`'s and `factory-adapter-grpc`'s tests. Like the
+platform, it commits an upload only when its stream ends cleanly; tonic
+hands a client reset to a handler as a clean end, so the fake yields once
+to let hyper drop the handler first. An application crate that needs
 the platform port but isn't about it may use a small hand-written stub of
 that one trait (see `context-application`'s tests).
