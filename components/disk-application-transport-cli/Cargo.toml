@@ -13,3 +13,4 @@ remora-disk = { path = "../disk" }
 remora-format = { path = "../format" }
 clap.workspace = true
 error-stack.workspace = true
+thiserror.workspace = true
