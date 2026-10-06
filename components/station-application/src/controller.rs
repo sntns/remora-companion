@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex as SyncMutex, OnceLock,
@@ -7,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use error_stack::{Report, ResultExt};
+use error_stack::{AttachmentKind, FrameKind, Report, ResultExt};
 use remora_context::{application::ContextService, model::ContextOverride};
 use remora_factory::{
     adapter::provisioning::{self, ProvisionedIdentity},
@@ -17,7 +18,7 @@ use remora_factory::{
 use remora_station::{
     adapter::{
         hooks::{ClaimRecord, HookEvent, HookInvocation, HookRun, HookRunnerAdapterService},
-        journal::{JournalAdapterService, JournalEntry, JournalEvent},
+        journal::{self, JournalAdapterService, JournalEntry, JournalEvent},
         operator::{
             Counters, HubSummary, LabelBlock, OperatorAdapterService, OperatorEvent, OperatorInput,
         },
@@ -28,10 +29,13 @@ use remora_station::{
         HardwareInfo, Hello, ImageInfo, LabelState, StationConfig, StationSummary,
     },
 };
-use tokio::sync::Mutex;
+use tokio::{
+    sync::{mpsc, oneshot, Mutex, OwnedMutexGuard},
+    task::JoinSet,
+};
 
 /// The station vertical's use case. Issues through the injected
-/// `FactoryService` as the context `start` resolved (the CSR checked, its
+/// `FactoryService` as the context `start` checked (the CSR verified, its
 /// key fingerprint naming the claim), keeps every claim in memory behind
 /// one lock, journals each transition through the injected
 /// `JournalAdapterService` (and rebuilds from it at `start`), runs hooks
@@ -41,7 +45,10 @@ use tokio::sync::Mutex;
 /// The platform call is the one slow step and is made outside the state
 /// lock, so claims issue in parallel; a lock per claim id makes concurrent
 /// requests for one key wait for the first one's answer instead of
-/// asking twice.
+/// asking twice. Disk syncs are off that lock too: transitions hand their
+/// journal entries, in order, to a single writer task, and only what must
+/// be on disk before a device hears of it (`Received`, `Issued`) is waited
+/// for -- by the request concerned, without the lock.
 pub struct StationControllerImpl(Arc<Shared>);
 
 impl StationControllerImpl {
@@ -62,6 +69,7 @@ impl StationControllerImpl {
             state: Mutex::new(State::default()),
             claim_locks: SyncMutex::new(HashMap::new()),
             searching: AtomicUsize::new(0),
+            hook_runs: SyncMutex::new(Some(JoinSet::new())),
         }))
     }
 }
@@ -80,6 +88,10 @@ struct Shared {
     claim_locks: SyncMutex<HashMap<ClaimId, Arc<Mutex<()>>>>,
     /// Claims waiting on the platform.
     searching: AtomicUsize,
+    /// The hook runs under way, so that `shutdown` can wait for them (and
+    /// stop them past `hook-timeout`); `None` once it has started, when no
+    /// new run starts.
+    hook_runs: SyncMutex<Option<JoinSet<()>>>,
 }
 
 struct Running {
@@ -87,11 +99,29 @@ struct Running {
     over: Option<ContextOverride>,
     /// The resolved context's name.
     context: String,
+    /// The journal's single writer (see `write_journal`).
+    journal: mpsc::UnboundedSender<Write>,
+}
+
+#[derive(Debug)]
+enum Write {
+    /// An entry; its outcome goes to the sender when one waits for it,
+    /// else a failure is the writer's to report.
+    Append(
+        Box<JournalEntry>,
+        Option<oneshot::Sender<journal::Result<()>>>,
+    ),
+    /// Answered once every entry sent before it has been appended.
+    Flush(oneshot::Sender<()>),
 }
 
 #[derive(Default)]
 struct State {
     claims: HashMap<ClaimId, Claim>,
+    /// Issued by the platform, but not in the journal yet: held back (the
+    /// device is told to retry) until the journal records them, so that a
+    /// retry is answered from here and never calls the platform again.
+    pending: HashMap<ClaimId, Claim>,
     /// Issued claims waiting for their label, oldest first; the active one
     /// is not in it.
     queue: VecDeque<ClaimId>,
@@ -217,15 +247,44 @@ impl Drop for Searching<'_> {
     }
 }
 
+/// Holds a claim id's lock: one issuance per key at a time. Its table
+/// entry goes with the last holder, so the table only ever holds keys
+/// being issued, not every key ever seen.
+struct ClaimSlot<'a> {
+    locks: &'a SyncMutex<HashMap<ClaimId, Arc<Mutex<()>>>>,
+    id: ClaimId,
+    _guard: OwnedMutexGuard<()>,
+}
+
+impl Drop for ClaimSlot<'_> {
+    fn drop(&mut self) {
+        let mut locks = self
+            .locks
+            .lock()
+            .expect("the claim lock table is never poisoned");
+        // The table's reference and this guard's, and no request waiting:
+        // every clone is made under the table's lock, so none can appear
+        // meanwhile.
+        if locks
+            .get(&self.id)
+            .is_some_and(|lock| Arc::strong_count(lock) <= 2)
+        {
+            locks.remove(&self.id);
+        }
+    }
+}
+
 /// What a factory failure means for the device: its CSR (it makes a new
 /// key), the station's configuration or the platform's refusal (it waits
-/// for someone to fix it), an existing device name, or an unreachable
-/// platform (it retries). The provisioning port's error says which, a few
-/// hops down the chain.
+/// for someone to fix it), an existing device name, or a platform that
+/// can't be reached or no longer accepts the context's credentials (it
+/// retries, once someone has acted). The provisioning port's error says
+/// which, a few hops down the chain.
 fn platform_error(report: Report<factory::Error>) -> Report<Error> {
     let next = match report.current_context() {
         factory::Error::InvalidCsr => Error::InvalidCsr,
-        factory::Error::MissingAccessUrl => Error::Refused,
+        factory::Error::MissingAccessUrl => Error::MissingAccessUrl,
+        factory::Error::Context(_) => Error::Unavailable,
         _ => match report.downcast_ref::<provisioning::Error>() {
             Some(provisioning::Error::AlreadyExists(name)) => Error::AlreadyExists(name.clone()),
             Some(provisioning::Error::Refused) => Error::Refused,
@@ -235,6 +294,74 @@ fn platform_error(report: Report<factory::Error>) -> Report<Error> {
     report.change_context(next)
 }
 
+/// Every context and printable attachment of `report`, outermost first,
+/// each once: what the operator reads about a refusal.
+fn describe<C>(report: &Report<C>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for frame in report.frames() {
+        let part = match frame.kind() {
+            FrameKind::Context(context) => context.to_string(),
+            FrameKind::Attachment(AttachmentKind::Printable(printable)) => printable.to_string(),
+            FrameKind::Attachment(_) => continue,
+        };
+        if !parts.contains(&part) {
+            parts.push(part);
+        }
+    }
+    parts.join(": ")
+}
+
+/// The journal's one writer: appends in the order entries were sent --
+/// under the state lock for transitions, so the journal's order is the
+/// state's -- so that no request waits on a disk sync unless it must (see
+/// `record_durably`). Alerts the operator when the journal starts failing,
+/// and says when it works again.
+async fn write_journal(
+    journal: JournalAdapterService,
+    operator: OperatorAdapterService,
+    path: PathBuf,
+    mut writes: mpsc::UnboundedReceiver<Write>,
+) {
+    let mut failing = false;
+    while let Some(write) = writes.recv().await {
+        let (entry, reply) = match write {
+            Write::Append(entry, reply) => (entry, reply),
+            Write::Flush(done) => {
+                let _ = done.send(());
+                continue;
+            }
+        };
+        let appended = journal.append(&path, &entry).await;
+        match (&appended, failing) {
+            (Err(report), false) => {
+                failing = true;
+                operator.show(&OperatorEvent::Alert(format!(
+                    "{report} -- new claims are turned away until it can be written again; \
+                     the production register is missing an entry for claim {}",
+                    entry.claim_id
+                )));
+            }
+            (Err(_), true) if reply.is_none() => {
+                operator.show(&OperatorEvent::Warning(format!(
+                    "the production register is missing an entry for claim {}",
+                    entry.claim_id
+                )));
+            }
+            (Ok(()), true) => {
+                failing = false;
+                operator.show(&OperatorEvent::Warning(format!(
+                    "the journal {} can be written again",
+                    path.display()
+                )));
+            }
+            _ => {}
+        }
+        if let Some(reply) = reply {
+            let _ = reply.send(appended);
+        }
+    }
+}
+
 impl Shared {
     fn running(&self) -> Result<&Running> {
         self.running
@@ -242,13 +369,19 @@ impl Shared {
             .ok_or_else(|| Report::new(Error::NotStarted))
     }
 
-    fn claim_lock(&self, id: &ClaimId) -> Arc<Mutex<()>> {
-        self.claim_locks
+    async fn claim_slot(&self, id: &ClaimId) -> ClaimSlot<'_> {
+        let lock = self
+            .claim_locks
             .lock()
             .expect("the claim lock table is never poisoned")
             .entry(id.clone())
             .or_default()
-            .clone()
+            .clone();
+        ClaimSlot {
+            locks: &self.claim_locks,
+            id: id.clone(),
+            _guard: lock.lock_owned().await,
+        }
     }
 
     fn counters(&self, state: &State) -> Counters {
@@ -285,19 +418,40 @@ impl Shared {
         })
     }
 
-    /// Journals `event`. A journal that can't be written doesn't stop the
-    /// flow once an identity exists (refusing the device helps no one);
-    /// the operator is told every time.
-    async fn record(&self, running: &Running, claim_id: &ClaimId, event: JournalEvent) {
+    /// Journals `event` without waiting for the disk: the writer appends
+    /// it after everything sent before, and reports a failure itself (once
+    /// an identity exists, refusing the device would help no one).
+    fn record(&self, running: &Running, claim_id: &ClaimId, event: JournalEvent) {
         let entry = JournalEntry {
             claim_id: claim_id.clone(),
             event,
         };
-        if let Err(report) = self.journal.append(&running.config.journal, &entry).await {
-            self.operator.show(&OperatorEvent::Warning(format!(
-                "{report} -- the production register is missing an entry for claim {claim_id}"
-            )));
-        }
+        // The writer lives as long as `running`.
+        let _ = running.journal.send(Write::Append(Box::new(entry), None));
+    }
+
+    /// Journals `event` and waits until it is on disk: for what the
+    /// register must hold before a device hears of it.
+    async fn record_durably(
+        &self,
+        running: &Running,
+        claim_id: &ClaimId,
+        event: JournalEvent,
+    ) -> Result<()> {
+        let failed = || Error::Journal(running.config.journal.clone());
+        let (reply, appended) = oneshot::channel();
+        let entry = JournalEntry {
+            claim_id: claim_id.clone(),
+            event,
+        };
+        running
+            .journal
+            .send(Write::Append(Box::new(entry), Some(reply)))
+            .change_context_lazy(failed)?;
+        appended
+            .await
+            .change_context_lazy(failed)?
+            .change_context_lazy(failed)
     }
 
     fn hook_run(
@@ -322,73 +476,89 @@ impl Shared {
 
     /// Runs `run` on its own task: hooks take their time (a printer, a
     /// network registry), and nothing waits on them -- except validating a
-    /// label, which reads the outcome of `print`'s run from the claim.
+    /// label, which reads the outcome of `print`'s run from the claim, and
+    /// `shutdown`, which waits for them all.
     fn spawn_hooks(self: &Arc<Self>, run: HookRun, print: Option<u64>) {
+        let mut runs = self
+            .hook_runs
+            .lock()
+            .expect("the hook runs are never poisoned");
+        let Some(runs) = runs.as_mut() else {
+            self.operator.show(&OperatorEvent::Warning(format!(
+                "{} hooks not run for claim {}: the station is stopping",
+                run.invocation.event.name(),
+                run.invocation.claim.claim_id
+            )));
+            return;
+        };
+        // Reaps the runs already over: the set only holds those under way.
+        while runs.try_join_next().is_some() {}
         let shared = Arc::clone(self);
-        tokio::spawn(async move {
-            let outcomes = shared.hooks.run(&run).await;
-            let Ok(running) = shared.running() else {
-                return;
-            };
-            let invocation = &run.invocation;
-            let hub = hub_of(&invocation.claim);
-            let mut state = shared.state.lock().await;
-            let succeeded = match outcomes {
-                Ok(outcomes) => {
-                    for outcome in &outcomes {
-                        shared
-                            .record(
-                                running,
-                                &invocation.claim.claim_id,
-                                JournalEvent::Hook {
-                                    hook: outcome.hook.clone(),
-                                    exit: outcome.exit,
-                                    timed_out: outcome.timed_out,
-                                    attempt: invocation.attempt,
-                                    stdout: outcome.stdout.clone(),
-                                    stderr: outcome.stderr.clone(),
-                                },
-                            )
-                            .await;
-                        shared.operator.show(&OperatorEvent::Hook {
-                            event: invocation.event,
-                            hub: hub.clone(),
-                            outcome: outcome.clone(),
-                        });
-                    }
-                    outcomes.iter().all(|outcome| outcome.succeeded())
+        runs.spawn(async move { shared.run_hooks(run, print).await });
+    }
+
+    async fn run_hooks(&self, run: HookRun, print: Option<u64>) {
+        let outcomes = self.hooks.run(&run).await;
+        let Ok(running) = self.running() else {
+            return;
+        };
+        let invocation = &run.invocation;
+        let hub = hub_of(&invocation.claim);
+        let succeeded = match outcomes {
+            Ok(outcomes) => {
+                for outcome in &outcomes {
+                    self.record(
+                        running,
+                        &invocation.claim.claim_id,
+                        JournalEvent::Hook {
+                            hook: outcome.hook.clone(),
+                            exit: outcome.exit,
+                            timed_out: outcome.timed_out,
+                            attempt: invocation.attempt,
+                            stdout: outcome.stdout.clone(),
+                            stderr: outcome.stderr.clone(),
+                        },
+                    );
+                    self.operator.show(&OperatorEvent::Hook {
+                        event: invocation.event,
+                        hub: hub.clone(),
+                        outcome: outcome.clone(),
+                    });
                 }
-                Err(report) => {
-                    shared.operator.show(&OperatorEvent::Warning(format!(
-                        "{} hooks did not run: {report}",
-                        invocation.event.name()
-                    )));
-                    false
-                }
-            };
-            let Some(print) = print else {
-                return;
-            };
-            let id = &invocation.claim.claim_id;
-            let active = state.active.as_ref() == Some(id);
-            let Some(claim) = state.claims.get_mut(id) else {
-                return;
-            };
-            if claim.print != Print::Running(print) {
-                return;
+                outcomes.iter().all(|outcome| outcome.succeeded())
             }
-            claim.print = if succeeded {
-                Print::Done
-            } else {
-                Print::Failed
-            };
-            if !succeeded && active {
-                shared.operator.show(&OperatorEvent::Blocked {
-                    hub: claim.hub(),
-                    reason: LabelBlock::PrintFailed,
-                });
+            Err(report) => {
+                self.operator.show(&OperatorEvent::Warning(format!(
+                    "{} hooks did not run: {report}",
+                    invocation.event.name()
+                )));
+                false
             }
-        });
+        };
+        // Only a label print's outcome changes the claim.
+        let Some(print) = print else {
+            return;
+        };
+        let mut state = self.state.lock().await;
+        let id = &invocation.claim.claim_id;
+        let active = state.active.as_ref() == Some(id);
+        let Some(claim) = state.claims.get_mut(id) else {
+            return;
+        };
+        if claim.print != Print::Running(print) {
+            return;
+        }
+        claim.print = if succeeded {
+            Print::Done
+        } else {
+            Print::Failed
+        };
+        if !succeeded && active {
+            self.operator.show(&OperatorEvent::Blocked {
+                hub: claim.hub(),
+                reason: LabelBlock::PrintFailed,
+            });
+        }
     }
 
     /// Runs `label.d` for claim `id` (again).
@@ -404,7 +574,7 @@ impl Shared {
     /// Makes the first queued claim whose device is still polling the
     /// active one, unless one already is. Claims of devices gone silent
     /// keep their place, and are activated once they poll again.
-    async fn promote(self: &Arc<Self>, running: &Running, state: &mut State) -> bool {
+    fn promote(self: &Arc<Self>, running: &Running, state: &mut State) -> bool {
         if state.active.is_some() {
             return true;
         }
@@ -427,8 +597,7 @@ impl Shared {
         let attempt = claim.attempt;
         let hub = claim.hub();
         state.active = Some(id.clone());
-        self.record(running, &id, JournalEvent::LabelActive { attempt })
-            .await;
+        self.record(running, &id, JournalEvent::LabelActive { attempt });
         self.operator.show(&OperatorEvent::Active {
             hub,
             attempt,
@@ -439,8 +608,8 @@ impl Shared {
     }
 
     /// After the active claim left: the next one, or say there's none.
-    async fn advance(self: &Arc<Self>, running: &Running, state: &mut State) {
-        if !self.promote(running, state).await {
+    fn advance(self: &Arc<Self>, running: &Running, state: &mut State) {
+        if !self.promote(running, state) {
             self.operator.show(&OperatorEvent::Idle {
                 counters: self.counters(state),
             });
@@ -451,25 +620,44 @@ impl Shared {
     async fn known(self: &Arc<Self>, running: &Running, id: &ClaimId) -> Option<ClaimStatus> {
         let mut state = self.state.lock().await;
         state.claims.get_mut(id)?.last_seen = Some(Instant::now());
-        self.promote(running, &mut state).await;
+        self.promote(running, &mut state);
         self.status(&state, id)
     }
 
+    /// Tells the operator about a claim turned away: an alert when it's
+    /// for them to fix (the platform, the context's credentials), nothing
+    /// more for the journal (its writer already alerted).
     fn reject(&self, hardware: &HardwareInfo, id: &ClaimId, report: &Report<Error>) {
-        self.operator.show(&OperatorEvent::Rejected {
-            hub: HubSummary {
-                claim_id: id.clone(),
-                serial: None,
-                board: hardware.board.clone(),
-                temp_hostname: hardware.temp_hostname.clone(),
-                eth_mac: hardware.eth_mac.clone(),
-            },
-            reason: report.current_context().to_string(),
-        });
+        let hub = HubSummary {
+            claim_id: id.clone(),
+            serial: None,
+            board: hardware.board.clone(),
+            temp_hostname: hardware.temp_hostname.clone(),
+            eth_mac: hardware.eth_mac.clone(),
+        };
+        match report.current_context() {
+            Error::Journal(_) => {}
+            Error::Unavailable => self.operator.show(&OperatorEvent::Alert(format!(
+                "Turned away a {} hub ({}) until the platform answers: {}",
+                hub.board,
+                hub.temp_hostname,
+                describe(report)
+            ))),
+            _ => self.operator.show(&OperatorEvent::Rejected {
+                hub,
+                reason: describe(report),
+            }),
+        }
     }
 
     async fn submit(self: &Arc<Self>, request: ClaimRequest) -> Result<ClaimStatus> {
         let running = self.running()?;
+        // Before anything of it is shown, journaled or templated.
+        request.validate().map_err(|error| {
+            self.operator
+                .show(&OperatorEvent::Warning(format!("Refused a claim: {error}")));
+            Report::new(error).change_context(Error::InvalidHardware)
+        })?;
         let verified = self
             .factory
             .verify_csr(&request.csr_der)
@@ -487,17 +675,19 @@ impl Shared {
             report
         })?;
         let serial = policy.serial_for(&request.hardware).map_err(|error| {
-            let report = Report::new(Error::InvalidHardware(error.to_string()));
+            let report = Report::new(error).change_context(Error::InvalidHardware);
             self.reject(&request.hardware, &id, &report);
             report
         })?;
 
-        let lock = self.claim_lock(&id);
-        let _claim = lock.lock().await;
+        let _slot = self.claim_slot(&id).await;
         // A concurrent request for this key may have been issued while
-        // this one waited.
+        // this one waited -- or issued, but not journaled yet.
         if let Some(status) = self.known(running, &id).await {
             return Ok(status);
+        }
+        if self.state.lock().await.pending.contains_key(&id) {
+            return self.commit(running, &id).await;
         }
         let _searching = Searching::new(&self.searching);
         {
@@ -518,8 +708,8 @@ impl Shared {
         result
     }
 
-    /// Journals the request, asks the platform, and queues what it issued.
-    /// Holds a quota reservation, released here whatever happens.
+    /// Journals the request, asks the platform, and commits what it
+    /// issued. Holds a quota reservation, released here whatever happens.
     async fn issue(
         self: &Arc<Self>,
         running: &Running,
@@ -528,20 +718,13 @@ impl Shared {
         policy: BoardPolicy,
         serial: &DeviceSerial,
     ) -> Result<ClaimStatus> {
-        // Nothing is issued that the register doesn't know was asked for.
-        let received = JournalEntry {
-            claim_id: id.clone(),
-            event: JournalEvent::Received {
-                hardware: request.hardware.clone(),
-                image: request.image.clone(),
-            },
+        // Nothing is issued that the register doesn't know was asked for:
+        // a journal that can't be written turns new claims away here.
+        let received = JournalEvent::Received {
+            hardware: request.hardware.clone(),
+            image: request.image.clone(),
         };
-        let journaled = self
-            .journal
-            .append(&running.config.journal, &received)
-            .await
-            .change_context_lazy(|| Error::Journal(running.config.journal.clone()));
-        let outcome = match journaled {
+        let outcome = match self.record_durably(running, id, received).await {
             Ok(()) => self
                 .factory
                 .provision_csr(running.over.as_ref(), serial, &request.csr_der)
@@ -550,64 +733,88 @@ impl Shared {
             Err(report) => Err(report),
         };
 
-        let mut state = self.state.lock().await;
-        state.reserved -= 1;
-        let identity = match outcome {
-            Ok(identity) => identity,
-            Err(report) => {
-                if let Error::AlreadyExists(_) = report.current_context() {
-                    state.refused += 1;
-                    let reason = report.current_context().to_string();
-                    self.record(
-                        running,
-                        id,
-                        JournalEvent::Failed {
-                            reason: reason.clone(),
-                        },
-                    )
-                    .await;
-                    let record = ClaimRecord {
-                        claim_id: id.clone(),
-                        hardware: request.hardware.clone(),
-                        image: request.image.clone(),
-                        policy,
-                        identity: None,
-                        state: None,
-                        label: None,
-                        reason: Some(reason),
-                    };
-                    self.spawn_hooks(self.hook_run(running, HookEvent::Failed, record, 1), None);
+        {
+            let mut state = self.state.lock().await;
+            state.reserved -= 1;
+            let identity = match outcome {
+                Ok(identity) => identity,
+                Err(report) => {
+                    if let Error::AlreadyExists(_) = report.current_context() {
+                        state.refused += 1;
+                        let reason = report.current_context().to_string();
+                        self.record(
+                            running,
+                            id,
+                            JournalEvent::Failed {
+                                reason: reason.clone(),
+                            },
+                        );
+                        let record = ClaimRecord {
+                            claim_id: id.clone(),
+                            hardware: request.hardware.clone(),
+                            image: request.image.clone(),
+                            policy,
+                            identity: None,
+                            state: None,
+                            label: None,
+                            reason: Some(reason),
+                        };
+                        self.spawn_hooks(
+                            self.hook_run(running, HookEvent::Failed, record, 1),
+                            None,
+                        );
+                    }
+                    return Err(report);
                 }
-                return Err(report);
-            }
-        };
+            };
+            state.issued_this_run += 1;
+            let claim = Claim::new(
+                id.clone(),
+                request.hardware.clone(),
+                request.image.clone(),
+                policy,
+                identity,
+            );
+            state.pending.insert(id.clone(), claim);
+        }
+        self.commit(running, id).await
+    }
 
-        state.issued_this_run += 1;
-        let mut claim = Claim::new(
-            id.clone(),
-            request.hardware.clone(),
-            request.image.clone(),
-            policy.clone(),
-            identity.clone(),
-        );
+    /// Journals the identity issued for pending claim `id`, then hands it
+    /// out: queued, announced, `issued.d` started. Until the journal has
+    /// it, the claim stays pending and the device is told to retry --
+    /// answered from here, never by a second platform call: a serial the
+    /// register doesn't know would be lost to the next restart.
+    async fn commit(self: &Arc<Self>, running: &Running, id: &ClaimId) -> Result<ClaimStatus> {
+        let (identity, policy) = {
+            let state = self.state.lock().await;
+            let claim = state.pending.get(id).expect("committing a pending claim");
+            (claim.identity.clone(), claim.policy.clone())
+        };
+        let serial = identity.serial_number.clone();
+        let issued = JournalEvent::Issued {
+            identity,
+            context: running.context.clone(),
+            policy,
+        };
+        if let Err(report) = self.record_durably(running, id, issued).await {
+            self.operator.show(&OperatorEvent::Alert(format!(
+                "Serial {serial} was issued for claim {id}, but the journal can't record it: \
+                 held back until the journal can be written and its hub retries"
+            )));
+            return Err(report);
+        }
+
+        let mut state = self.state.lock().await;
+        let mut claim = state.pending.remove(id).expect("a pending claim");
         claim.last_seen = Some(Instant::now());
         let hub = claim.hub();
         let run = self.hook_run(running, HookEvent::Issued, claim.record(None), 1);
         state.claims.insert(id.clone(), claim);
         state.queue.push_back(id.clone());
-        self.record(
-            running,
-            id,
-            JournalEvent::Issued {
-                identity,
-                context: running.context.clone(),
-                policy,
-            },
-        )
-        .await;
         self.operator.show(&OperatorEvent::Issued { hub });
         self.spawn_hooks(run, None);
-        self.promote(running, &mut state).await;
+        self.promote(running, &mut state);
         Ok(self
             .status(&state, id)
             .expect("the claim was just inserted"))
@@ -620,23 +827,41 @@ impl Shared {
             .ok_or_else(|| Report::new(Error::UnknownClaim(id.to_string())))
     }
 
+    /// A device's ack. `installed` only once its label is validated -- the
+    /// commit point: until then nobody on the workshop network can mark a
+    /// device installed or fire `installed.d` with its claim id. `failed`
+    /// at any time: a device checks its identity as soon as it gets it,
+    /// and one it rejects must not be labelled -- it leaves the queue (the
+    /// next device becomes active if it was), keeping its label state
+    /// otherwise. A `failed` device may still ack `installed` once
+    /// labelled (it wrote its identity after all); repeating an ack
+    /// changes nothing.
     async fn ack(self: &Arc<Self>, id: &ClaimId, ack: Ack) -> Result<ClaimStatus> {
         let running = self.running()?;
+        let ack = ack.sanitized();
         let mut state = self.state.lock().await;
         let claim = state
             .claims
             .get_mut(id)
             .ok_or_else(|| Report::new(Error::UnknownClaim(id.to_string())))?;
         claim.last_seen = Some(Instant::now());
-        let (next, event, reason) = match ack {
-            Ack::Installed => (ClaimState::Installed, HookEvent::Installed, None),
-            Ack::Failed { reason } => (ClaimState::Failed, HookEvent::Failed, Some(reason)),
+        let (next, event, reason) = match (ack, claim.state) {
+            // A lost response makes a device ack twice: the same answer,
+            // and no second hook run.
+            (Ack::Installed, ClaimState::Installed) | (Ack::Failed { .. }, ClaimState::Failed) => {
+                return Ok(self.status(&state, id).expect("a known claim"))
+            }
+            (Ack::Installed, _) if claim.label != LabelState::Labelled => {
+                return Err(Report::new(Error::NotLabelled(id.to_string())))
+            }
+            (Ack::Installed, _) => (ClaimState::Installed, HookEvent::Installed, None),
+            (Ack::Failed { reason }, _) => (ClaimState::Failed, HookEvent::Failed, Some(reason)),
         };
-        // A lost response makes a device ack twice.
-        if claim.state == next {
-            return Ok(self.status(&state, id).expect("a known claim"));
-        }
         claim.state = next;
+        // Out of the labelling queue: a failed claim no longer waits.
+        if claim.label == LabelState::Active {
+            claim.label = LabelState::Queued;
+        }
         let hub = claim.hub();
         let run = self.hook_run(running, event, claim.record(reason.clone()), claim.attempt);
         let was_active = state.active.as_ref() == Some(id);
@@ -646,7 +871,7 @@ impl Shared {
         state.queue.retain(|queued| queued != id);
         match reason {
             None => {
-                self.record(running, id, JournalEvent::Installed).await;
+                self.record(running, id, JournalEvent::Installed);
                 self.operator.show(&OperatorEvent::Installed { hub });
             }
             Some(reason) => {
@@ -656,14 +881,13 @@ impl Shared {
                     JournalEvent::Failed {
                         reason: reason.clone(),
                     },
-                )
-                .await;
+                );
                 self.operator.show(&OperatorEvent::Failed { hub, reason });
             }
         }
         self.spawn_hooks(run, None);
         if was_active {
-            self.advance(running, &mut state).await;
+            self.advance(running, &mut state);
         }
         Ok(self.status(&state, id).expect("a known claim"))
     }
@@ -677,10 +901,9 @@ impl Shared {
         match input {
             OperatorInput::Scan(scanned) => {
                 self.confirm(running, &mut state, &id, Some(scanned.trim().to_string()))
-                    .await
             }
             OperatorInput::Enter => match running.config.confirm {
-                ConfirmMode::Key => self.confirm(running, &mut state, &id, None).await,
+                ConfirmMode::Key => self.confirm(running, &mut state, &id, None),
                 ConfirmMode::Scan => self.operator.show(&OperatorEvent::ScanRequired),
             },
             OperatorInput::Reprint => {
@@ -697,8 +920,7 @@ impl Shared {
                 }
                 claim.attempt += 1;
                 let attempt = claim.attempt;
-                self.record(running, &id, JournalEvent::Reprint { attempt })
-                    .await;
+                self.record(running, &id, JournalEvent::Reprint { attempt });
                 self.print(running, &mut state, &id);
             }
             OperatorInput::Skip => {
@@ -710,9 +932,9 @@ impl Shared {
                 let hub = claim.hub();
                 state.active = None;
                 state.queue.push_back(id.clone());
-                self.record(running, &id, JournalEvent::LabelSkipped).await;
+                self.record(running, &id, JournalEvent::LabelSkipped);
                 self.operator.show(&OperatorEvent::Skipped { hub });
-                self.advance(running, &mut state).await;
+                self.advance(running, &mut state);
             }
             OperatorInput::Force => {
                 let claim = state
@@ -721,18 +943,16 @@ impl Shared {
                     .expect("the active claim is known");
                 claim.forced = true;
                 let hub = claim.hub();
-                self.record(running, &id, JournalEvent::LabelForced).await;
+                self.record(running, &id, JournalEvent::LabelForced);
                 self.operator.show(&OperatorEvent::Forced { hub });
             }
-            // `operate` stops on it before getting here.
-            OperatorInput::Quit => {}
         }
     }
 
     /// Validates the active claim's label: `scanned` must be its serial
     /// (`None`: Enter alone, in `confirm: key` mode), and `label.d` must
     /// have succeeded unless the operator forced it.
-    async fn confirm(
+    fn confirm(
         self: &Arc<Self>,
         running: &Running,
         state: &mut State,
@@ -750,8 +970,7 @@ impl Shared {
                     JournalEvent::LabelMismatch {
                         scanned: scanned.clone(),
                     },
-                )
-                .await;
+                );
                 self.operator.show(&OperatorEvent::Mismatch {
                     expected,
                     scanned: scanned.clone(),
@@ -780,18 +999,18 @@ impl Shared {
             claim.attempt,
         );
         state.active = None;
-        self.record(running, id, JournalEvent::Labelled { scanned })
-            .await;
+        self.record(running, id, JournalEvent::Labelled { scanned });
         self.operator.show(&OperatorEvent::Labelled {
             hub,
             counters: self.counters(state),
         });
         self.spawn_hooks(run, None);
-        self.advance(running, state).await;
+        self.advance(running, state);
     }
 
-    /// Requeues the active claim once its device stopped polling.
-    async fn check_presence(self: &Arc<Self>, running: &Running) {
+    /// Requeues the active claim once its device stopped polling, and
+    /// activates the next one still polling.
+    async fn tick(self: &Arc<Self>, running: &Running) {
         let mut state = self.state.lock().await;
         let timeout = running.config.presence_timeout;
         let lost = state
@@ -799,7 +1018,7 @@ impl Shared {
             .clone()
             .filter(|id| !state.claims[id].present(timeout));
         let Some(id) = lost else {
-            self.promote(running, &mut state).await;
+            self.promote(running, &mut state);
             return;
         };
         let claim = state
@@ -810,9 +1029,40 @@ impl Shared {
         let hub = claim.hub();
         state.active = None;
         state.queue.push_back(id.clone());
-        self.record(running, &id, JournalEvent::LabelLost).await;
+        self.record(running, &id, JournalEvent::LabelLost);
         self.operator.show(&OperatorEvent::Lost { hub });
-        self.advance(running, &mut state).await;
+        self.advance(running, &mut state);
+    }
+
+    /// Lets the hook runs under way finish within `hook-timeout` (their
+    /// outcomes journaled), stops those still going past it -- killing
+    /// their scripts, rather than leaving them orphaned when the process
+    /// exits -- then waits until the journal has every entry.
+    async fn shutdown(&self, running: &Running) {
+        let runs = self
+            .hook_runs
+            .lock()
+            .expect("the hook runs are never poisoned")
+            .take();
+        if let Some(mut runs) = runs {
+            let drained = tokio::time::timeout(running.config.hook_timeout, async {
+                while runs.join_next().await.is_some() {}
+            })
+            .await;
+            if drained.is_err() {
+                let stopped = runs.len();
+                runs.shutdown().await;
+                self.operator.show(&OperatorEvent::Warning(format!(
+                    "stopped {stopped} hook run(s) still going after {}s: their outcome is not \
+                     in the journal",
+                    running.config.hook_timeout.as_secs_f32()
+                )));
+            }
+        }
+        let (flush, flushed) = oneshot::channel();
+        if running.journal.send(Write::Flush(flush)).is_ok() {
+            let _ = flushed.await;
+        }
     }
 }
 
@@ -871,9 +1121,11 @@ impl StationServiceInterface for StationControllerImpl {
         if shared.running.get().is_some() {
             return Err(Report::new(Error::AlreadyStarted));
         }
-        let context = shared
+        // Asks the platform, not just the context store: a station whose
+        // credentials were revoked would otherwise turn every hub away.
+        let (resolved, _, _) = shared
             .contexts
-            .resolve(over.as_ref())
+            .whoami(over.as_ref())
             .await
             .map_err(|report| {
                 let message = report.current_context().to_string();
@@ -893,18 +1145,29 @@ impl StationServiceInterface for StationControllerImpl {
         let mut state = shared.state.lock().await;
         replay(&mut state, entries);
         let summary = StationSummary {
-            context: context.context.name.clone(),
+            context: resolved.context.name.clone(),
             restored: state.claims.len(),
             awaiting_label: state.queue.len(),
+            tick: (config.presence_timeout / 4)
+                .clamp(Duration::from_millis(50), Duration::from_secs(1)),
         };
-        shared
-            .running
-            .set(Running {
-                config,
-                over,
-                context: context.context.name,
-            })
-            .map_err(|_| Report::new(Error::AlreadyStarted))?;
+        let (journal, writes) = mpsc::unbounded_channel();
+        let running = Running {
+            over,
+            context: resolved.context.name,
+            journal,
+            config,
+        };
+        let path = running.config.journal.clone();
+        if shared.running.set(running).is_err() {
+            return Err(Report::new(Error::AlreadyStarted));
+        }
+        tokio::spawn(write_journal(
+            shared.journal.clone(),
+            shared.operator.clone(),
+            path,
+            writes,
+        ));
         Ok(summary)
     }
 
@@ -926,25 +1189,21 @@ impl StationServiceInterface for StationControllerImpl {
         self.0.ack(claim, ack).await
     }
 
-    async fn operate(&self) -> Result<()> {
-        let shared = &self.0;
-        let running = shared.running()?;
-        let tick = (running.config.presence_timeout / 4)
-            .clamp(Duration::from_millis(50), Duration::from_secs(1));
-        let mut ticker = tokio::time::interval(tick);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut reading = true;
-        loop {
-            tokio::select! {
-                input = shared.operator.read(), if reading => {
-                    match input.change_context(Error::Operator)? {
-                        None => reading = false,
-                        Some(OperatorInput::Quit) => return Ok(()),
-                        Some(input) => shared.handle(running, input).await,
-                    }
-                }
-                _ = ticker.tick() => shared.check_presence(running).await,
-            }
-        }
+    async fn handle(&self, input: OperatorInput) -> Result<()> {
+        let running = self.0.running()?;
+        self.0.handle(running, input).await;
+        Ok(())
+    }
+
+    async fn tick(&self) -> Result<()> {
+        let running = self.0.running()?;
+        self.0.tick(running).await;
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        let running = self.0.running()?;
+        self.0.shutdown(running).await;
+        Ok(())
     }
 }

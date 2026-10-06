@@ -3767,11 +3767,8 @@ dependencies = [
 name = "remora-station-adapter-operator-tui"
 version = "0.9.0"
 dependencies = [
- "async-trait",
- "error-stack",
  "remora-station",
  "remora-tui",
- "tokio",
 ]
 
 [[package]]
@@ -3780,9 +3777,21 @@ version = "0.9.0"
 dependencies = [
  "async-trait",
  "error-stack",
+ "rcgen",
  "remora-context",
+ "remora-context-adapter-file",
+ "remora-context-adapter-grpc",
+ "remora-context-application",
  "remora-factory",
+ "remora-factory-adapter-grpc",
+ "remora-factory-adapter-local",
+ "remora-factory-application",
+ "remora-ota-adapter-grpc",
  "remora-station",
+ "remora-station-adapter-hooks-process",
+ "remora-station-adapter-jsonl",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -3819,6 +3828,7 @@ dependencies = [
  "rcgen",
  "remora-context",
  "remora-context-adapter-file",
+ "remora-context-adapter-grpc",
  "remora-context-application",
  "remora-factory",
  "remora-factory-adapter-grpc",

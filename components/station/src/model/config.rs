@@ -50,6 +50,9 @@ pub struct StationSummary {
     pub restored: usize,
     /// Of those, the ones waiting for their label again.
     pub awaiting_label: usize,
+    /// How often `StationServiceInterface::tick` must run: often enough
+    /// to notice a silent active device well within `presence-timeout`.
+    pub tick: Duration,
 }
 
 /// How a board's devices get their serial on the platform -- the two

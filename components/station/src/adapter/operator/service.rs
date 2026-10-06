@@ -1,11 +1,11 @@
-use super::error::Result;
 use crate::{
     adapter::hooks::{HookEvent, HookOutcome},
     model::ClaimId,
 };
 
 /// What the operator types (or scans: a barcode scanner reads as a
-/// keyboard, a line then Enter).
+/// keyboard, a line then Enter), for the active device. Quitting is the
+/// console's own business, not the station's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperatorInput {
     /// A scanned label (or anything typed that isn't a command).
@@ -19,8 +19,6 @@ pub enum OperatorInput {
     /// `f`: allow validating despite a failed label hook (the scan is
     /// still required).
     Force,
-    /// `q`: stop the station.
-    Quit,
 }
 
 /// A device, as the operator sees it.
@@ -123,20 +121,20 @@ pub enum OperatorEvent {
         reason: String,
     },
     /// Something the operator should know about but that doesn't stop the
-    /// station (the journal couldn't be written, hooks couldn't be read).
+    /// station (a hook couldn't be read, one was stopped at shutdown).
     Warning(String),
+    /// Something the operator must act on: devices are being turned away
+    /// (the journal can't be written, the context's credentials no longer
+    /// work).
+    Alert(String),
 }
 
-/// DI seam for `remora-station-application`: the labelling console --
-/// showing what happens and which device to label, and reading the scans
-/// and commands.
-#[async_trait::async_trait]
+/// DI seam for `remora-station-application`: the labelling console's
+/// display -- what happens, and which device to label. Infallible: a
+/// console that can't draw must not stop the station. What the operator
+/// types comes the other way, through `StationServiceInterface::handle`.
 pub trait OperatorAdapter: Send + Sync {
     fn show(&self, event: &OperatorEvent);
-    /// The next input; `None` once there will be none (stdin closed). Must
-    /// be cancel-safe: the station polls it alongside its own timers, and
-    /// an input must never be lost to a cancelled call.
-    async fn read(&self) -> Result<Option<OperatorInput>>;
 }
 
 /// Injectable handle to whatever `OperatorAdapter` was wired at startup.

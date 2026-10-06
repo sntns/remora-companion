@@ -1,4 +1,5 @@
 mod config;
+mod console;
 mod error;
 mod serve;
 mod service;

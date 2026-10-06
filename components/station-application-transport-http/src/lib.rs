@@ -11,8 +11,8 @@ mod wire;
 
 pub use client::StationClient;
 pub use error::{Error, Result};
-pub use service::{router, serve};
+pub use service::{router, serve, BODY_LIMIT};
 pub use wire::{
-    AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, HardwareBody, HelloBody,
+    AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HardwareBody, HelloBody,
     IdentityBody, ImageBody, LabelBody, StateBody, DEFAULT_PORT, PROTOCOL, SERVICE,
 };

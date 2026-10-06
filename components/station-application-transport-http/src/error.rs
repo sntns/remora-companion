@@ -7,6 +7,8 @@ pub enum Error {
     #[error("the station answered {status}: {message}")]
     Status {
         status: u16,
+        /// Why, for the device to decide on.
+        code: Option<crate::ErrorCode>,
         message: String,
         /// Seconds to wait before retrying, on a 503.
         retry_after: Option<u64>,

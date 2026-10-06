@@ -1,62 +1,23 @@
-use std::io::BufRead;
-
 use remora_station::adapter::{
     hooks::HookOutcome,
-    operator::{
-        Counters, HubSummary, LabelBlock, OperatorAdapter, OperatorEvent, OperatorInput, Result,
-    },
+    operator::{Counters, HubSummary, LabelBlock, OperatorAdapter, OperatorEvent},
 };
 use remora_tui as tui;
-use tokio::sync::{mpsc, Mutex};
 
 /// How many trailing lines of a hook's output the dashboard shows (the
 /// journal has all of it).
 const OUTPUT_LINES: usize = 3;
 
-/// The labelling console on this process's terminal. stdin is read on a
-/// thread of its own, started at the first `read`, and handed over a
-/// channel: a blocking read can't be cancelled, a channel receive can.
-pub struct TuiOperatorImpl {
-    lines: Mutex<Option<mpsc::UnboundedReceiver<String>>>,
-}
+/// The labelling console's display on this process's terminal.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TuiOperatorImpl;
 
-impl TuiOperatorImpl {
-    pub fn new() -> Self {
-        Self {
-            lines: Mutex::new(None),
-        }
-    }
-}
-
-impl Default for TuiOperatorImpl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// A line of input: a command letter, Enter alone, or a scan.
-pub fn parse_input(line: &str) -> OperatorInput {
-    match line.trim() {
-        "" => OperatorInput::Enter,
-        "r" | "R" => OperatorInput::Reprint,
-        "s" | "S" => OperatorInput::Skip,
-        "f" | "F" => OperatorInput::Force,
-        "q" | "Q" => OperatorInput::Quit,
-        scanned => OperatorInput::Scan(scanned.to_string()),
-    }
-}
-
-fn stdin_lines() -> mpsc::UnboundedReceiver<String> {
-    let (sender, receiver) = mpsc::unbounded_channel();
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lock().lines() {
-            let Ok(line) = line else { break };
-            if sender.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    receiver
+/// `text` without its control characters. The station checks what devices
+/// report, but this is the last stop before the terminal: an escape
+/// sequence from anywhere (a hook's output, a scan) could clear the
+/// dashboard or forge the line saying which hub to label.
+fn clean(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 fn counters(counters: &Counters) -> String {
@@ -72,15 +33,15 @@ fn counters(counters: &Counters) -> String {
 }
 
 fn name(hub: &HubSummary) -> String {
-    tui::accent(hub.serial.as_deref().unwrap_or(&hub.temp_hostname))
+    tui::accent(clean(hub.serial.as_deref().unwrap_or(&hub.temp_hostname)))
 }
 
 fn details(hub: &HubSummary, attempt: Option<u32>) -> String {
     let mut lines = vec![
         format!("serial    {}", name(hub)),
-        format!("board     {}", hub.board),
-        format!("hostname  {}", hub.temp_hostname),
-        format!("MAC       {}", hub.eth_mac.as_deref().unwrap_or("-")),
+        format!("board     {}", clean(&hub.board)),
+        format!("hostname  {}", clean(&hub.temp_hostname)),
+        format!("MAC       {}", clean(hub.eth_mac.as_deref().unwrap_or("-"))),
     ];
     if let Some(attempt) = attempt.filter(|attempt| *attempt > 1) {
         lines.push(format!("attempt   {attempt}"));
@@ -96,11 +57,10 @@ fn tail(outcome: &HookOutcome) -> String {
         .collect();
     lines[lines.len().saturating_sub(OUTPUT_LINES)..]
         .iter()
-        .map(|line| format!("\n  {}", tui::dim(line)))
+        .map(|line| format!("\n  {}", tui::dim(clean(line))))
         .collect()
 }
 
-#[async_trait::async_trait]
 impl OperatorAdapter for TuiOperatorImpl {
     fn show(&self, event: &OperatorEvent) {
         match event {
@@ -108,11 +68,11 @@ impl OperatorAdapter for TuiOperatorImpl {
                 tui::success(format!(
                     "Issued {} {}",
                     name(hub),
-                    tui::dim(format!("({}, {})", hub.board, hub.temp_hostname))
+                    tui::dim(format!("({}, {})", clean(&hub.board), clean(&hub.temp_hostname)))
                 ));
                 // The serial alone on stdout, one per line: the output.
                 if let Some(serial) = &hub.serial {
-                    println!("{serial}");
+                    println!("{}", clean(serial));
                 }
             }
             OperatorEvent::Active {
@@ -137,7 +97,9 @@ impl OperatorAdapter for TuiOperatorImpl {
                 counters(totals)
             )),
             OperatorEvent::Mismatch { expected, scanned } => tui::alert(format!(
-                "Scanned {scanned}, but the hub to label is {expected}: nothing validated"
+                "Scanned {}, but the hub to label is {}: nothing validated",
+                clean(scanned),
+                clean(expected)
             )),
             OperatorEvent::NothingActive => tui::warning("No hub to label right now"),
             OperatorEvent::ScanRequired => {
@@ -172,7 +134,7 @@ impl OperatorAdapter for TuiOperatorImpl {
             } => {
                 let line = format!(
                     "{} for {}: {}{}",
-                    outcome.hook,
+                    clean(&outcome.hook),
                     name(hub),
                     match (outcome.exit, outcome.timed_out) {
                         (_, true) => "timed out".to_string(),
@@ -191,20 +153,17 @@ impl OperatorAdapter for TuiOperatorImpl {
                 tui::success(format!("{} wrote its identity", name(hub)))
             }
             OperatorEvent::Failed { hub, reason } => {
-                tui::alert(format!("{} failed: {reason}", name(hub)))
+                tui::alert(format!("{} failed: {}", name(hub), clean(reason)))
             }
             OperatorEvent::Rejected { hub, reason } => tui::warning(format!(
-                "Refused a {} hub ({}): {reason}",
-                hub.board, hub.temp_hostname
+                "Refused a {} hub ({}): {}",
+                clean(&hub.board),
+                clean(&hub.temp_hostname),
+                clean(reason)
             )),
-            OperatorEvent::Warning(message) => tui::warning(message),
+            OperatorEvent::Warning(message) => tui::warning(clean(message)),
+            OperatorEvent::Alert(message) => tui::alert(clean(message)),
         }
-    }
-
-    async fn read(&self) -> Result<Option<OperatorInput>> {
-        let mut lines = self.lines.lock().await;
-        let lines = lines.get_or_insert_with(stdin_lines);
-        Ok(lines.recv().await.as_deref().map(parse_input))
     }
 }
 
@@ -213,12 +172,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_line_is_a_command_letter_enter_or_a_scan() {
-        assert_eq!(parse_input(""), OperatorInput::Enter);
-        assert_eq!(parse_input("r"), OperatorInput::Reprint);
-        assert_eq!(parse_input(" S "), OperatorInput::Skip);
-        assert_eq!(parse_input("f"), OperatorInput::Force);
-        assert_eq!(parse_input("q"), OperatorInput::Quit);
-        assert_eq!(parse_input(" 1H7Z\r"), OperatorInput::Scan("1H7Z".into()));
+    fn strips_what_could_redraw_the_terminal() {
+        assert_eq!(clean("\x1b[2J\x1b[1;1H1H7Z\r\n"), "[2J[1;1H1H7Z");
+        assert_eq!(clean("1H7Z"), "1H7Z");
     }
 }

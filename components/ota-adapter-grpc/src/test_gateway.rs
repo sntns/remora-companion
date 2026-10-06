@@ -1,7 +1,8 @@
 //! A fake remora gateway, in process, for tests: releases and resumable
 //! uploads held in memory, a fixed set of labelled devices, and deployments
 //! that move PENDING → RUNNING → SUCCEEDED as they're polled (FAILED for a
-//! device named `BROKEN`), reporting progress as log entries on the way.
+//! device named `BROKEN`), reporting progress as log entries on the way,
+//! and IAM's `whoami` calls for any token (until `revoked`).
 //! Like the platform, an upload is committed only when its stream ends
 //! cleanly; one that errors or is reset keeps its bytes for a resume.
 //! Never built into a shipped binary (the `test-gateway` feature is only
@@ -15,7 +16,9 @@ use std::{
 use remora_context::model::{
     Context, Credentials, Endpoint, ResolvedContext, Secret, Selection, Tls,
 };
-use remora_platform_grpc::sntns::service::{remora::v1 as pb, v1::ResourceReference};
+use remora_platform_grpc::sntns::service::{
+    iam::v1 as iam, remora::v1 as pb, v1::ResourceReference,
+};
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -59,6 +62,9 @@ pub struct State {
     deployments: BTreeMap<String, StoredDeployment>,
     /// Manufactured serials, with how many times each was signed.
     pub factory_devices: BTreeMap<String, u32>,
+    /// Every call is refused as unauthenticated, as for credentials
+    /// revoked after login.
+    pub revoked: bool,
 }
 
 impl State {
@@ -100,6 +106,12 @@ impl TestGateway {
                     gateway.clone(),
                 ))
                 .add_service(pb::device_service_server::DeviceServiceServer::new(
+                    gateway.clone(),
+                ))
+                .add_service(iam::user_service_server::UserServiceServer::new(
+                    gateway.clone(),
+                ))
+                .add_service(iam::account_service_server::AccountServiceServer::new(
                     gateway.clone(),
                 ))
                 .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
@@ -420,6 +432,9 @@ impl pb::device_service_server::DeviceService for TestGateway {
     ) -> Result<Response<pb::DeviceServiceCreateFactoryDeviceResponse>, Status> {
         let request = request.into_inner();
         let mut state = self.state();
+        if state.revoked {
+            return Err(Status::unauthenticated("invalid access key"));
+        }
         let serial = match (
             request.device_name.is_empty(),
             request.serial_number_policy_name.is_empty(),
@@ -674,6 +689,49 @@ impl pb::deployment_service_server::DeploymentService for TestGateway {
         Ok(Response::new(
             pb::DeploymentServiceListDeploymentLogEntriesResponse {
                 deployment_log_entries: logs,
+            },
+        ))
+    }
+}
+
+/// Whoever the token, the same user -- unless `revoked`.
+#[tonic::async_trait]
+impl iam::user_service_server::UserService for TestGateway {
+    async fn get_current_user(
+        &self,
+        _request: Request<iam::UserServiceGetCurrentUserRequest>,
+    ) -> Result<Response<iam::UserServiceGetCurrentUserResponse>, Status> {
+        if self.state().revoked {
+            return Err(Status::unauthenticated("invalid access key"));
+        }
+        Ok(Response::new(iam::UserServiceGetCurrentUserResponse {
+            user_descriptor: Some(iam::UserDescriptor {
+                resource: Some(ResourceReference {
+                    id: "1".into(),
+                    urn: "urn:test:user:factory".into(),
+                    name: "factory".into(),
+                }),
+                ..Default::default()
+            }),
+        }))
+    }
+}
+
+#[tonic::async_trait]
+impl iam::account_service_server::AccountService for TestGateway {
+    async fn get_current_account(
+        &self,
+        _request: Request<iam::AccountServiceGetCurrentAccountRequest>,
+    ) -> Result<Response<iam::AccountServiceGetCurrentAccountResponse>, Status> {
+        if self.state().revoked {
+            return Err(Status::unauthenticated("invalid access key"));
+        }
+        Ok(Response::new(
+            iam::AccountServiceGetCurrentAccountResponse {
+                account_descriptor: Some(iam::AccountDescriptor {
+                    resource: reference("test"),
+                    ..Default::default()
+                }),
             },
         ))
     }

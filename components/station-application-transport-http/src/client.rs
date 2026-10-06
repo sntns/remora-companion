@@ -69,6 +69,7 @@ impl StationClient {
             let refusal: Option<ErrorBody> = serde_json::from_slice(&bytes).ok();
             return Err(Report::new(Error::Status {
                 status: status.as_u16(),
+                code: refusal.as_ref().and_then(|body| body.code),
                 message: refusal
                     .as_ref()
                     .map(|body| body.error.clone())

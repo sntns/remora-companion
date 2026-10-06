@@ -64,13 +64,14 @@ pub struct ImageBody {
 }
 
 impl ClaimBody {
-    /// The request it carries; `Err` says what's malformed.
+    /// The request it carries; `Err` says what's malformed. What it says
+    /// about the device is the station's to check (`ClaimRequest::validate`).
     pub fn into_request(self) -> Result<ClaimRequest, String> {
         let csr_der = STANDARD
             .decode(self.csr.trim())
             .map_err(|e| format!("csr is not standard base64: {e}"))?;
         if self.hardware.board.is_empty() {
-            return Err("hardware.board is empty".into());
+            return Err("hardware.board is missing".into());
         }
         let HardwareBody {
             board,
@@ -80,8 +81,8 @@ impl ClaimBody {
             machine_id,
             macs,
         } = self.hardware;
-        // An empty optional field is an absent one: templates and hooks
-        // treat them the same.
+        // An empty field is an absent one (a hub sends "" for what it
+        // can't read): templates and hooks treat them the same.
         let present = |field: Option<String>| field.filter(|value| !value.is_empty());
         Ok(ClaimRequest {
             csr_der,
@@ -91,7 +92,10 @@ impl ClaimBody {
                 eth_mac: present(eth_mac),
                 bsp_serial: present(bsp_serial),
                 machine_id: present(machine_id),
-                macs,
+                macs: macs
+                    .into_iter()
+                    .filter(|(_, mac)| !mac.is_empty())
+                    .collect(),
             },
             image: ImageInfo {
                 version: present(self.image.version),
@@ -217,10 +221,79 @@ pub struct AckBody {
     pub reason: Option<String>,
 }
 
-/// Every refusal: `{ "error" }`, and `retry_after` (seconds) on a 503.
+/// Every refusal: `{ "error", "code" }`, and `retry_after` (seconds) when
+/// retrying later helps. `error` is for a log; `code` is what a device
+/// decides on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorBody {
     pub error: String,
+    /// Absent only from a station predating codes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<ErrorCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u64>,
+}
+
+/// Why the station refused, stable across versions (protocol v1): the
+/// table of §3 in docs/specs/provisioning-station.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ErrorCode {
+    /// 400: the CSR isn't a self-signed P-256 PKCS#10 -- the one refusal
+    /// after which a device makes a new key.
+    InvalidCsr,
+    /// 400: a hardware or image field is refused (which one is in
+    /// `error`), or a field the board's `device-name` needs is missing.
+    InvalidHardware,
+    /// 400: not JSON, a required field missing, bad base64.
+    InvalidRequest,
+    /// 413: a body over the station's limit.
+    PayloadTooLarge,
+    /// 403: the board isn't configured on this station.
+    UnknownBoard,
+    /// 403: this station's `max-claims` is reached.
+    QuotaExceeded,
+    /// 403: the platform refused (permission, policy).
+    Refused,
+    /// 403: the platform has no access URL for devices.
+    MissingAccessUrl,
+    /// 409: the explicit `device-name` already exists on the platform.
+    AlreadyExists,
+    /// 409: `installed` acked before the label was validated.
+    NotLabelled,
+    /// 404: no such claim on this station.
+    UnknownClaim,
+    /// 503: the platform can't be reached, or refuses the station's
+    /// credentials; retry after `retry_after`.
+    Unavailable,
+    /// 503: the station's journal can't be written; retry after
+    /// `retry_after`.
+    JournalUnavailable,
+    /// 503: the station isn't serving yet; retry after `retry_after`.
+    NotStarted,
+    /// 500: anything else.
+    Internal,
+}
+
+impl ErrorCode {
+    /// The HTTP status it comes with.
+    pub fn status(self) -> u16 {
+        match self {
+            Self::InvalidCsr | Self::InvalidHardware | Self::InvalidRequest => 400,
+            Self::PayloadTooLarge => 413,
+            Self::UnknownBoard | Self::QuotaExceeded | Self::Refused | Self::MissingAccessUrl => {
+                403
+            }
+            Self::AlreadyExists | Self::NotLabelled => 409,
+            Self::UnknownClaim => 404,
+            Self::Unavailable | Self::JournalUnavailable | Self::NotStarted => 503,
+            Self::Internal => 500,
+        }
+    }
+
+    /// Whether retrying the same request later can succeed with nobody
+    /// changing anything on the device (`retry_after` is given).
+    pub fn retries(self) -> bool {
+        self.status() == 503
+    }
 }

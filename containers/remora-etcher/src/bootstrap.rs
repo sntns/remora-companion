@@ -373,7 +373,7 @@ pub async fn wire() -> Services {
         .expect("HookRunnerAdapterService was just registered");
 
     container
-        .set_type(OperatorAdapterService::new(TuiOperatorImpl::new()))
+        .set_type(OperatorAdapterService::new(TuiOperatorImpl))
         .await;
     let operator = container
         .get_type::<OperatorAdapterService>()

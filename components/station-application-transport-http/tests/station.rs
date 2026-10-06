@@ -2,8 +2,9 @@
 //! over the real use case, its JSONL journal and hook runner (real scripts
 //! in a temporary directory), the real factory use case and gateway adapter
 //! against the in-process fake gateway, and a real HTTP client playing the
-//! devices. Only the operator console is a stub: the scans and commands a
-//! test sends it, and what it was shown.
+//! devices. Only the operator console's display is a stub, keeping what it
+//! was shown; the operator's scans and commands go to `handle`, as `serve`
+//! sends them.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -18,13 +19,14 @@ use rcgen::{CertificateParams, DnType, KeyPair};
 use remora_context::{
     adapter::{
         credentials::{CredentialStoreAdapter, CredentialStoreAdapterService},
-        platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
+        platform::PlatformSessionAdapterService,
         store::{ContextStoreAdapter, ContextStoreAdapterService},
     },
     application::ContextService,
-    model::{Context, Credentials, Principal, ResolvedContext},
+    model::ResolvedContext,
 };
 use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
+use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
 use remora_factory::{
     adapter::{
@@ -42,7 +44,7 @@ use remora_station::{
         hooks::{HookEvent, HookRunnerAdapterService},
         journal::JournalAdapterService,
         operator::{
-            self, LabelBlock, OperatorAdapter, OperatorAdapterService, OperatorEvent, OperatorInput,
+            LabelBlock, OperatorAdapter, OperatorAdapterService, OperatorEvent, OperatorInput,
         },
     },
     application::StationService,
@@ -52,44 +54,18 @@ use remora_station_adapter_hooks_process::ProcessHookRunnerImpl;
 use remora_station_adapter_jsonl::JsonlJournalImpl;
 use remora_station_application::StationControllerImpl;
 use remora_station_application_transport_http::{
-    serve, AckBody, AckState, ClaimBody, ClaimStatusBody, Error, HardwareBody, ImageBody,
-    LabelBody, StateBody, StationClient,
+    serve, AckBody, AckState, ClaimBody, ClaimStatusBody, Error, ErrorCode, HardwareBody,
+    ImageBody, LabelBody, StateBody, StationClient, BODY_LIMIT,
 };
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::oneshot;
 
-/// The operator, scripted: inputs come from the test, everything shown is
-/// kept for it to inspect.
-struct ScriptedOperator {
-    inputs: Mutex<mpsc::UnboundedReceiver<OperatorInput>>,
-    shown: Arc<StdMutex<Vec<OperatorEvent>>>,
-}
+/// What the console was shown, kept for the test to inspect: the
+/// terminal's own console can't be read back.
+struct RecordingOperator(Arc<StdMutex<Vec<OperatorEvent>>>);
 
-#[async_trait::async_trait]
-impl OperatorAdapter for ScriptedOperator {
+impl OperatorAdapter for RecordingOperator {
     fn show(&self, event: &OperatorEvent) {
-        self.shown.lock().unwrap().push(event.clone());
-    }
-
-    async fn read(&self) -> operator::Result<Option<OperatorInput>> {
-        Ok(self.inputs.lock().await.recv().await)
-    }
-}
-
-/// Resolving a context never calls its platform.
-struct NoPlatform;
-
-#[async_trait::async_trait]
-impl PlatformSessionAdapter for NoPlatform {
-    async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
-        unreachable!("the station does not log in")
-    }
-    async fn acting_account(
-        &self,
-        _: &Context,
-        _: &Credentials,
-        _: &str,
-    ) -> platform::Result<Option<String>> {
-        unreachable!("the station does not log in")
+        self.0.lock().unwrap().push(event.clone());
     }
 }
 
@@ -106,7 +82,7 @@ fn contexts(resolved: &ResolvedContext) -> ContextService {
     ContextService::new(ContextControllerImpl::new(
         ContextStoreAdapterService::new(store),
         CredentialStoreAdapterService::new(credentials),
-        PlatformSessionAdapterService::new(NoPlatform),
+        PlatformSessionAdapterService::new(PlatformSessionAdapterImpl),
     ))
 }
 
@@ -153,31 +129,27 @@ fn hook(config: &StationConfig, event: &str, name: &str, body: &str) {
 
 struct Station {
     client: StationClient,
-    inputs: mpsc::UnboundedSender<OperatorInput>,
+    service: StationService,
     shown: Arc<StdMutex<Vec<OperatorEvent>>>,
     journal: PathBuf,
     shutdown: oneshot::Sender<()>,
     server: tokio::task::JoinHandle<()>,
-    operate: tokio::task::JoinHandle<()>,
+    ticker: tokio::task::JoinHandle<()>,
 }
 
 impl Station {
     async fn start(contexts: &ContextService, config: StationConfig) -> Self {
         std::fs::create_dir_all(&config.hooks).unwrap();
         let journal = config.journal.clone();
-        let (inputs, receiver) = mpsc::unbounded_channel();
         let shown = Arc::new(StdMutex::new(Vec::new()));
         let service = StationService::new(StationControllerImpl::new(
             contexts.clone(),
             factory(contexts),
             JournalAdapterService::new(JsonlJournalImpl::new()),
             HookRunnerAdapterService::new(ProcessHookRunnerImpl),
-            OperatorAdapterService::new(ScriptedOperator {
-                inputs: Mutex::new(receiver),
-                shown: shown.clone(),
-            }),
+            OperatorAdapterService::new(RecordingOperator(shown.clone())),
         ));
-        service.start(config, None).await.unwrap();
+        let summary = service.start(config, None).await.unwrap();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -192,31 +164,41 @@ impl Station {
                 .unwrap()
             }
         });
-        let operate = tokio::spawn(async move { service.operate().await.unwrap() });
+        // The labelling queue's clock, as `serve` runs it.
+        let ticker = tokio::spawn({
+            let service = service.clone();
+            async move {
+                loop {
+                    tokio::time::sleep(summary.tick).await;
+                    service.tick().await.unwrap();
+                }
+            }
+        });
         Self {
             client: StationClient::new(&url),
-            inputs,
+            service,
             shown,
             journal,
             shutdown,
             server,
-            operate,
+            ticker,
         }
     }
 
+    /// As `serve` stops: devices first, then the station.
     async fn stop(self) {
-        let _ = self.inputs.send(OperatorInput::Quit);
-        self.operate.await.unwrap();
+        self.ticker.abort();
         let _ = self.shutdown.send(());
         self.server.await.unwrap();
+        self.service.shutdown().await.unwrap();
     }
 
-    fn send(&self, input: OperatorInput) {
-        self.inputs.send(input).unwrap();
+    async fn send(&self, input: OperatorInput) {
+        self.service.handle(input).await.unwrap();
     }
 
-    fn scan(&self, serial: &str) {
-        self.send(OperatorInput::Scan(serial.to_string()));
+    async fn scan(&self, serial: &str) {
+        self.send(OperatorInput::Scan(serial.to_string())).await;
     }
 
     fn shown(&self) -> Vec<OperatorEvent> {
@@ -238,6 +220,16 @@ impl Station {
             .filter(|entry| entry["event"] == event)
             .map(|entry| (entry["claim_id"].as_str().unwrap().to_string(), entry))
             .collect()
+    }
+
+    /// The `event` entries once there are `count` of them: transitions
+    /// reach the journal just behind the state.
+    async fn settled(&self, event: &str, count: usize) -> Vec<(String, serde_json::Value)> {
+        eventually(event, || async {
+            let entries = self.journaled(event);
+            (entries.len() >= count).then_some(entries)
+        })
+        .await
     }
 
     /// How many `<event>.d` scripts finished for `serial`, and how many of
@@ -328,29 +320,44 @@ impl Hub {
         }
     }
 
-    async fn claim(&self, station: &Station) -> Result<ClaimStatusBody, u16> {
+    async fn claim(&self, station: &Station) -> Result<ClaimStatusBody, (u16, ErrorCode)> {
         station
             .client
             .claim(&self.body(&self.csr("claim")))
             .await
-            .map_err(|report| status_code(&report))
+            .map_err(|report| code(&report))
+    }
+
+    /// A claim the station refuses.
+    async fn claim_report(&self, station: &Station) -> error_stack::Report<Error> {
+        station
+            .client
+            .claim(&self.body(&self.csr("claim")))
+            .await
+            .unwrap_err()
     }
 }
 
-fn status_code(report: &error_stack::Report<Error>) -> u16 {
-    match report.current_context() {
-        Error::Status { status, .. } => *status,
-        other => panic!("not an HTTP refusal: {other} ({report:?})"),
-    }
-}
-
-fn refusal(report: &error_stack::Report<Error>) -> (u16, String, Option<u64>) {
+/// The status and code of a refusal.
+fn code(report: &error_stack::Report<Error>) -> (u16, ErrorCode) {
     match report.current_context() {
         Error::Status {
             status,
+            code: Some(code),
+            ..
+        } => (*status, *code),
+        other => panic!("not a coded HTTP refusal: {other} ({report:?})"),
+    }
+}
+
+fn refusal(report: &error_stack::Report<Error>) -> (u16, Option<ErrorCode>, String, Option<u64>) {
+    match report.current_context() {
+        Error::Status {
+            status,
+            code,
             message,
             retry_after,
-        } => (*status, message.clone(), *retry_after),
+        } => (*status, *code, message.clone(), *retry_after),
         other => panic!("not an HTTP refusal: {other}"),
     }
 }
@@ -371,7 +378,7 @@ async fn scan_when_printed(station: &Station, claim: &ClaimStatusBody, scanned: 
         (station.hooks_finished(HookEvent::Label, serial).0 > 0).then_some(())
     })
     .await;
-    station.scan(scanned);
+    station.scan(scanned).await;
 }
 
 #[cfg(unix)]
@@ -442,12 +449,14 @@ async fn ten_concurrent_claims_are_issued_then_labelled_one_at_a_time_in_order()
 
     // FIFO: activated in the order they were issued.
     let issued: Vec<_> = station
-        .journaled("issued")
+        .settled("issued", 10)
+        .await
         .into_iter()
         .map(|(id, _)| id)
         .collect();
     let activated: Vec<_> = station
-        .journaled("label-active")
+        .settled("label-active", 10)
+        .await
         .into_iter()
         .map(|(id, _)| id)
         .collect();
@@ -500,7 +509,7 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
     .await;
     assert_eq!(poll(&station, &first).await.label, LabelBody::Active);
     assert_eq!(poll(&station, &second).await.label, LabelBody::Queued);
-    let mismatches = station.journaled("label-mismatch");
+    let mismatches = station.settled("label-mismatch", 1).await;
     assert_eq!(mismatches.len(), 1);
     assert_eq!(mismatches[0].0, first.claim_id);
     assert_eq!(
@@ -508,7 +517,20 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
         second.identity.serial_number.as_str()
     );
 
-    station.scan(&first.identity.serial_number);
+    // Nobody may say a hub not labelled yet installed: 409, no change.
+    let installed = AckBody {
+        state: AckState::Installed,
+        reason: None,
+    };
+    let report = station
+        .client
+        .ack(&first.claim_id, &installed)
+        .await
+        .unwrap_err();
+    assert_eq!(code(&report), (409, ErrorCode::NotLabelled));
+    assert_eq!(poll(&station, &first).await.label, LabelBody::Active);
+
+    station.scan(&first.identity.serial_number).await;
     eventually("the first hub labelled", || async {
         (poll(&station, &first).await.label == LabelBody::Labelled).then_some(())
     })
@@ -516,7 +538,7 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
     let first_now = poll(&station, &first).await;
     assert_eq!(first_now.queue_position, None);
     assert_eq!(poll(&station, &second).await.label, LabelBody::Active);
-    let labelled = station.journaled("labelled");
+    let labelled = station.settled("labelled", 1).await;
     assert_eq!(
         labelled[0].1["scanned"],
         first.identity.serial_number.as_str()
@@ -535,10 +557,11 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
         .await
         .unwrap();
     assert_eq!(acked.state, StateBody::Installed);
-    assert_eq!(station.journaled("installed").len(), 1);
+    assert_eq!(station.settled("installed", 1).await.len(), 1);
     assert_eq!(poll(&station, &second).await.label, LabelBody::Active);
 
-    // A hub rejecting what it got: failed, and out of the queue.
+    // A hub rejecting what it got before its label: failed, out of the
+    // queue.
     let failed = station
         .client
         .ack(
@@ -550,9 +573,12 @@ async fn a_wrong_scan_changes_nothing_and_the_right_one_moves_on() {
         )
         .await
         .unwrap();
-    assert_eq!(failed.state, StateBody::Failed);
     assert_eq!(
-        station.journaled("failed")[0].1["reason"],
+        (failed.state, failed.label, failed.queue_position),
+        (StateBody::Failed, LabelBody::Queued, None)
+    );
+    assert_eq!(
+        station.settled("failed", 1).await[0].1["reason"],
         "certificate does not chain"
     );
     station.stop().await;
@@ -639,7 +665,7 @@ async fn a_silent_active_hub_goes_back_to_the_queue() {
         (poll(&station, &polling).await.label == LabelBody::Active).then_some(())
     })
     .await;
-    let lost = station.journaled("label-lost");
+    let lost = station.settled("label-lost", 1).await;
     assert_eq!(lost.len(), 1);
     assert_eq!(lost[0].0, silent.claim_id);
     assert!(station.shown().iter().any(
@@ -685,23 +711,26 @@ async fn a_failing_label_hook_blocks_validation_until_reprinted_or_forced() {
     })
     .await;
     assert_eq!(poll(&station, &reprinted).await.label, LabelBody::Active);
-    station.send(OperatorInput::Reprint);
+    station.send(OperatorInput::Reprint).await;
     eventually("the reprint", || async {
         (station.hooks_finished(HookEvent::Label, serial) == (2, 1)).then_some(())
     })
     .await;
-    station.scan(serial);
+    station.scan(serial).await;
     eventually("the reprinted hub labelled", || async {
         (poll(&station, &reprinted).await.label == LabelBody::Labelled).then_some(())
     })
     .await;
-    let attempts: Vec<_> = station
-        .journaled("hook")
-        .into_iter()
-        .filter(|(id, _)| id == &reprinted.claim_id)
-        .map(|(_, entry)| (entry["attempt"].as_u64(), entry["exit"].as_i64()))
-        .collect();
-    assert_eq!(attempts, [(Some(1), Some(1)), (Some(2), Some(0))]);
+    eventually("both prints journaled", || async {
+        let attempts: Vec<_> = station
+            .journaled("hook")
+            .into_iter()
+            .filter(|(id, _)| id == &reprinted.claim_id)
+            .map(|(_, entry)| (entry["attempt"].as_u64(), entry["exit"].as_i64()))
+            .collect();
+        (attempts == [(Some(1), Some(1)), (Some(2), Some(0))]).then_some(())
+    })
+    .await;
 
     // Force: still refused until scanned after `f`.
     let serial = &forced.identity.serial_number;
@@ -710,13 +739,13 @@ async fn a_failing_label_hook_blocks_validation_until_reprinted_or_forced() {
         blocked(&forced).then_some(())
     })
     .await;
-    station.send(OperatorInput::Force);
-    station.scan(serial);
+    station.send(OperatorInput::Force).await;
+    station.scan(serial).await;
     eventually("the forced hub labelled", || async {
         (poll(&station, &forced).await.label == LabelBody::Labelled).then_some(())
     })
     .await;
-    assert_eq!(station.journaled("label-forced").len(), 1);
+    assert_eq!(station.settled("label-forced", 1).await.len(), 1);
     station.stop().await;
 }
 
@@ -728,7 +757,7 @@ async fn skipping_sends_the_active_hub_to_the_end_of_the_queue() {
     let station = Station::start(&contexts(&resolved), config(root.path())).await;
     let skipped = Hub::new("hub-v2", 1).claim(&station).await.unwrap();
     let next = Hub::new("hub-v2", 2).claim(&station).await.unwrap();
-    station.send(OperatorInput::Skip);
+    station.send(OperatorInput::Skip).await;
     eventually("the next hub active", || async {
         (poll(&station, &next).await.label == LabelBody::Active).then_some(())
     })
@@ -738,7 +767,7 @@ async fn skipping_sends_the_active_hub_to_the_end_of_the_queue() {
         (back.label, back.queue_position),
         (LabelBody::Queued, Some(1))
     );
-    assert_eq!(station.journaled("label-skipped").len(), 1);
+    assert_eq!(station.settled("label-skipped", 1).await.len(), 1);
     station.stop().await;
 }
 
@@ -764,22 +793,29 @@ async fn refusals_map_to_the_contract_status_codes() {
 
     assert_eq!(
         Hub::new("hub-v3", 1).claim(&station).await.unwrap_err(),
-        403
+        (403, ErrorCode::UnknownBoard)
     );
 
+    // Only a bad CSR makes a hub regenerate its key.
     let hub = Hub::new("hub-v2", 2);
     let mut garbage = hub.body(b"not a csr");
     let report = station.client.claim(&garbage).await.unwrap_err();
-    let (status, message, _) = refusal(&report);
-    assert_eq!(status, 400);
+    let (status, code_of, message, _) = refusal(&report);
+    assert_eq!((status, code_of), (400, Some(ErrorCode::InvalidCsr)));
     assert!(
         message.contains("invalid certificate signing request"),
         "{message}"
     );
     garbage.csr = "%%% not base64".into();
     assert_eq!(
-        status_code(&station.client.claim(&garbage).await.unwrap_err()),
-        400
+        code(&station.client.claim(&garbage).await.unwrap_err()),
+        (400, ErrorCode::InvalidRequest)
+    );
+    let mut boardless = hub.body(&hub.csr("x"));
+    boardless.hardware.board = String::new();
+    assert_eq!(
+        code(&station.client.claim(&boardless).await.unwrap_err()),
+        (400, ErrorCode::InvalidRequest)
     );
 
     // An explicit device name the platform already has.
@@ -790,8 +826,11 @@ async fn refusals_map_to_the_contract_status_codes() {
         .factory_devices
         .insert("c3d203".into(), 1);
     let duplicate = Hub::new("hub-v1", 3);
-    assert_eq!(duplicate.claim(&station).await.unwrap_err(), 409);
-    let failed = station.journaled("failed");
+    assert_eq!(
+        duplicate.claim(&station).await.unwrap_err(),
+        (409, ErrorCode::AlreadyExists)
+    );
+    let failed = station.settled("failed", 1).await;
     assert_eq!(failed.len(), 1);
     assert!(failed[0].1["reason"].as_str().unwrap().contains("c3d203"));
     eventually("failed.d to run", || async {
@@ -805,7 +844,10 @@ async fn refusals_map_to_the_contract_status_codes() {
     // A hub without the field its board's device-name needs.
     let mut nameless = Hub::new("hub-v1", 4);
     nameless.hardware.bsp_serial = None;
-    assert_eq!(nameless.claim(&station).await.unwrap_err(), 400);
+    assert_eq!(
+        nameless.claim(&station).await.unwrap_err(),
+        (400, ErrorCode::InvalidHardware)
+    );
 
     // The quota: two identities, then refusals -- but a retry still gets
     // its identity back.
@@ -813,27 +855,123 @@ async fn refusals_map_to_the_contract_status_codes() {
     Hub::new("hub-v1", 5).claim(&station).await.unwrap();
     assert_eq!(
         Hub::new("hub-v2", 6).claim(&station).await.unwrap_err(),
-        403
+        (403, ErrorCode::QuotaExceeded)
     );
     assert_eq!(hub.claim(&station).await.unwrap().identity, first.identity);
 
     let report = station.client.status("0123").await.unwrap_err();
-    assert_eq!(status_code(&report), 404);
+    assert_eq!(code(&report), (404, ErrorCode::UnknownClaim));
     station.stop().await;
 
-    // A platform that can't be reached: retry later.
-    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mut unreachable = resolved.clone();
-    unreachable.context.endpoint.address = closed.local_addr().unwrap().to_string();
-    drop(closed);
+    // Without a quota from here on.
     let root = tempfile::tempdir().unwrap();
-    let station = Station::start(&contexts(&unreachable), crate::config(root.path())).await;
-    let report = station
-        .client
-        .claim(&Hub::new("hub-v2", 7).body(&Hub::new("hub-v2", 7).csr("x")))
-        .await
-        .unwrap_err();
-    let (status, _, retry_after) = refusal(&report);
-    assert_eq!((status, retry_after), (503, Some(5)));
+    let station = Station::start(&contexts(&resolved), crate::config(root.path())).await;
+
+    // Each field past its limit, or able to forge the operator's console:
+    // invalid-hardware, naming the field.
+    let long = "a".repeat(65);
+    type Change = fn(&mut HardwareBody, &mut ImageBody, &str);
+    let refused: [(&str, Change); 9] = [
+        ("hardware.temp_hostname", |h, _, _| {
+            h.temp_hostname = "\x1b[2J1H7Z".into()
+        }),
+        ("hardware.temp_hostname", |h, _, long| {
+            h.temp_hostname = long.into()
+        }),
+        ("hardware.eth_mac", |h, _, long| {
+            h.eth_mac = Some(long.into())
+        }),
+        ("hardware.bsp_serial", |h, _, _| {
+            h.bsp_serial = Some("c3d2 $(reboot)".into())
+        }),
+        ("hardware.machine_id", |h, _, long| {
+            h.machine_id = Some(long.into())
+        }),
+        ("hardware.macs.wlan0", |h, _, _| {
+            h.macs.insert("wlan0".into(), "aa\nbb".into());
+        }),
+        ("hardware.macs", |h, _, _| {
+            h.macs.insert("a-very-long-interface".into(), "aa".into());
+        }),
+        ("more than 32 MACs", |h, _, _| {
+            h.macs = (0..33).map(|n| (format!("eth{n}"), "aa".into())).collect()
+        }),
+        ("image.version", |_, i, long| i.version = Some(long.into())),
+    ];
+    for (n, (field, change)) in refused.into_iter().enumerate() {
+        let hub = Hub::new("hub-v2", 10 + n);
+        let mut body = hub.body(&hub.csr("x"));
+        change(&mut body.hardware, &mut body.image, &long);
+        let report = station.client.claim(&body).await.unwrap_err();
+        let (status, code_of, message, _) = refusal(&report);
+        assert_eq!((status, code_of), (400, Some(ErrorCode::InvalidHardware)));
+        assert!(message.contains(field), "{field}: {message}");
+    }
+
+    // What real hubs send, unknown values as "" included.
+    let real = Hub::new("hub-v2", 50);
+    let mut body = real.body(&real.csr("x"));
+    body.hardware.temp_hostname = "525400123456".into();
+    body.hardware.eth_mac = Some(String::new());
+    body.hardware.bsp_serial = Some(String::new());
+    body.hardware.machine_id = Some("1abf02e5bed34d63a097f3f38f0f6408".into());
+    body.hardware.macs = BTreeMap::from([
+        ("bat0".into(), "aabbccddeeff".into()),
+        ("wlan0".into(), "aa:bb:cc:dd:ee:ff".into()),
+        ("usb0".into(), String::new()),
+    ]);
+    body.image.version = Some("local-748efa3".into());
+    body.image.compatible = Some("virtual".into());
+    station.client.claim(&body).await.unwrap();
+    body.image = ImageBody {
+        version: Some(String::new()),
+        compatible: Some(String::new()),
+    };
+    station.client.claim(&body).await.unwrap();
+
+    // A body no device sends.
+    let mut huge = Hub::new("hub-v2", 8).body(&Hub::new("hub-v2", 8).csr("x"));
+    huge.hardware.macs = BTreeMap::from([("wlan0".into(), "x".repeat(BODY_LIMIT))]);
+    assert_eq!(
+        code(&station.client.claim(&huge).await.unwrap_err()),
+        (413, ErrorCode::PayloadTooLarge)
+    );
+
+    // Credentials revoked while the station runs: retry later.
+    gateway.0.lock().unwrap().revoked = true;
+    let report = Hub::new("hub-v2", 9).claim_report(&station).await;
+    let (status, code_of, _, retry_after) = refusal(&report);
+    assert_eq!(
+        (status, code_of, retry_after),
+        (503, Some(ErrorCode::Unavailable), Some(5))
+    );
+    station.stop().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn issued_hooks_get_the_claim_a_hub_sent() {
+    let (_gateway, resolved) = TestGateway::serve().await;
+    let root = tempfile::tempdir().unwrap();
+    let config = config(root.path());
+    hook(
+        &config,
+        "issued",
+        "10-register",
+        "echo \"$1 $REMORA_SERIAL $REMORA_BOARD $REMORA_TEMP_HOSTNAME $REMORA_ETH_MAC \
+         $REMORA_BSP_SERIAL $REMORA_MACHINE_ID $REMORA_IMAGE_VERSION $REMORA_ATTEMPT\"",
+    );
+    let station = Station::start(&contexts(&resolved), config).await;
+    let hub = Hub::new("hub-v2", 1);
+    let claim = hub.claim(&station).await.unwrap();
+    let hooks = station.settled("hook", 1).await;
+    assert_eq!(hooks[0].0, claim.claim_id);
+    assert_eq!(
+        hooks[0].1["stdout"],
+        format!(
+            "issued {} hub-v2 e2b4a1c09f01 e2:b4:a1:c0:9f:01 c3d201 {:032} 1.4.0 1\n",
+            claim.identity.serial_number, 1
+        )
+    );
     station.stop().await;
 }

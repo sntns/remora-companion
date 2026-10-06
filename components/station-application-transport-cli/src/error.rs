@@ -4,14 +4,17 @@ use std::{net::SocketAddr, path::PathBuf};
 pub enum Error {
     #[error("failed to read the station configuration {0}")]
     ReadConfig(PathBuf),
+    /// Which key or option is wrong; why is the cause, or attached.
     #[error("invalid station configuration: {0}")]
     Config(String),
-    #[error("{0}")]
-    Station(String),
+    #[error("failed to start the station")]
+    Start,
     #[error("failed to listen on {0}")]
     Listen(SocketAddr),
     #[error("the station's HTTP server failed")]
     Serve,
+    #[error("the labelling console failed")]
+    Operate,
     #[error("the station at {0} is not a remora station")]
     NotAStation(String),
     #[error("{0}")]
@@ -25,12 +28,3 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;
-
-/// Lifts a station-service failure, keeping its message as the headline
-/// (e.g. which context isn't logged in, or which journal won't load).
-pub(crate) fn station_error(
-    report: error_stack::Report<remora_station::application::Error>,
-) -> error_stack::Report<Error> {
-    let message = report.current_context().to_string();
-    report.change_context(Error::Station(message))
-}

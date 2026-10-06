@@ -2,13 +2,14 @@ use std::future::Future;
 
 use axum::{
     body::Bytes,
+    extract::{rejection::BytesRejection, DefaultBodyLimit},
     extract::{Path, State},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
-use error_stack::{Report, ResultExt};
+use error_stack::{AttachmentKind, FrameKind, Report, ResultExt};
 use remora_station::{
     application::{Error as StationError, StationService},
     model::{Ack, ClaimId},
@@ -16,21 +17,29 @@ use remora_station::{
 
 use crate::{
     error::{Error, Result},
-    wire::{AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, HelloBody},
+    wire::{AckBody, AckState, ClaimBody, ClaimStatusBody, ErrorBody, ErrorCode, HelloBody},
 };
 
 /// How long a device waits before retrying a claim the platform couldn't
 /// take: long enough not to hammer a platform that's down.
 const RETRY_AFTER_SECS: u64 = 5;
 
+/// The largest request body: a claim is a P-256 CSR (under 1 KiB in
+/// base64) and a few short fields, so anything near this is not a device.
+/// Far below axum's 2 MB default, which anyone on the workshop network
+/// could otherwise make the station parse.
+pub const BODY_LIMIT: usize = 64 * 1024;
+
 /// The protocol's routes over `service`. No logic beyond the wire: decoding
-/// bodies, and each station error to its status code.
+/// bodies (at most `BODY_LIMIT` bytes), and each station error to its
+/// status code.
 pub fn router(service: StationService) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
         .route("/v1/claims", post(claim))
         .route("/v1/claims/{claim_id}", get(status))
         .route("/v1/claims/{claim_id}/ack", post(ack))
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(service)
 }
 
@@ -46,9 +55,15 @@ pub async fn serve(
         .change_context(Error::Serve)
 }
 
-fn refuse(status: StatusCode, error: String) -> Response {
-    let retry_after = (status == StatusCode::SERVICE_UNAVAILABLE).then_some(RETRY_AFTER_SECS);
-    let mut response = (status, Json(ErrorBody { error, retry_after })).into_response();
+fn refuse(code: ErrorCode, error: String) -> Response {
+    let status = StatusCode::from_u16(code.status()).expect("every code has a valid status");
+    let retry_after = code.retries().then_some(RETRY_AFTER_SECS);
+    let body = ErrorBody {
+        error,
+        code: Some(code),
+        retry_after,
+    };
+    let mut response = (status, Json(body)).into_response();
     if let Some(seconds) = retry_after {
         response
             .headers_mut()
@@ -57,39 +72,66 @@ fn refuse(status: StatusCode, error: String) -> Response {
     response
 }
 
-/// The headline, and the first detail under it (why a CSR is invalid,
-/// what the platform said): what a device's log needs.
+/// The headline, and the first detail under it (what the platform said,
+/// else the innermost cause: which check a CSR failed, which field is
+/// invalid): what a device's log needs.
 fn message(report: &Report<StationError>) -> String {
     let headline = report.current_context().to_string();
-    let detail = report.frames().find_map(|frame| {
-        frame
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| frame.downcast_ref::<&str>().map(|s| s.to_string()))
+    let attachment = report.frames().find_map(|frame| match frame.kind() {
+        FrameKind::Attachment(AttachmentKind::Printable(printable)) => Some(printable.to_string()),
+        _ => None,
     });
-    match detail {
+    let innermost = report
+        .frames()
+        .filter_map(|frame| match frame.kind() {
+            FrameKind::Context(context) => Some(context.to_string()),
+            FrameKind::Attachment(_) => None,
+        })
+        .last();
+    match attachment.or(innermost) {
         Some(detail) if detail != headline => format!("{headline}: {detail}"),
         _ => headline,
     }
 }
 
 fn station_error(report: Report<StationError>) -> Response {
-    let status = match report.current_context() {
-        StationError::InvalidCsr | StationError::InvalidHardware(_) => StatusCode::BAD_REQUEST,
-        StationError::UnknownBoard(_) | StationError::QuotaReached(_) | StationError::Refused => {
-            StatusCode::FORBIDDEN
-        }
-        StationError::AlreadyExists(_) => StatusCode::CONFLICT,
-        StationError::UnknownClaim(_) => StatusCode::NOT_FOUND,
-        StationError::Unavailable | StationError::NotStarted => StatusCode::SERVICE_UNAVAILABLE,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    let code = match report.current_context() {
+        StationError::InvalidCsr => ErrorCode::InvalidCsr,
+        StationError::InvalidHardware => ErrorCode::InvalidHardware,
+        StationError::UnknownBoard(_) => ErrorCode::UnknownBoard,
+        StationError::QuotaReached(_) => ErrorCode::QuotaExceeded,
+        StationError::Refused => ErrorCode::Refused,
+        StationError::MissingAccessUrl => ErrorCode::MissingAccessUrl,
+        StationError::AlreadyExists(_) => ErrorCode::AlreadyExists,
+        StationError::NotLabelled(_) => ErrorCode::NotLabelled,
+        StationError::UnknownClaim(_) => ErrorCode::UnknownClaim,
+        StationError::Unavailable => ErrorCode::Unavailable,
+        StationError::Journal(_) => ErrorCode::JournalUnavailable,
+        StationError::NotStarted => ErrorCode::NotStarted,
+        _ => ErrorCode::Internal,
     };
-    refuse(status, message(&report))
+    refuse(code, message(&report))
 }
 
-/// A JSON body; `Err` says what's malformed, for a 400.
-fn body<T: serde::de::DeserializeOwned>(bytes: &Bytes) -> std::result::Result<T, String> {
-    serde_json::from_slice(bytes).map_err(|e| format!("malformed request body: {e}"))
+/// A JSON body; `Err` is the refusal to answer when it isn't one:
+/// `invalid-request`, or `payload-too-large`.
+fn body<T: serde::de::DeserializeOwned>(
+    bytes: std::result::Result<Bytes, BytesRejection>,
+) -> std::result::Result<T, (ErrorCode, String)> {
+    let bytes = bytes.map_err(|rejection| {
+        let code = if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ErrorCode::PayloadTooLarge
+        } else {
+            ErrorCode::InvalidRequest
+        };
+        (code, rejection.body_text())
+    })?;
+    serde_json::from_slice(&bytes).map_err(|e| {
+        (
+            ErrorCode::InvalidRequest,
+            format!("malformed request body: {e}"),
+        )
+    })
 }
 
 async fn hello(State(service): State<StationService>) -> Response {
@@ -99,10 +141,16 @@ async fn hello(State(service): State<StationService>) -> Response {
     }
 }
 
-async fn claim(State(service): State<StationService>, bytes: Bytes) -> Response {
-    let request = match body::<ClaimBody>(&bytes).and_then(ClaimBody::into_request) {
-        Ok(request) => request,
-        Err(error) => return refuse(StatusCode::BAD_REQUEST, error),
+async fn claim(
+    State(service): State<StationService>,
+    bytes: std::result::Result<Bytes, BytesRejection>,
+) -> Response {
+    let request = match body::<ClaimBody>(bytes) {
+        Ok(claim) => match claim.into_request() {
+            Ok(request) => request,
+            Err(error) => return refuse(ErrorCode::InvalidRequest, error),
+        },
+        Err((code, error)) => return refuse(code, error),
     };
     match service.submit(request).await {
         Ok(status) => Json(ClaimStatusBody::from(status)).into_response(),
@@ -120,9 +168,9 @@ async fn status(State(service): State<StationService>, Path(claim_id): Path<Stri
 async fn ack(
     State(service): State<StationService>,
     Path(claim_id): Path<String>,
-    bytes: Bytes,
+    bytes: std::result::Result<Bytes, BytesRejection>,
 ) -> Response {
-    let ack = match body::<AckBody>(&bytes) {
+    let ack = match body::<AckBody>(bytes) {
         Ok(AckBody {
             state: AckState::Installed,
             ..
@@ -132,10 +180,10 @@ async fn ack(
             reason,
         }) => Ack::Failed {
             reason: reason
-                .filter(|reason| !reason.is_empty())
+                .filter(|reason| !reason.trim().is_empty())
                 .unwrap_or_else(|| "no reason given".into()),
         },
-        Err(error) => return refuse(StatusCode::BAD_REQUEST, error),
+        Err((code, error)) => return refuse(code, error),
     };
     match service.ack(&ClaimId::new(claim_id), ack).await {
         Ok(status) => Json(ClaimStatusBody::from(status)).into_response(),

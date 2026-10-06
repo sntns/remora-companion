@@ -78,15 +78,16 @@ pub(crate) fn read(path: &Path) -> Result<StationFile> {
     yaml_serde::from_str(&text).change_context_lazy(|| Error::ReadConfig(path.into()))
 }
 
-fn invalid(message: impl Into<String>) -> Report<Error> {
-    Report::new(Error::Config(message.into()))
+/// `where` in the configuration is wrong.
+fn invalid(at: impl Into<String>) -> Error {
+    Error::Config(at.into())
 }
 
 fn duration(key: &str, text: Option<String>, default: Duration) -> Result<Duration> {
     match text {
         None => Ok(default),
         Some(text) => humantime::parse_duration(&text)
-            .map_err(|e| invalid(format!("{key}: {text:?} is not a duration ({e})"))),
+            .change_context_lazy(|| invalid(format!("{key} {text:?}"))),
     }
 }
 
@@ -94,7 +95,9 @@ fn board_value<'a>(option: &str, value: &'a str) -> Result<(&'a str, &'a str)> {
     value
         .split_once('=')
         .filter(|(board, rest)| !board.is_empty() && !rest.is_empty())
-        .ok_or_else(|| invalid(format!("--{option} {value:?}: expected BOARD=VALUE")))
+        .ok_or_else(|| {
+            Report::new(invalid(format!("--{option} {value:?}"))).attach("expected BOARD=VALUE")
+        })
 }
 
 /// The address to listen on, and the station's settings: the file's (its
@@ -124,7 +127,7 @@ pub(crate) fn resolve(
             device_name,
         } = settings.create_factory_device;
         let policy = BoardPolicy::from_parts(serial_number_policy, device_name)
-            .map_err(|e| invalid(format!("boards.{board}.create-factory-device: {e}")))?;
+            .change_context_lazy(|| invalid(format!("boards.{board}.create-factory-device")))?;
         boards.insert(board, policy);
     }
     for value in &overrides.serial_policies {
@@ -137,7 +140,7 @@ pub(crate) fn resolve(
     for value in &overrides.device_names {
         let (board, template) = board_value("device-name", value)?;
         let policy = BoardPolicy::from_parts(None, Some(template.to_string()))
-            .map_err(|e| invalid(format!("--device-name {value:?}: {e}")))?;
+            .change_context_lazy(|| invalid(format!("--device-name {value:?}")))?;
         boards.insert(board.to_string(), policy);
     }
 
@@ -174,7 +177,8 @@ pub(crate) fn resolve(
         boards,
     };
     if config.presence_timeout.is_zero() || config.hook_timeout.is_zero() {
-        return Err(invalid("timeouts must be longer than zero"));
+        return Err(Report::new(invalid("presence-timeout, hook-timeout"))
+            .attach("timeouts must be longer than zero"));
     }
     Ok((listen, config))
 }

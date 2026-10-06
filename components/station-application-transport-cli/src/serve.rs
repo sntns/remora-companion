@@ -10,7 +10,8 @@ use remora_tui as tui;
 
 use crate::{
     config::{self, Overrides, StationFile},
-    error::{station_error, Error, Result},
+    console::{self, Line},
+    error::{Error, Result},
     service::ServeArgs,
 };
 
@@ -70,7 +71,7 @@ pub(crate) async fn run(
     let summary = service
         .start(config, over.cloned())
         .await
-        .map_err(station_error)?;
+        .change_context(Error::Start)?;
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .change_context(Error::Listen(listen))?;
@@ -99,19 +100,51 @@ pub(crate) async fn run(
             let _ = stopped.await;
         },
     ));
+
+    // The labelling console: the operator's lines, the queue's clock, and
+    // Ctrl-C, until `q`.
     let interrupted = remora_progress::cancelled_by_ctrl_c();
-    let outcome = tokio::select! {
-        operated = service.operate() => operated.map_err(station_error),
-        () = interrupted.cancelled() => Ok(()),
-        served = &mut server => {
-            return match served {
-                Ok(served) => served.change_context(Error::Serve),
-                Err(_) => Err(Report::new(Error::Serve)),
-            };
+    let mut lines = console::lines();
+    let mut reading = true;
+    let mut ticker = tokio::time::interval(summary.tick);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut served = None;
+    let outcome = loop {
+        let step = tokio::select! {
+            line = lines.recv(), if reading => match line.as_deref().map(console::parse) {
+                None => {
+                    reading = false;
+                    Ok(())
+                }
+                Some(Line::Quit) => break Ok(()),
+                Some(Line::Input(input)) => service.handle(input).await,
+            },
+            _ = ticker.tick() => service.tick().await,
+            () = interrupted.cancelled() => break Ok(()),
+            done = &mut server => {
+                served = Some(done);
+                break Ok(());
+            }
+        };
+        if let Err(report) = step {
+            break Err(report.change_context(Error::Operate));
         }
     };
-    let _ = stop.send(());
-    let _ = server.await;
+
+    // Devices first: once nothing can reach the station, its hooks get
+    // their time and the journal is flushed.
+    let served = match served {
+        Some(served) => served,
+        None => {
+            let _ = stop.send(());
+            server.await
+        }
+    };
+    let stopped = service.shutdown().await.change_context(Error::Operate);
     tui::outro("Station stopped");
-    outcome
+    match served {
+        Ok(served) => served.change_context(Error::Serve)?,
+        Err(join) => return Err(Report::new(join).change_context(Error::Serve)),
+    }
+    outcome.and(stopped)
 }
