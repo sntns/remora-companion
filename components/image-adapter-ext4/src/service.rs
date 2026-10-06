@@ -29,7 +29,7 @@ impl WindowedFileDevice {
             .read(true)
             .write(true)
             .open(path)
-            .map_err(|_| Error::Open(path.to_path_buf()))?;
+            .map_err(|e| Error::Io(path.to_path_buf(), e))?;
         Ok(Self {
             file: Mutex::new(file),
             offset,
@@ -93,11 +93,11 @@ fn refuse_if_needs_journal_recovery(
     image: &Path,
     partition_offset: u64,
 ) -> std::result::Result<(), Error> {
-    let mut file = File::open(image).map_err(|_| Error::Open(image.to_path_buf()))?;
+    let mut file = File::open(image).map_err(|e| Error::Io(image.to_path_buf(), e))?;
     let mut buf = [0u8; 100];
     file.seek(SeekFrom::Start(partition_offset + EXT4_SUPERBLOCK_OFFSET))
         .and_then(|_| file.read_exact(&mut buf))
-        .map_err(|_| Error::Open(image.to_path_buf()))?;
+        .map_err(|e| Error::Io(image.to_path_buf(), e))?;
 
     let magic = u16::from_le_bytes([buf[EXT4_MAGIC_OFFSET], buf[EXT4_MAGIC_OFFSET + 1]]);
     if magic != EXT4_MAGIC {
@@ -120,10 +120,16 @@ fn refuse_if_needs_journal_recovery(
     Ok(())
 }
 
+/// `image`'s size in bytes, a block device's included: its metadata length
+/// is 0, only seeking to its end tells its capacity.
+fn image_len(image: &Path) -> std::result::Result<u64, Error> {
+    File::open(image)
+        .and_then(|mut file| file.seek(SeekFrom::End(0)))
+        .map_err(|e| Error::Io(image.to_path_buf(), e))
+}
+
 fn mount_window(image: &Path, offset: u64, size: u64) -> std::result::Result<Filesystem, Error> {
-    let image_len = std::fs::metadata(image)
-        .map_err(|_| Error::Open(image.to_path_buf()))?
-        .len();
+    let image_len = image_len(image)?;
     let window_end = offset.checked_add(size).filter(|&end| end <= image_len);
     if window_end.is_none() {
         return Err(Error::OutOfWindow {
@@ -242,9 +248,9 @@ fn format(
         .write(true)
         .truncate(true)
         .open(image)
-        .map_err(|_| Error::Open(image.to_path_buf()))?;
+        .map_err(|e| Error::Io(image.to_path_buf(), e))?;
     file.set_len(size_bytes)
-        .map_err(|_| Error::Open(image.to_path_buf()))?;
+        .map_err(|e| Error::Io(image.to_path_buf(), e))?;
     drop(file);
 
     let dev = WindowedFileDevice::open_rw(image, 0, size_bytes)?;
@@ -376,6 +382,28 @@ mod tests {
             .write_all(bytes)
             .unwrap();
         path
+    }
+
+    #[test]
+    fn image_len_measures_a_block_device() {
+        // Read-only, and only when this user may open one (group `disk`).
+        let device = std::fs::read_dir("/sys/block").ok().and_then(|disks| {
+            disks.flatten().find_map(|disk| {
+                let sectors: u64 = std::fs::read_to_string(disk.path().join("size"))
+                    .ok()?
+                    .trim()
+                    .parse()
+                    .ok()?;
+                let node = Path::new("/dev").join(disk.file_name());
+                (sectors > 0 && File::open(&node).is_ok()).then_some((node, sectors * 512))
+            })
+        });
+        let Some((node, size)) = device else {
+            eprintln!("no readable block device on this machine, skipping");
+            return;
+        };
+        assert_eq!(std::fs::metadata(&node).unwrap().len(), 0);
+        assert_eq!(image_len(&node).unwrap(), size);
     }
 
     #[test]

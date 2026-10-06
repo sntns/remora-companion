@@ -177,7 +177,8 @@ rmra scp -r root@525400C0FFEE:/var/log ./logs
 host pinning, with the device side written `[user@]DEVICE:path` (one device
 per copy). scp's options pass through, except those that would bypass the
 channel or the pinning (`-J`, `-F`, `-S`, `-o ProxyCommand`/`ProxyJump`);
-`-c`/`-v` are rmra's own, so pass scp's after `--`.
+`-v` is rmra's own, so pass scp's after `--`; scp's `-c` (cipher) is scp's,
+since rmra's `--context` goes before the command.
 
 `rmra channel open <device>` is the raw channel on stdin/stdout, for use as
 a ProxyCommand of your own.
@@ -195,8 +196,10 @@ rmra release show 2026.10.0
 A release is a version and its artifacts (RAUC bundles); each artifact's
 `--tag-condition` says which devices it is for, as a boolean expression
 over device tags (`type:rauc && (board:hdc || board:rp5)`). Uploads show a
-live byte bar and resume on their own after a dropped connection; if a run
-is interrupted, it prints a token to continue with `--resume <token>`.
+live byte bar and resume on their own after a dropped connection. Ctrl-C (or
+a local read error) stops an upload without the platform committing what
+was sent; it prints the `rmra release upload … --resume <token>` command
+that continues it.
 
 ### Roll it out and follow it
 
@@ -216,8 +219,13 @@ unless `--draft`. A device that can't take it (one already has an update in
 flight) is reported without stopping the others. `--watch` (or `rmra
 deployment watch <names...>`) draws one live line per deployment — status,
 progress, the device's latest report — and exits non-zero if any of them
-doesn't succeed; Ctrl-C stops watching, not the deployments. Every listing
-takes `--format json` for scripts.
+doesn't succeed; Ctrl-C stops watching, not the deployments. A status rmra
+doesn't know yet stops the watch for that deployment with a warning and
+counts as not succeeded. `--interval` sets the polling period of `--watch`
+and `deployment logs --follow`. With `--selector`, what is deployed is
+exactly the device list shown and confirmed. Every listing — and
+`deployment logs` (one object per line with `--follow`) and `deploy`'s
+result — takes `--format json` for scripts.
 
 ## remora-etcher
 
@@ -247,7 +255,9 @@ remora-etcher flash --image remora.wic --device /dev/sdb
 
 Sparse-aware and checksum-verified whenever a `.bmap` file sits next to the
 image (auto-discovered as `<image>.bmap`, same convention as `bmaptool`;
-skip it with `--no-bmap`). Refuses to overwrite what looks like the system
+skip it with `--no-bmap`). The device may be given by any path to it
+(`/dev/disk/by-id/…`, a symlink): the checks run on the disk it really
+is. Refuses to overwrite what looks like the system
 disk, refuses a non-removable disk unless you pass `--force`, and makes you
 type the device path back to confirm — unless `--yes`, which a run with
 nobody at the terminal (a script, CI) needs.
@@ -359,7 +369,7 @@ DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
 `config`, `convert`, `batch` and `factory` for remora-etcher, `context`,
-`channel`, `ota` and `device` for rmra. Components are generic, not owned by a binary: the
+`channel`, `ota` and `device` for rmra, `update` (and `context`) for both. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each
 is split further into:
 
@@ -378,19 +388,23 @@ is split further into:
 Not every vertical needs all four: `identity` and `config` have no
 filesystem adapter of their own — they inject the already-wired `image`
 vertical's `ImageService` instead (see `containers/remora-etcher/src/bootstrap.rs`),
-since writing into a partition is `image`'s job either way.
+since writing into a partition, or a standalone ext4 image, is `image`'s
+job either way. Likewise `flash` asks `disk`'s `DiskService` which disk a
+path really is, and `ota` asks `device`'s `DeviceService` which devices a
+selector names.
 
 Small shared utility crates with no vertical prefix (`remora-fs-walk`,
-`remora-scratch`, `remora-format`, `remora-progress`, and for rmra
-`remora-platform-grpc` — the vendored sntns-platform protos, compiled with
-the pure-Rust [protox](https://docs.rs/protox) so no `protoc` is needed —
-and `remora-tui`) mirror remora-edge's own `components/store`/`config`
-convention. Each binary in `containers/` (`remora-etcher`, `rmra`) is a
+`remora-scratch`, `remora-format`, `remora-progress`, `remora-tui`,
+`remora-completion`, and `remora-platform-grpc` — the vendored
+sntns-platform protos, compiled with the pure-Rust
+[protox](https://docs.rs/protox) so no `protoc` is needed) mirror
+remora-edge's own `components/store`/`config` convention. Each binary in `containers/` (`remora-etcher`, `rmra`) is a
 composition root that wires its adapters and use cases together via
 [`busybody`](https://docs.rs/busybody) (the same DI crate remora-edge uses),
 then dispatches CLI subcommands into them. Errors propagate as
-[`error-stack`](https://docs.rs/error-stack) `Report`s end to end, so a
-failure prints its full cause chain with file:line at every layer.
+[`error-stack`](https://docs.rs/error-stack) `Report`s end to end: a failure
+prints its headline and causes for a human, and its full chain with
+file:line at every layer with `-v`/`--verbose`.
 
 See each vertical's `components/<vertical>-application` crate for its
 integration tests (real adapters, real `mke2fs`/`mkfs.vfat`/`sfdisk`/

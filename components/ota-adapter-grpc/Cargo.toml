@@ -1,6 +1,6 @@
 [package]
 name = "remora-ota-adapter-grpc"
-description = "OtaGatewayAdapter over sntns-platform's remora gateway: ReleaseService (with the client-streaming, resumable artifact upload), DeploymentService and DeviceService"
+description = "OtaGatewayAdapter over sntns-platform's remora gateway: ReleaseService (with the client-streaming, resumable artifact upload) and DeploymentService"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,6 +16,7 @@ tonic.workspace = true
 prost-types.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+rand_core.workspace = true
 
 [features]
 # An in-process fake remora gateway (releases, uploads, devices,

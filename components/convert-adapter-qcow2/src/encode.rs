@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use remora_convert::adapter::{Error, Result};
 
 use crate::header::{ceil_div, Header, L1E_COPIED, L2E_COPIED};
@@ -28,7 +28,7 @@ const REFCOUNT_BYTES: u64 = 2;
 /// fully-allocated qcow2 file.
 pub(crate) fn encode(input_raw: &Path, output: &Path) -> Result<()> {
     let virtual_size = std::fs::metadata(input_raw)
-        .map_err(|_| Report::new(Error::ReadFile(input_raw.to_path_buf())))?
+        .change_context_lazy(|| Error::ReadFile(input_raw.to_path_buf()))?
         .len();
 
     let l2_entries = CLUSTER_SIZE / 8; // 8192 entries/table
@@ -117,10 +117,10 @@ pub(crate) fn encode(input_raw: &Path, output: &Path) -> Result<()> {
     }
 
     let mut outfile =
-        File::create(output).map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
+        File::create(output).change_context_lazy(|| Error::WriteFile(output.to_path_buf()))?;
     outfile
         .set_len(total_clusters * CLUSTER_SIZE)
-        .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
+        .change_context_lazy(|| Error::WriteFile(output.to_path_buf()))?;
 
     write_cluster(&mut outfile, output, header_start, &{
         let header = Header {
@@ -133,6 +133,7 @@ pub(crate) fn encode(input_raw: &Path, output: &Path) -> Result<()> {
             l1_table_offset: l1_start * CLUSTER_SIZE,
             refcount_table_offset: refcount_table_start * CLUSTER_SIZE,
             refcount_table_clusters: refcount_table_clusters as u32,
+            nb_snapshots: 0,
             incompatible_features: 0,
             refcount_order: 4,
         };
@@ -201,7 +202,7 @@ pub(crate) fn encode(input_raw: &Path, output: &Path) -> Result<()> {
     // order (sequential read from the source, scattered writes to their
     // assigned cluster in the destination).
     let mut infile =
-        File::open(input_raw).map_err(|_| Report::new(Error::ReadFile(input_raw.to_path_buf())))?;
+        File::open(input_raw).change_context_lazy(|| Error::ReadFile(input_raw.to_path_buf()))?;
     let mut buf = vec![0u8; CLUSTER_SIZE as usize];
     for i in 0..n_clusters {
         if !is_nonzero[i as usize] {
@@ -211,10 +212,10 @@ pub(crate) fn encode(input_raw: &Path, output: &Path) -> Result<()> {
         let read_len = CLUSTER_SIZE.min(virtual_size - logical_offset) as usize;
         infile
             .seek(SeekFrom::Start(logical_offset))
-            .map_err(|_| Report::new(Error::ReadFile(input_raw.to_path_buf())))?;
+            .change_context_lazy(|| Error::ReadFile(input_raw.to_path_buf()))?;
         infile
             .read_exact(&mut buf[..read_len])
-            .map_err(|_| Report::new(Error::ReadFile(input_raw.to_path_buf())))?;
+            .change_context_lazy(|| Error::ReadFile(input_raw.to_path_buf()))?;
         if read_len < buf.len() {
             buf[read_len..].fill(0);
         }
@@ -237,21 +238,20 @@ fn write_cluster(
 ) -> Result<()> {
     outfile
         .seek(SeekFrom::Start(cluster_index * CLUSTER_SIZE))
-        .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
+        .change_context_lazy(|| Error::WriteFile(output.to_path_buf()))?;
     outfile
         .write_all(bytes)
-        .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))
+        .change_context_lazy(|| Error::WriteFile(output.to_path_buf()))
 }
 
 /// Reads `path` sequentially, cluster by cluster, recording which logical
 /// clusters are entirely zero. Streamed rather than loaded whole, so this
 /// stays cheap even for a multi-GiB disk image.
 fn classify_clusters(path: &Path, n_clusters: u64, cluster_size: u64) -> Result<Vec<bool>> {
-    let mut file =
-        File::open(path).map_err(|_| Report::new(Error::ReadFile(path.to_path_buf())))?;
+    let mut file = File::open(path).change_context_lazy(|| Error::ReadFile(path.to_path_buf()))?;
     let file_len = file
         .metadata()
-        .map_err(|_| Report::new(Error::ReadFile(path.to_path_buf())))?
+        .change_context_lazy(|| Error::ReadFile(path.to_path_buf()))?
         .len();
 
     let mut result = vec![false; n_clusters as usize];
@@ -263,7 +263,7 @@ fn classify_clusters(path: &Path, n_clusters: u64, cluster_size: u64) -> Result<
             continue;
         }
         file.read_exact(&mut buf[..read_len])
-            .map_err(|_| Report::new(Error::ReadFile(path.to_path_buf())))?;
+            .change_context_lazy(|| Error::ReadFile(path.to_path_buf()))?;
         result[i as usize] = buf[..read_len].iter().any(|&b| b != 0);
     }
     Ok(result)

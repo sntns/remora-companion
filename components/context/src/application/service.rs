@@ -15,9 +15,13 @@ use crate::model::{
 pub trait ContextServiceInterface: Send + Sync {
     async fn list(&self) -> Result<Vec<ContextSummary>>;
     async fn inspect(&self, name: &str) -> Result<ContextSummary>;
-    /// Creates `context`; `replace` overwrites an existing one of that name
-    /// (keeping its credentials, since the endpoint may just have moved).
-    async fn create(&self, context: Context, replace: bool) -> Result<()>;
+    /// Creates `context`, acting as `role` (`Keep`: the role of the context
+    /// it replaces, if any) -- checked against its roles, but only verified
+    /// with the platform at login, there being no credentials yet. `replace`
+    /// overwrites an existing context of that name, keeping what isn't the
+    /// endpoint: its login (its own credentials, or the one it shares) and
+    /// its roles, unless `context` names roles of its own.
+    async fn create(&self, context: Context, role: RoleOverride, replace: bool) -> Result<()>;
     /// Creates context `name` from context `source`: its endpoint, role
     /// aliases and login, acting as `role` (`Keep` takes the source's role,
     /// `Drop` none). The role is verified with the platform under the
@@ -68,8 +72,12 @@ pub trait ContextServiceInterface: Send + Sync {
         over: Option<&ContextOverride>,
     ) -> Result<(ResolvedContext, Principal, Option<Option<String>>)>;
 
-    /// The selected context's name and its roles, sorted by alias.
-    async fn roles(&self, over: Option<&ContextOverride>) -> Result<(String, Vec<RoleSummary>)>;
+    /// The selected context's name, its roles sorted by alias, and the role
+    /// it acts as -- which may have no alias (a URN given as is).
+    async fn roles(
+        &self,
+        over: Option<&ContextOverride>,
+    ) -> Result<(String, Vec<RoleSummary>, Option<AssumedRole>)>;
     /// Remembers `urn` under `alias` in the selected context.
     async fn add_role(&self, over: Option<&ContextOverride>, alias: &str, urn: &str) -> Result<()>;
     /// Forgets a role alias (and stops assuming it if it was).

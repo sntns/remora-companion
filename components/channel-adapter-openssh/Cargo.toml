@@ -11,6 +11,7 @@ remora-channel = { path = "../channel" }
 async-trait.workspace = true
 error-stack.workspace = true
 tokio = { workspace = true, features = ["process", "signal"] }
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

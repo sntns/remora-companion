@@ -26,6 +26,7 @@ remora-channel-application-transport-cli = { path = "../../components/channel-ap
 remora-ota = { path = "../../components/ota" }
 remora-ota-application = { path = "../../components/ota-application" }
 remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc" }
+remora-ota-adapter-file = { path = "../../components/ota-adapter-file" }
 remora-ota-application-transport-cli = { path = "../../components/ota-application-transport-cli" }
 remora-device = { path = "../../components/device" }
 remora-device-application = { path = "../../components/device-application" }

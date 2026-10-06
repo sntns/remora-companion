@@ -6,11 +6,13 @@ pub enum Error {
     Cancelled,
     #[error("failed to read the terminal")]
     Prompt,
-    #[error("invalid label {0:?}: expected key=value")]
-    Label(String),
+    #[error("invalid labels")]
+    Labels,
+    #[error("not a terminal: pass --yes to deploy to devices picked by --selector")]
+    NeedsYes,
     #[error("{0} of {1} deployments did not succeed")]
     Unsuccessful(usize, usize),
-    #[error("{0} of {1} deployments could not be created")]
+    #[error("{0} of {1} deployments could not be created or started")]
     NotCreated(usize, usize),
 }
 

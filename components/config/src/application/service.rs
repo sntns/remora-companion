@@ -1,8 +1,13 @@
 use std::path::Path;
 
-use remora_squashfs::application::BuildSummary;
-
 use super::error::Result;
+
+/// What `build` put into the image.
+#[derive(Debug)]
+pub struct BuildSummary {
+    pub entry_count: usize,
+    pub bytes_written: u64,
+}
 
 /// The config vertical's application-facing port: what every transport (CLI
 /// today, anything else later) calls into.

@@ -30,10 +30,18 @@ use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
 use remora_convert_application::ConvertControllerImpl;
 use remora_factory::{
-    adapter::{FactoryProvisioningAdapter, FactoryProvisioningAdapterService, ProvisionedIdentity},
+    adapter::{
+        credential::CredentialWriterAdapterService,
+        key::DeviceKeyAdapterService,
+        provisioning::{
+            self, FactoryProvisioningAdapter, FactoryProvisioningAdapterService,
+            ProvisionedIdentity,
+        },
+    },
     application::FactoryService,
     model::DeviceSerial,
 };
+use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
 use remora_fs_walk::FsWalkAdapterService;
 use remora_identity::application::IdentityService;
@@ -130,7 +138,7 @@ impl FactoryProvisioningAdapter for UnusedProvisioning {
         _context: &remora_context::model::ResolvedContext,
         _serial: &DeviceSerial,
         _csr_der: &[u8],
-    ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
+    ) -> provisioning::Result<ProvisionedIdentity> {
         unreachable!("no test in this file exercises a FactoryProvision step")
     }
 }
@@ -217,6 +225,7 @@ fn controller() -> BatchControllerImpl {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ));
 
     let identity = IdentityService::new(IdentityControllerImpl::new(
@@ -229,7 +238,6 @@ fn controller() -> BatchControllerImpl {
     ));
 
     let config = ConfigService::new(ConfigControllerImpl::new(
-        Ext4AdapterService::new(Ext4AdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
         image.clone(),
     ));
@@ -241,7 +249,9 @@ fn controller() -> BatchControllerImpl {
 
     let factory = FactoryService::new(FactoryControllerImpl::new(
         logged_in_contexts(),
+        DeviceKeyAdapterService::new(DeviceKeyAdapterImpl),
         FactoryProvisioningAdapterService::new(UnusedProvisioning),
+        CredentialWriterAdapterService::new(CredentialWriterAdapterImpl),
     ));
 
     BatchControllerImpl::new(convert, identity, config, image, squashfs, factory)
@@ -419,7 +429,7 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
         _context: &remora_context::model::ResolvedContext,
         serial: &DeviceSerial,
         _csr_der: &[u8],
-    ) -> remora_factory::adapter::Result<ProvisionedIdentity> {
+    ) -> provisioning::Result<ProvisionedIdentity> {
         let device_name = serial_of(serial);
         Ok(ProvisionedIdentity {
             serial_number: device_name.clone(),
@@ -450,6 +460,7 @@ async fn runs_a_factory_provision_step() {
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
+        Ext4AdapterService::new(Ext4AdapterImpl),
     ));
     let identity = IdentityService::new(IdentityControllerImpl::new(
         remora_identity::adapter::KeygenAdapterService::new(KeygenAdapterImpl),
@@ -460,7 +471,6 @@ async fn runs_a_factory_provision_step() {
         image.clone(),
     ));
     let config = ConfigService::new(ConfigControllerImpl::new(
-        Ext4AdapterService::new(Ext4AdapterImpl),
         FsWalkAdapterService::new(remora_fs_walk::FsWalkAdapterImpl),
         image.clone(),
     ));
@@ -470,7 +480,9 @@ async fn runs_a_factory_provision_step() {
     ));
     let factory = FactoryService::new(FactoryControllerImpl::new(
         logged_in_contexts(),
+        DeviceKeyAdapterService::new(DeviceKeyAdapterImpl),
         FactoryProvisioningAdapterService::new(FakeProvisioning),
+        CredentialWriterAdapterService::new(CredentialWriterAdapterImpl),
     ));
     let controller = BatchControllerImpl::new(convert, identity, config, image, squashfs, factory);
 

@@ -124,7 +124,7 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
     use remora_context_application_transport_cli as context;
     match options.command {
         Commands::Login(args) => exit_on_error(
-            context::run_login(args, &services.context, over).await,
+            context::run_login(args, &services.context, over, "remora-etcher").await,
             verbose,
         ),
         Commands::Logout(args) => exit_on_error(
@@ -136,7 +136,7 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             verbose,
         ),
         Commands::Context(command) => exit_on_error(
-            context::run(command, &services.context, over).await,
+            context::run(command, &services.context, over, "remora-etcher").await,
             verbose,
         ),
         Commands::Disk(cmd) => exit_on_error(
@@ -175,14 +175,16 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             remora_factory_application_transport_cli::run(cmd, &services.factory, over).await,
             verbose,
         ),
-        Commands::Update(args) => {
-            let app =
-                remora_update::model::App::running("remora-etcher", env!("CARGO_PKG_VERSION"));
-            exit_on_error(
-                remora_update_application_transport_cli::run(args, &services.update, &app).await,
-                verbose,
+        Commands::Update(args) => exit_on_error(
+            remora_update_application_transport_cli::run(
+                args,
+                &services.update,
+                "remora-etcher",
+                env!("CARGO_PKG_VERSION"),
             )
-        }
+            .await,
+            verbose,
+        ),
         Commands::Completion(args) => remora_completion::instructions(
             "remora-etcher",
             args,
@@ -196,6 +198,8 @@ fn exit_on_error<C>(result: Result<(), error_stack::Report<C>>, verbose: bool) -
         Ok(()) => 0,
         Err(report) => {
             tracing::debug!("{report:?}");
+            let report =
+                remora_context_application_transport_cli::with_hint(report, "remora-etcher");
             remora_tui::render_report(&report, verbose);
             1
         }

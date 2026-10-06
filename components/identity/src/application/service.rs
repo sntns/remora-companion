@@ -18,7 +18,7 @@ pub trait IdentityServiceInterface: Send + Sync {
     /// carry whatever additional files the caller supplies. If `inputs`
     /// already provides a root-level file at one of those paths (or, for
     /// the SSH keypair, both halves of it), that file wins and nothing is
-    /// generated for it.
+    /// generated for it. Only one half of the keypair is an error.
     async fn build(
         &self,
         inputs: &[PathBuf],

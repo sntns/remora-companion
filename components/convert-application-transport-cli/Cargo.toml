@@ -12,6 +12,6 @@ remora-convert = { path = "../convert" }
 remora-progress = { path = "../progress" }
 clap.workspace = true
 error-stack.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
-tokio-util.workspace = true

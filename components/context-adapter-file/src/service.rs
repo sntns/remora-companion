@@ -10,7 +10,7 @@ use remora_context::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::layout::{read_optional, write_atomic, Layout};
+use crate::layout::{read_optional, remove_dir_if_empty, remove_file, write_atomic, Layout};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,13 +87,14 @@ impl ContextStoreAdapter for FileContextStoreImpl {
         write_atomic(&path, &bytes, false).change_context_lazy(|| store::Error::Write(path))
     }
 
+    /// Only the context's own file: its directory is shared with the
+    /// credential store, whose file is that store's to remove. The
+    /// directory goes with the last of them.
     fn delete(&self, name: &str) -> store::Result<()> {
+        let path = self.layout.meta(name);
+        remove_file(&path).change_context_lazy(|| store::Error::Write(path.clone()))?;
         let dir = self.layout.context_dir(name);
-        match fs::remove_dir_all(&dir) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(Report::new(e).change_context(store::Error::Write(dir))),
-        }
+        remove_dir_if_empty(&dir).change_context_lazy(|| store::Error::Write(dir))
     }
 
     fn current(&self) -> store::Result<Option<String>> {
@@ -107,10 +108,6 @@ impl ContextStoreAdapter for FileContextStoreImpl {
         let bytes = serde_json::to_vec_pretty(&config)
             .change_context_lazy(|| store::Error::Write(path.clone()))?;
         write_atomic(&path, &bytes, false).change_context_lazy(|| store::Error::Write(path))
-    }
-
-    fn location(&self) -> String {
-        self.layout.root.display().to_string()
     }
 }
 
@@ -151,15 +148,16 @@ impl CredentialStoreAdapter for FileCredentialStoreImpl {
             .attach_with(|| path.display().to_string())
     }
 
+    /// The credentials file, then the context's directory if that leaves it
+    /// empty (see `FileContextStoreImpl::delete`).
     fn delete(&self, context: &str) -> credentials::Result<bool> {
         let path = self.layout.credentials(context);
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(Report::new(e)
-                .change_context(credentials::Error::Delete(context.to_owned()))
-                .attach(path.display().to_string())),
-        }
+        let delete = || credentials::Error::Delete(context.to_owned());
+        let removed = remove_file(&path)
+            .change_context_lazy(delete)
+            .attach_with(|| path.display().to_string())?;
+        remove_dir_if_empty(&self.layout.context_dir(context)).change_context_lazy(delete)?;
+        Ok(removed)
     }
 }
 
@@ -232,6 +230,33 @@ mod tests {
 
         assert!(store.delete("eu2").unwrap());
         assert!(!store.delete("eu2").unwrap());
+    }
+
+    #[test]
+    fn each_store_removes_only_its_own_file() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = FileContextStoreImpl::new(root.path());
+        let credentials = FileCredentialStoreImpl::new(root.path());
+        let secret = Credentials {
+            secret: Secret::AccessKey { token: "t".into() },
+        };
+        let dir = root.path().join("contexts/eu2");
+
+        // Context first: the credentials stay, and so does the directory.
+        contexts.put(&context("eu2")).unwrap();
+        credentials.put("eu2", &secret).unwrap();
+        contexts.delete("eu2").unwrap();
+        assert!(credentials.get("eu2").unwrap().is_some());
+        assert!(credentials.delete("eu2").unwrap());
+        assert!(!dir.exists());
+
+        // Credentials first: the same, the other way round.
+        contexts.put(&context("eu2")).unwrap();
+        credentials.put("eu2", &secret).unwrap();
+        credentials.delete("eu2").unwrap();
+        assert!(contexts.get("eu2").unwrap().is_some());
+        contexts.delete("eu2").unwrap();
+        assert!(!dir.exists());
     }
 
     #[test]

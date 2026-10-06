@@ -9,6 +9,7 @@ use remora_progress::{OperationContext, OperationEvent};
 use remora_tui as tui;
 use serde_json::json;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::{ota_error, prompt_error, Result},
@@ -158,6 +159,7 @@ pub async fn run(
                 tui::accent(&name),
                 tui::dim(format!("version {version}"))
             ));
+            let cancel = remora_progress::cancelled_by_ctrl_c();
             for path in artifacts {
                 upload(
                     service,
@@ -170,6 +172,7 @@ pub async fn run(
                         tag_condition: tag_condition.clone().unwrap_or_default(),
                         resume: None,
                     },
+                    &cancel,
                 )
                 .await?;
             }
@@ -206,6 +209,7 @@ pub async fn run(
                     tag_condition,
                     resume,
                 },
+                &remora_progress::cancelled_by_ctrl_c(),
             )
             .await
         }
@@ -251,16 +255,14 @@ pub async fn run(
     }
 }
 
-/// Uploads one artifact with a live byte bar; Ctrl-C stops it cleanly,
-/// printing how to resume.
+/// Uploads one artifact with a live byte bar; Ctrl-C (`cancel`) stops it
+/// cleanly, printing how to resume.
 async fn upload(
     service: &OtaService,
     over: Option<&ContextOverride>,
     request: UploadRequest,
+    cancel: &CancellationToken,
 ) -> Result<()> {
-    let total = std::fs::metadata(&request.path)
-        .map(|m| m.len())
-        .unwrap_or(0);
     let shown = request
         .file_name
         .clone()
@@ -271,30 +273,32 @@ async fn upload(
                 .map(|n| n.to_string_lossy().into_owned())
         })
         .unwrap_or_default();
-    let mut bar = tui::Progress::bytes(
-        total,
-        format!(
-            "Uploading {} to {}",
-            tui::accent(&shown),
-            tui::accent(&request.release)
-        ),
+    let title = format!(
+        "Uploading {} to {}",
+        tui::accent(&shown),
+        tui::accent(&request.release)
     );
+    // Drawn once the upload knows the file's size (its first progress).
+    let mut bar: Option<tui::Progress> = None;
 
     let (sink, mut events) = remora_progress::channel();
-    let cancel = tokio_util::sync::CancellationToken::new();
     let ctx = OperationContext::new(sink, cancel.clone());
-    let release = request.release.clone();
+    let resume_with = request.clone();
     let upload = service.upload(over, request, &ctx);
     tokio::pin!(upload);
     let result = loop {
         tokio::select! {
             result = &mut upload => break result,
             Some(event) = events.next() => match event {
-                OperationEvent::Progress { done, .. } => bar.set(done),
-                OperationEvent::Log(line) => bar.note(line),
+                OperationEvent::Progress { done, total } => bar
+                    .get_or_insert_with(|| tui::Progress::bytes(total, &title))
+                    .set(done),
+                OperationEvent::Log(line) => match &bar {
+                    Some(bar) => bar.note(line),
+                    None => tui::step(line),
+                },
                 OperationEvent::Phase(_) => {}
             },
-            _ = tokio::signal::ctrl_c() => cancel.cancel(),
         }
     };
     match result {
@@ -313,19 +317,68 @@ async fn upload(
                     if outcome.resumes == 1 { "" } else { "s" }
                 ));
             }
-            bar.done(format!(
+            let message = format!(
                 "Uploaded {} to {} {}",
                 tui::accent(&outcome.file_name),
-                tui::accent(&release),
+                tui::accent(&resume_with.release),
                 tui::dim(format!("{}{resumed}", tui::bytes(outcome.bytes)))
-            ));
+            );
+            match bar {
+                Some(bar) => bar.done(message),
+                None => tui::success(message),
+            }
             Ok(())
         }
         Err(report) => {
-            bar.fail(format!("Upload of {} stopped", tui::accent(&shown)));
+            // Without a bar, it failed before sending anything: the error
+            // says it all.
+            if let Some(bar) = bar {
+                bar.fail(format!("Upload of {} stopped", tui::accent(&shown)));
+            }
+            if let Some(token) = report.current_context().resume_token() {
+                tui::step(format!(
+                    "Resume it with {}",
+                    tui::accent(resume_command(&resume_with, token))
+                ));
+            }
             Err(ota_error(report))
         }
     }
+}
+
+/// The command that continues an interrupted upload where it stopped: the
+/// same file, release and artifact settings, and the token.
+fn resume_command(request: &UploadRequest, token: &str) -> String {
+    let quote = |value: &str| {
+        if !value.is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_./:=+,@".contains(c))
+        {
+            value.to_owned()
+        } else {
+            format!("'{}'", value.replace('\'', "'\\''"))
+        }
+    };
+    let mut command = format!(
+        "rmra release upload {} {}",
+        quote(&request.release),
+        quote(&request.path.to_string_lossy())
+    );
+    if let Some(name) = &request.file_name {
+        command.push_str(&format!(" --file-name {}", quote(name)));
+    }
+    if let Some(content_type) = &request.content_type {
+        command.push_str(&format!(" --content-type {}", quote(content_type)));
+    }
+    if !request.tag_condition.is_empty() {
+        command.push_str(&format!(
+            " --tag-condition {}",
+            quote(&request.tag_condition)
+        ));
+    }
+    command.push_str(&format!(" --resume {token}"));
+    command
 }
 
 fn print_release(release: &Release) {

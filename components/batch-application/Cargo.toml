@@ -39,4 +39,5 @@ remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
 remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
 remora-fs-walk = { path = "../fs-walk" }
 remora-factory-application = { path = "../factory-application" }
+remora-factory-adapter-local = { path = "../factory-adapter-local" }
 tokio = { workspace = true, features = ["macros", "rt"] }

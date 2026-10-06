@@ -45,11 +45,13 @@ impl SquashfsServiceInterface for SquashfsControllerImpl {
         }
 
         ctx.sink.phase("walking inputs");
-        let mut entries = Vec::new();
-        let mut newest_mtime: u32 = 0;
-        for input in inputs {
-            self.collect_entries(input, &mut entries, &mut newest_mtime)?;
-        }
+        // A whole tree's worth of stat calls: off the runtime threads.
+        let fs_walk = self.fs_walk.clone();
+        let inputs_owned = inputs.to_vec();
+        let (mut entries, newest_mtime, total_input_bytes) =
+            tokio::task::spawn_blocking(move || walk_inputs(&fs_walk, &inputs_owned))
+                .await
+                .expect("squashfs walk worker panicked")?;
 
         if let Some(pinned) = options.source_date_epoch {
             for entry in &mut entries {
@@ -65,21 +67,14 @@ impl SquashfsServiceInterface for SquashfsControllerImpl {
         let root_owner = single_directory_owner(inputs);
 
         let out_file = fs::File::create(output)
-            .map_err(|_| Report::new(Error::CreateOutput(output.to_path_buf())))?;
+            .change_context_lazy(|| Error::CreateOutput(output.to_path_buf()))?;
 
         // `backhand` buffers pushed entries and does the real read/compress/
         // write work inside this one opaque `write()` call -- track it by
-        // polling the output file's size against the summed input size,
-        // rather than a per-entry hook that wouldn't reflect real work (see
-        // SquashfsServiceInterface::build's doc comment).
-        let total_input_bytes: u64 = entries
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EntryKind::File { source } => fs::metadata(source).ok().map(|m| m.len()),
-                _ => None,
-            })
-            .sum();
-
+        // polling the output file's size against the summed input size
+        // (`total_input_bytes`), rather than a per-entry hook that wouldn't
+        // reflect real work (see SquashfsServiceInterface::build's doc
+        // comment).
         ctx.sink.phase("writing squashfs image");
         let squashfs = self.squashfs.clone();
         let entries_for_work = entries.clone();
@@ -108,35 +103,60 @@ impl SquashfsServiceInterface for SquashfsControllerImpl {
     }
 
     async fn inspect(&self, image: &Path) -> Result<Vec<InspectedEntry>> {
-        let file = fs::File::open(image)
-            .map_err(|_| Report::new(Error::OpenInput(image.to_path_buf())))?;
-        self.squashfs.inspect(file).change_context(Error::Build)
+        let squashfs = self.squashfs.clone();
+        let image = image.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let file =
+                fs::File::open(&image).change_context_lazy(|| Error::OpenInput(image.clone()))?;
+            squashfs.inspect(file).change_context(Error::Build)
+        })
+        .await
+        .expect("squashfs inspect worker panicked")
     }
 }
 
-impl SquashfsControllerImpl {
-    fn collect_entries(
-        &self,
-        input: &Path,
-        entries: &mut Vec<Entry>,
-        newest_mtime: &mut u32,
-    ) -> Result<()> {
-        let root_meta = fs::symlink_metadata(input)
-            .map_err(|_| Report::new(Error::Walk))
-            .attach_with(|| input.display().to_string())?;
-
-        if root_meta.is_dir() {
-            let walked = self.fs_walk.walk_dir(input).change_context(Error::Walk)?;
-            for entry in walked {
-                *newest_mtime = (*newest_mtime).max(entry.metadata.mtime);
-                entries.push(entry);
-            }
-        } else {
-            entries.push(stat_file_input(input, newest_mtime)?);
-        }
-
-        Ok(())
+/// Every entry of `inputs` merged into one list, with the newest mtime
+/// among them and the summed size of their files.
+fn walk_inputs(
+    fs_walk: &FsWalkAdapterService,
+    inputs: &[PathBuf],
+) -> Result<(Vec<Entry>, u32, u64)> {
+    let mut entries = Vec::new();
+    let mut newest_mtime: u32 = 0;
+    for input in inputs {
+        collect_entries(fs_walk, input, &mut entries, &mut newest_mtime)?;
     }
+    let total_input_bytes = entries
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntryKind::File { source } => fs::metadata(source).ok().map(|m| m.len()),
+            _ => None,
+        })
+        .sum();
+    Ok((entries, newest_mtime, total_input_bytes))
+}
+
+fn collect_entries(
+    fs_walk: &FsWalkAdapterService,
+    input: &Path,
+    entries: &mut Vec<Entry>,
+    newest_mtime: &mut u32,
+) -> Result<()> {
+    let root_meta = fs::symlink_metadata(input)
+        .change_context(Error::Walk)
+        .attach_with(|| input.display().to_string())?;
+
+    if root_meta.is_dir() {
+        let walked = fs_walk.walk_dir(input).change_context(Error::Walk)?;
+        for entry in walked {
+            *newest_mtime = (*newest_mtime).max(entry.metadata.mtime);
+            entries.push(entry);
+        }
+    } else {
+        entries.push(stat_file_input(input, newest_mtime)?);
+    }
+
+    Ok(())
 }
 
 /// A lone file input (as opposed to a directory, which goes through
@@ -148,22 +168,29 @@ fn stat_file_input(input: &Path, newest_mtime: &mut u32) -> Result<Entry> {
     let name = input
         .file_name()
         .map(PathBuf::from)
-        .ok_or_else(|| Report::new(Error::Walk))?;
+        .ok_or_else(|| Report::new(Error::Walk).attach("input has no file name"))
+        .attach_with(|| input.display().to_string())?;
 
-    let meta = fs::symlink_metadata(input).map_err(|_| Report::new(Error::Walk))?;
+    let meta = fs::symlink_metadata(input)
+        .change_context(Error::Walk)
+        .attach_with(|| input.display().to_string())?;
     let mtime = mtime_secs(&meta);
     *newest_mtime = (*newest_mtime).max(mtime);
     let metadata = entry_metadata(&meta, mtime);
 
     let kind = if meta.is_symlink() {
-        let target = fs::read_link(input).map_err(|_| Report::new(Error::Walk))?;
+        let target = fs::read_link(input)
+            .change_context(Error::Walk)
+            .attach_with(|| input.display().to_string())?;
         EntryKind::Symlink { target }
     } else if meta.is_file() {
         EntryKind::File {
             source: input.to_path_buf(),
         }
     } else {
-        return Err(Report::new(Error::Walk));
+        return Err(Report::new(Error::Walk)
+            .attach("neither a file, a directory nor a symlink")
+            .attach(input.display().to_string()));
     };
 
     Ok(Entry {

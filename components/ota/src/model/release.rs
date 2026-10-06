@@ -37,7 +37,9 @@ pub struct UploadRequest {
     pub path: PathBuf,
     /// The name update clients see; defaults to the file's own name.
     pub file_name: Option<String>,
-    /// Defaults from the extension (`.raucb` is a RAUC bundle).
+    /// Defaults from the extension (`.json`, `.tar`, `.gz`/`.tgz`), else
+    /// `application/octet-stream` -- a RAUC bundle's too: update clients
+    /// pick bundles by file name and tag condition, not content type.
     pub content_type: Option<String>,
     pub tag_condition: String,
     /// The resume token of an interrupted upload of this same file.

@@ -12,6 +12,7 @@
 
 mod operation;
 mod progress;
+mod raw;
 mod report;
 mod spinner;
 mod table;
@@ -19,6 +20,7 @@ mod time;
 
 pub use operation::{follow, Follow, Phase};
 pub use progress::{Progress, Watch, WatchLine};
+pub use raw::{debug, raw_error};
 pub use report::{one_line, render_report};
 pub use spinner::Spinner;
 pub use table::Table;

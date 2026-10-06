@@ -1,7 +1,7 @@
 use error_stack::Report;
 use remora_context::model::ResolvedContext;
 use remora_factory::{
-    adapter::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
+    adapter::provisioning::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
     model::DeviceSerial,
 };
 use remora_platform_grpc::{
@@ -51,7 +51,7 @@ impl FactoryProvisioningAdapter for FactoryGatewayAdapterImpl {
                         Report::new(Error::AlreadyExists(device_name.clone())).attach(summary)
                     }
                     (tonic::Code::Unavailable, _) => Report::new(Error::Request).attach(summary),
-                    _ => Report::new(Error::Refused(summary)),
+                    _ => Report::new(Error::Refused).attach(summary),
                 }
             })?
             .into_inner();

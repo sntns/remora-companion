@@ -12,3 +12,4 @@ remora-identity = { path = "../identity" }
 remora-format = { path = "../format" }
 clap.workspace = true
 error-stack.workspace = true
+thiserror.workspace = true

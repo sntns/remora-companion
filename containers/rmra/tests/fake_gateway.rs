@@ -262,6 +262,8 @@ async fn login_whoami_and_a_channel_on_stdio() {
     let (code, _, stderr) = rmra.run(&["whoami"], b"").await;
     assert_eq!(code, 1);
     assert!(stderr.contains("not logged in"), "{stderr}");
+    // What to run about it, as this binary spells it.
+    assert!(stderr.contains("log in with `rmra --context "), "{stderr}");
 
     let (code, _, stderr) = rmra
         .run(&["login", "--token-stdin"], format!("{TOKEN}\n").as_bytes())
@@ -278,7 +280,10 @@ async fn login_whoami_and_a_channel_on_stdio() {
 
     let (code, stdout, _) = rmra.run(&["context", "ls", "--format", "json"], b"").await;
     assert_eq!(code, 0);
-    assert!(stdout.contains("\"login\": \"access key\""), "{stdout}");
+    assert!(
+        stdout.contains("\"credentials\": \"access key\""),
+        "{stdout}"
+    );
     assert!(
         !stdout.contains(TOKEN),
         "a secret leaked into context ls: {stdout}"
@@ -520,4 +525,5 @@ async fn login_whoami_and_a_channel_on_stdio() {
     let (code, _, stderr) = rmra.run(&["channel", "open", "525400C0FFEE"], b"").await;
     assert_eq!(code, 255);
     assert!(stderr.contains("not logged in"), "{stderr}");
+    assert!(stderr.contains("log in with `rmra --context "), "{stderr}");
 }

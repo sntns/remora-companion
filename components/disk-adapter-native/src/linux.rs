@@ -1,10 +1,11 @@
 use std::{
     collections::HashSet,
     fs,
+    os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
 };
 
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use remora_disk::{
     adapter::{Error, Result},
     model::DiskInfo,
@@ -31,19 +32,47 @@ pub fn enumerate() -> Result<Vec<DiskInfo>> {
     Ok(disks)
 }
 
+/// The disk `path` really opens. A device node's *name* says nothing about
+/// which disk it is (`~/sdc -> /dev/sda` is named `sdc`), so the node is
+/// resolved through every symlink and then matched by its device number
+/// against `/sys/block/*/dev` -- the same identity the kernel uses when the
+/// flash opens it.
 pub fn info(path: &Path) -> Result<DiskInfo> {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| error_stack::Report::new(Error::NotFound(path.to_path_buf())))?;
-
-    if !Path::new(SYS_BLOCK).join(&name).exists() {
-        return Err(error_stack::Report::new(Error::NotFound(
-            path.to_path_buf(),
-        )));
+    let canonical =
+        fs::canonicalize(path).change_context_lazy(|| Error::NotFound(path.to_path_buf()))?;
+    let meta =
+        fs::metadata(&canonical).change_context_lazy(|| Error::NotFound(path.to_path_buf()))?;
+    if !meta.file_type().is_block_device() {
+        return Err(Report::new(Error::NotBlockDevice(path.to_path_buf())));
     }
 
-    disk_info(&name, &system_device_majmins())
+    let name = whole_disk_named(Path::new(SYS_BLOCK), &majmin(meta.rdev()))?
+        .ok_or_else(|| Report::new(Error::NotWholeDisk(path.to_path_buf())))?;
+    let mut info = disk_info(&name, &system_device_majmins())?;
+    // The node actually opened, not `/dev/<name>`: the two only differ for
+    // a node outside `/dev`, and it's this one the flash guard compares.
+    info.path = canonical;
+    Ok(info)
+}
+
+/// `major:minor`, as `/sys/block/*/dev` spells it, of a `st_rdev` (glibc's
+/// `gnu_dev_major`/`gnu_dev_minor` encoding).
+fn majmin(rdev: u64) -> String {
+    let major = ((rdev >> 8) & 0xfff) | ((rdev >> 32) & !0xfff);
+    let minor = (rdev & 0xff) | ((rdev >> 12) & !0xff);
+    format!("{major}:{minor}")
+}
+
+/// The `/sys/block` entry whose `dev` is `majmin`, if any. Partitions live
+/// one level down (`/sys/block/sda/sda1`), so they never match here.
+fn whole_disk_named(sys_block: &Path, majmin: &str) -> Result<Option<String>> {
+    for entry in fs::read_dir(sys_block).change_context(Error::Io)? {
+        let entry = entry.change_context(Error::Io)?;
+        if read_trimmed(&entry.path().join("dev")).is_ok_and(|dev| dev == majmin) {
+            return Ok(Some(entry.file_name().to_string_lossy().into_owned()));
+        }
+    }
+    Ok(None)
 }
 
 fn disk_info(name: &str, system_devs: &HashSet<String>) -> Result<DiskInfo> {
@@ -237,6 +266,78 @@ mod tests {
         let system_devs = HashSet::from(["259:2".to_string()]);
 
         assert!(device_owns_majmin(&sys_dir, "nvme0n1", &system_devs));
+    }
+
+    #[test]
+    fn majmin_decodes_glibc_dev_t() {
+        assert_eq!(majmin(0x0802), "8:2");
+        assert_eq!(majmin((259 << 8) | 1), "259:1");
+        // Minors past 255 spill into the high bits.
+        assert_eq!(majmin((8 << 8) | (1 << 20) | 0x10), "8:272");
+    }
+
+    #[test]
+    fn whole_disk_named_matches_a_disk_never_a_partition() {
+        let fixture = SysBlockFixture::new();
+        fixture.disk("sda", "8:0");
+        fixture.partition("sda", "sda1", "8:1");
+        fixture.disk("sdc", "8:32");
+
+        assert_eq!(
+            whole_disk_named(&fixture.dir, "8:32").unwrap().as_deref(),
+            Some("sdc")
+        );
+        assert_eq!(whole_disk_named(&fixture.dir, "8:1").unwrap(), None);
+    }
+
+    /// A whole disk of this machine with its `/dev` node, if any.
+    fn some_real_disk() -> Option<String> {
+        fs::read_dir(SYS_BLOCK)
+            .ok()?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .find(|name| Path::new("/dev").join(name).exists())
+    }
+
+    #[test]
+    fn info_resolves_a_symlink_to_the_disk_it_opens() {
+        let Some(name) = some_real_disk() else {
+            eprintln!("no block device on this machine, skipping");
+            return;
+        };
+        let fixture = SysBlockFixture::new();
+        // Named like another disk: only the target may count.
+        let link = fixture.dir.join("sdzz");
+        std::os::unix::fs::symlink(Path::new("/dev").join(&name), &link).unwrap();
+
+        let info = info(&link).unwrap();
+        assert_eq!(info.path, Path::new("/dev").join(&name));
+    }
+
+    #[test]
+    fn info_refuses_a_node_that_is_not_a_block_device() {
+        let err = info(Path::new("/dev/null")).unwrap_err();
+        assert!(matches!(err.current_context(), Error::NotBlockDevice(_)));
+    }
+
+    #[test]
+    fn info_refuses_a_partition() {
+        let partition = fs::read_dir(SYS_BLOCK).ok().and_then(|disks| {
+            disks.flatten().find_map(|disk| {
+                let disk = disk.file_name().to_string_lossy().into_owned();
+                fs::read_dir(Path::new(SYS_BLOCK).join(&disk))
+                    .ok()?
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .find(|n| n.starts_with(&disk) && Path::new("/dev").join(n).exists())
+            })
+        });
+        let Some(partition) = partition else {
+            eprintln!("no partitioned block device on this machine, skipping");
+            return;
+        };
+        let err = info(&Path::new("/dev").join(partition)).unwrap_err();
+        assert!(matches!(err.current_context(), Error::NotWholeDisk(_)));
     }
 
     #[test]

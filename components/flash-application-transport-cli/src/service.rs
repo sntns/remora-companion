@@ -58,14 +58,17 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
         bmap.or_else(|| default_bmap_path(&image))
     };
 
+    // Shown before the guard runs, so a refused target is still visible --
+    // as the disk it resolves to, not the name it was given.
     let info = disk.info(&device).await.change_context(Error::Disk)?;
     remora_tui::note("Target", disk_line(&info));
 
     // The real guard (removable / not-the-system-disk) lives in
-    // FlashServiceInterface::preflight and cannot be bypassed from here;
-    // this confirmation is an extra CLI-only usability layer on top of it.
+    // FlashServiceInterface::preflight, which `flash` runs again on its own
+    // lookup and cannot be bypassed from here; this confirmation is an
+    // extra CLI-only usability layer on top of it.
     flash
-        .preflight(&info, force)
+        .preflight(&device, force)
         .await
         .change_context(Error::Flash)?;
     if !yes {
@@ -89,9 +92,8 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
     };
     let (sink, stream) = remora_progress::channel();
     let follow = remora_tui::follow(stream);
-    let ctx =
-        remora_progress::OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
-    let outcome = flash.flash(&request, &info, &ctx).await;
+    let ctx = remora_progress::OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
+    let outcome = flash.flash(&request, &ctx).await;
     drop(ctx);
     follow.finish(&outcome).await;
     let outcome = outcome.change_context(Error::Flash)?;

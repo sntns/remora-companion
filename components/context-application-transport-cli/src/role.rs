@@ -48,10 +48,11 @@ pub async fn run(
     command: Command,
     service: &ContextService,
     over: Option<&ContextOverride>,
+    program: &str,
 ) -> Result<()> {
     match command {
         Command::List { format } => {
-            let (context, roles) = service.roles(over).await.map_err(context_error)?;
+            let (context, roles, _) = service.roles(over).await.map_err(context_error)?;
             match format {
                 crate::service::Format::Json => println!(
                     "{}",
@@ -64,10 +65,7 @@ pub async fn run(
                 crate::service::Format::Table if roles.is_empty() => tui::info(format!(
                     "No role in context {}. Add one with {}",
                     tui::accent(&context),
-                    tui::accent(format!(
-                        "{} context role add <alias> <role-urn>",
-                        crate::program()
-                    ))
+                    tui::accent(format!("{program} context role add <alias> <role-urn>"))
                 )),
                 crate::service::Format::Table => {
                     let mut table = tui::Table::new(["alias", "urn"]);
@@ -99,7 +97,7 @@ pub async fn run(
             } else {
                 tui::step(format!(
                     "Assume it with {}",
-                    tui::accent(format!("{} context role assume {alias}", crate::program()))
+                    tui::accent(format!("{program} context role assume {alias}"))
                 ));
             }
             Ok(())

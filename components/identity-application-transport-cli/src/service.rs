@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
+use error_stack::ResultExt;
 use remora_format::human_size;
-use remora_identity::application::{IdentityService, Result};
+use remora_identity::application::IdentityService;
+
+use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -50,7 +53,8 @@ pub async fn run(command: Command, service: &IdentityService) -> Result<()> {
         } => {
             let summary = service
                 .build(&inputs, hostname.as_deref(), machine_id.as_deref(), &output)
-                .await?;
+                .await
+                .change_context(Error::Build)?;
             remora_tui::success(format!(
                 "Wrote {} {}",
                 remora_tui::accent(output.display()),
@@ -70,7 +74,8 @@ pub async fn run(command: Command, service: &IdentityService) -> Result<()> {
         } => {
             let bytes_written = service
                 .create(&inputs, hostname.as_deref(), machine_id.as_deref(), &image)
-                .await?;
+                .await
+                .change_context(Error::Create)?;
             remora_tui::success(format!(
                 "Wrote identity.squashfs to {} {}",
                 remora_tui::accent(format!("{}:/remora/identity", image.display())),

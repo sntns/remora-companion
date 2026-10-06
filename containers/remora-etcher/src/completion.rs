@@ -26,7 +26,8 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
         match kind {
             Kind::Context => return context::complete_contexts(&services.context).await,
             Kind::Role => {
-                let over = context::context_on_command_line();
+                use clap::CommandFactory;
+                let over = context::context_on_command_line(crate::Options::command());
                 return context::complete_roles(&services.context, over.as_ref()).await;
             }
             _ => {}

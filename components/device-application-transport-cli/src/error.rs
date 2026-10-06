@@ -2,8 +2,8 @@
 pub enum Error {
     #[error("{0}")]
     Device(String),
-    #[error("invalid label {0:?}: expected key=value")]
-    Label(String),
+    #[error("invalid --label")]
+    Labels,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

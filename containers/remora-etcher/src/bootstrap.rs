@@ -21,8 +21,15 @@ use remora_convert_application::ConvertControllerImpl;
 use remora_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_disk_adapter_native::DiskAdapterImpl;
 use remora_disk_application::DiskControllerImpl;
-use remora_factory::{adapter::FactoryProvisioningAdapterService, application::FactoryService};
+use remora_factory::{
+    adapter::{
+        credential::CredentialWriterAdapterService, key::DeviceKeyAdapterService,
+        provisioning::FactoryProvisioningAdapterService,
+    },
+    application::FactoryService,
+};
 use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
+use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
 use remora_flash::{adapter::BmapAdapterService, application::FlashService};
 use remora_flash_adapter_bmap::BmapAdapterImpl;
@@ -70,10 +77,11 @@ pub struct Services {
 /// out to hand to the use case that depends on it, register that use case in
 /// turn. Same recipe as remora-edge's `containers/remora-*d/src/daemon.rs`.
 ///
-/// Wiring itself needs an async context purely because `busybody`'s
-/// container API is async (so it can, elsewhere, resolve dependencies that
-/// really do need to await something); nothing past this function is async —
-/// the CLI dispatch stays plain synchronous Rust.
+/// Async because `busybody`'s container API is, and because what it wires
+/// is too: the ports and use cases are async (the context and factory
+/// verticals make network calls), and the CLI dispatches into them on the
+/// runtime `main()` builds; blocking work of meaningful size runs in
+/// `spawn_blocking` inside the adapters.
 pub async fn wire() -> Services {
     let container = busybody::ServiceContainerBuilder::new().build();
 
@@ -102,7 +110,10 @@ pub async fn wire() -> Services {
         .expect("BmapAdapterService was just registered");
 
     container
-        .set_type(FlashService::new(FlashControllerImpl::new(bmap_adapter)))
+        .set_type(FlashService::new(FlashControllerImpl::new(
+            disk.clone(),
+            bmap_adapter,
+        )))
         .await;
     let flash = container
         .get_type::<FlashService>()
@@ -137,22 +148,9 @@ pub async fn wire() -> Services {
     let vfat_fs: Arc<dyn remora_image::adapter::partition_fs::PartitionFilesystem> =
         Arc::new(VfatAdapterImpl);
 
-    container
-        .set_type(ImageService::new(ImageControllerImpl::new(
-            partition_table,
-            ext4_fs,
-            vfat_fs,
-            fs_walk.clone(),
-        )))
-        .await;
-    let image = container
-        .get_type::<ImageService>()
-        .await
-        .expect("ImageService was just registered");
-
-    // The config vertical injects Ext4Adapter directly too (not through
-    // PartitionFilesystem) to manipulate a standalone config.ext4 file —
-    // see remora-image's Ext4Adapter doc comment.
+    // The image use case injects Ext4Adapter directly too (not through
+    // PartitionFilesystem) for its standalone ext4 image operations — see
+    // remora-image's Ext4Adapter doc comment.
     container
         .set_type(Ext4AdapterService::new(Ext4AdapterImpl))
         .await;
@@ -160,6 +158,20 @@ pub async fn wire() -> Services {
         .get_type::<Ext4AdapterService>()
         .await
         .expect("Ext4AdapterService was just registered");
+
+    container
+        .set_type(ImageService::new(ImageControllerImpl::new(
+            partition_table,
+            ext4_fs,
+            vfat_fs,
+            fs_walk.clone(),
+            ext4_adapter,
+        )))
+        .await;
+    let image = container
+        .get_type::<ImageService>()
+        .await
+        .expect("ImageService was just registered");
 
     container
         .set_type(SquashfsAdapterService::new(SquashfsAdapterImpl))
@@ -207,7 +219,6 @@ pub async fn wire() -> Services {
 
     container
         .set_type(ConfigService::new(ConfigControllerImpl::new(
-            ext4_adapter,
             fs_walk_for_config,
             image.clone(),
         )))
@@ -241,35 +252,139 @@ pub async fn wire() -> Services {
     // The same contexts as rmra's, in the same place: one login serves
     // both binaries.
     let root = default_root();
-    let context = ContextService::new(ContextControllerImpl::new(
-        ContextStoreAdapterService::new(FileContextStoreImpl::new(&root)),
-        CredentialStoreAdapterService::new(FileCredentialStoreImpl::new(&root)),
-        PlatformSessionAdapterService::new(PlatformSessionAdapterImpl),
-    ));
+    container
+        .set_type(ContextStoreAdapterService::new(FileContextStoreImpl::new(
+            &root,
+        )))
+        .await;
+    let context_store = container
+        .get_type::<ContextStoreAdapterService>()
+        .await
+        .expect("ContextStoreAdapterService was just registered");
 
-    // Manufactures as the selected context, over the gateway's gRPC API.
-    let factory = FactoryService::new(FactoryControllerImpl::new(
-        context.clone(),
-        FactoryProvisioningAdapterService::new(FactoryGatewayAdapterImpl),
-    ));
+    container
+        .set_type(CredentialStoreAdapterService::new(
+            FileCredentialStoreImpl::new(&root),
+        ))
+        .await;
+    let credential_store = container
+        .get_type::<CredentialStoreAdapterService>()
+        .await
+        .expect("CredentialStoreAdapterService was just registered");
 
-    // Pure orchestration over the other verticals' already-wired services —
-    // no adapter of its own, so no set_type/get_type round-trip needed;
-    // just construct it directly like the ext4_fs/vfat_fs handles above.
-    let batch = BatchService::new(BatchControllerImpl::new(
-        convert.clone(),
-        identity.clone(),
-        config.clone(),
-        image.clone(),
-        squashfs.clone(),
-        factory.clone(),
-    ));
+    container
+        .set_type(PlatformSessionAdapterService::new(
+            PlatformSessionAdapterImpl,
+        ))
+        .await;
+    let platform_session = container
+        .get_type::<PlatformSessionAdapterService>()
+        .await
+        .expect("PlatformSessionAdapterService was just registered");
+
+    container
+        .set_type(ContextService::new(ContextControllerImpl::new(
+            context_store,
+            credential_store,
+            platform_session,
+        )))
+        .await;
+    let context = container
+        .get_type::<ContextService>()
+        .await
+        .expect("ContextService was just registered");
+
+    // Manufactures as the selected context, over the gateway's gRPC API;
+    // the device key and remora-factory.yaml stay local.
+    container
+        .set_type(DeviceKeyAdapterService::new(DeviceKeyAdapterImpl))
+        .await;
+    let device_keys = container
+        .get_type::<DeviceKeyAdapterService>()
+        .await
+        .expect("DeviceKeyAdapterService was just registered");
+
+    container
+        .set_type(FactoryProvisioningAdapterService::new(
+            FactoryGatewayAdapterImpl,
+        ))
+        .await;
+    let provisioning = container
+        .get_type::<FactoryProvisioningAdapterService>()
+        .await
+        .expect("FactoryProvisioningAdapterService was just registered");
+
+    container
+        .set_type(CredentialWriterAdapterService::new(
+            CredentialWriterAdapterImpl,
+        ))
+        .await;
+    let credential_writer = container
+        .get_type::<CredentialWriterAdapterService>()
+        .await
+        .expect("CredentialWriterAdapterService was just registered");
+
+    container
+        .set_type(FactoryService::new(FactoryControllerImpl::new(
+            context.clone(),
+            device_keys,
+            provisioning,
+            credential_writer,
+        )))
+        .await;
+    let factory = container
+        .get_type::<FactoryService>()
+        .await
+        .expect("FactoryService was just registered");
+
+    // Pure orchestration over the other verticals' already-wired services:
+    // no adapter of its own.
+    container
+        .set_type(BatchService::new(BatchControllerImpl::new(
+            convert.clone(),
+            identity.clone(),
+            config.clone(),
+            image.clone(),
+            squashfs.clone(),
+            factory.clone(),
+        )))
+        .await;
+    let batch = container
+        .get_type::<BatchService>()
+        .await
+        .expect("BatchService was just registered");
 
     // Same releases repo and installers as rmra's own `update`.
-    let update = UpdateService::new(UpdateControllerImpl::new(
-        ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(RELEASES_REPO)),
-        InstallerAdapterService::new(DistInstallerImpl::new(RELEASES_REPO)),
-    ));
+    container
+        .set_type(ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(
+            RELEASES_REPO,
+        )))
+        .await;
+    let release_feed = container
+        .get_type::<ReleaseFeedAdapterService>()
+        .await
+        .expect("ReleaseFeedAdapterService was just registered");
+
+    container
+        .set_type(InstallerAdapterService::new(DistInstallerImpl::new(
+            RELEASES_REPO,
+        )))
+        .await;
+    let installer = container
+        .get_type::<InstallerAdapterService>()
+        .await
+        .expect("InstallerAdapterService was just registered");
+
+    container
+        .set_type(UpdateService::new(UpdateControllerImpl::new(
+            release_feed,
+            installer,
+        )))
+        .await;
+    let update = container
+        .get_type::<UpdateService>()
+        .await
+        .expect("UpdateService was just registered");
 
     Services {
         context,

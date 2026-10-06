@@ -3,9 +3,12 @@ mod completion;
 
 use clap::{CommandFactory, FromArgMatches, Parser};
 
+/// This binary's name, for the commands its messages suggest.
+const PROGRAM: &str = "rmra";
+
 #[derive(Parser)]
 #[command(
-    name = "rmra",
+    name = PROGRAM,
     version,
     about = "Remora operator CLI: reach your devices through sntns-platform",
     after_help = "Start with `rmra login`, then `rmra ssh <device>`, or publish an update with \
@@ -101,7 +104,7 @@ async fn run() {
     use remora_ota_application_transport_cli as ota;
     let code = match options.command {
         Commands::Login(args) => exit_on_error(
-            context::run_login(args, &services.context, over).await,
+            context::run_login(args, &services.context, over, PROGRAM).await,
             verbose,
         ),
         Commands::Logout(args) => exit_on_error(
@@ -113,32 +116,37 @@ async fn run() {
             verbose,
         ),
         Commands::Context(command) => exit_on_error(
-            context::run(command, &services.context, over).await,
+            context::run(command, &services.context, over, PROGRAM).await,
             verbose,
         ),
         // ssh's own convention: 255 when the connection itself failed.
-        Commands::Channel(command) => channel::run(command, &services.channel, over, verbose)
-            .await
-            .unwrap_or_else(|report| fail(&report, verbose, 255)),
+        Commands::Channel(command) => {
+            channel::run(command, &services.channel, over, PROGRAM, verbose)
+                .await
+                .unwrap_or_else(|report| fail(report, verbose, 255))
+        }
         Commands::Ssh(args) => channel::run_ssh(args, &services.channel, over, verbose)
             .await
-            .unwrap_or_else(|report| fail(&report, verbose, 255)),
+            .unwrap_or_else(|report| fail(report, verbose, 255)),
         // scp's own convention: 1 for any failure.
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
-            .unwrap_or_else(|report| fail(&report, verbose, 1)),
+            .unwrap_or_else(|report| fail(report, verbose, 1)),
         Commands::Completion(args) => remora_completion::instructions(
-            "rmra",
+            PROGRAM,
             args,
             "Contexts, devices, releases and deployments complete with Tab.",
         ),
-        Commands::Update(args) => {
-            let app = remora_update::model::App::running("rmra", env!("CARGO_PKG_VERSION"));
-            exit_on_error(
-                remora_update_application_transport_cli::run(args, &services.update, &app).await,
-                verbose,
+        Commands::Update(args) => exit_on_error(
+            remora_update_application_transport_cli::run(
+                args,
+                &services.update,
+                PROGRAM,
+                env!("CARGO_PKG_VERSION"),
             )
-        }
+            .await,
+            verbose,
+        ),
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
             verbose,
@@ -163,11 +171,14 @@ async fn run() {
 fn exit_on_error<C>(result: Result<(), error_stack::Report<C>>, verbose: bool) -> i32 {
     match result {
         Ok(()) => 0,
-        Err(report) => fail(&report, verbose, 1),
+        Err(report) => fail(report, verbose, 1),
     }
 }
 
-fn fail<C>(report: &error_stack::Report<C>, verbose: bool, code: i32) -> i32 {
-    remora_tui::render_report(report, verbose);
+/// Renders a failure -- with what to run about it, when it is a context's
+/// (not logged in, none selected...), whichever command met it.
+fn fail<C>(report: error_stack::Report<C>, verbose: bool, code: i32) -> i32 {
+    let report = remora_context_application_transport_cli::with_hint(report, PROGRAM);
+    remora_tui::render_report(&report, verbose);
     code
 }

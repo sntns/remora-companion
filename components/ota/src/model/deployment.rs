@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use super::Labels;
+use crate::application::Error;
 
 /// Asking one device to install one release.
 #[derive(Debug, Clone)]
@@ -73,6 +74,14 @@ impl DeploymentStatus {
     pub fn is_failure(&self) -> bool {
         matches!(self, Self::Failed | Self::Canceled | Self::Rejected)
     }
+
+    /// Following it can stop: it is terminal, or this version doesn't know
+    /// the status at all. Polling an unknown status could otherwise last
+    /// forever (the platform may have added a terminal one); stopping
+    /// early instead is the safe side, and it counts as not succeeded.
+    pub fn is_settled(&self) -> bool {
+        self.is_terminal() || matches!(self, Self::Other(_))
+    }
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -139,5 +148,84 @@ pub struct DeployRequest {
 pub struct Planned {
     pub device: String,
     pub deployment: String,
-    pub outcome: Result<bool, String>,
+    pub outcome: PlannedOutcome,
+}
+
+#[derive(Debug)]
+pub enum PlannedOutcome {
+    Started,
+    /// Created and left a draft, as asked.
+    Draft,
+    /// The whole chain, so that the platform's reason shows as it does for
+    /// any other failure (and in full with `--verbose`).
+    NotCreated(error_stack::Report<Error>),
+    /// Created, but the start was refused: it is left a draft.
+    NotStarted(error_stack::Report<Error>),
+}
+
+impl PlannedOutcome {
+    pub fn failure(&self) -> Option<&error_stack::Report<Error>> {
+        match self {
+            Self::NotCreated(report) | Self::NotStarted(report) => Some(report),
+            Self::Started | Self::Draft => None,
+        }
+    }
+}
+
+/// Where a followed deployment is, as an operator wants to see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentProgress {
+    pub name: String,
+    pub status: DeploymentStatus,
+    /// 0-100, from the latest report that gave a progress.
+    pub percent: Option<u64>,
+    /// Why it failed, else the latest thing the device said.
+    pub detail: String,
+}
+
+impl DeploymentProgress {
+    pub fn of(deployment: &Deployment, logs: &[LogEntry]) -> Self {
+        let percent = if deployment.status == DeploymentStatus::Succeeded {
+            Some(100)
+        } else {
+            logs.iter()
+                .rev()
+                .find_map(|entry| entry.progress.as_ref())
+                .filter(|progress| progress.max > 0)
+                .map(|progress| {
+                    (progress.current.clamp(0, progress.max) * 100 / progress.max) as u64
+                })
+        };
+        let detail = if deployment.status.is_failure() && !deployment.details.is_empty() {
+            deployment
+                .details
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            logs.iter()
+                .rev()
+                .find_map(|entry| entry.details.last().cloned())
+                .unwrap_or_default()
+        };
+        Self {
+            name: deployment.name.clone(),
+            status: deployment.status.clone(),
+            percent,
+            detail,
+        }
+    }
+}
+
+/// How following deployments ended, by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchOutcome {
+    pub succeeded: Vec<String>,
+    /// Failed, cancelled or rejected.
+    pub failed: Vec<String>,
+    /// Stopped at a status this version doesn't know.
+    pub unknown: Vec<String>,
+    /// Still going when the watch was cancelled.
+    pub pending: Vec<String>,
 }

@@ -5,11 +5,12 @@ use super::error::Result;
 /// DI seam over the ext4 backend: implemented by
 /// `remora-image-adapter-ext4` for the real `am-fs-ext4` wrapper, and
 /// by that same adapter for the boot-mode-agnostic `PartitionFilesystem`
-/// composite port used by the image application service. The config
-/// vertical also injects this directly (not through `PartitionFilesystem`)
-/// to manipulate a standalone `config.ext4` file — that file's content
-/// happens to be a whole ext4 filesystem in its own right, addressed at
-/// `offset = 0`, not a partition inside a bigger disk image.
+/// composite port used by the image application service. The image use
+/// case also injects this directly (not through `PartitionFilesystem`) for
+/// its `ext4_file_*` operations on a standalone ext4 image — a whole
+/// filesystem in its own right, addressed at `offset = 0`, not a partition
+/// inside a bigger disk image — and for `format`, which no partition
+/// backend has.
 pub trait Ext4Adapter: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     fn write_file(

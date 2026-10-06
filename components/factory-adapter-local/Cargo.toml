@@ -1,0 +1,24 @@
+[package]
+name = "remora-factory-adapter-local"
+description = "The factory vertical's local adapters: a device keypair + CSR (rcgen), and remora-factory.yaml rendered and written owner-only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-factory = { path = "../factory" }
+async-trait.workspace = true
+error-stack.workspace = true
+rcgen.workspace = true
+p256.workspace = true
+pem.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+# Only to *verify* a real platform-issued certificate set and the CSR this
+# crate builds -- production code never parses these itself.
+x509-parser = { version = "0.18", features = ["verify"] }
+base64.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

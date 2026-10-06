@@ -6,18 +6,19 @@
 //! call is cut at a few seconds, and a failure falls back to the last
 //! answer, or to nothing.
 
-use std::{
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use std::time::Duration;
 
-use remora_completion::{Candidate, Kind};
+use clap::CommandFactory;
+use remora_completion::{Cache, Candidate, Kind};
 use remora_context::model::ContextOverride;
 use remora_context_application_transport_cli::{
     complete_contexts, complete_roles, context_on_command_line,
 };
 
-use crate::bootstrap::{self, Services};
+use crate::{
+    bootstrap::{self, Services},
+    Options, PROGRAM,
+};
 
 const FRESH: Duration = Duration::from_secs(60);
 const PATIENCE: Duration = Duration::from_secs(3);
@@ -31,7 +32,7 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
     };
     runtime.block_on(async move {
         let services = bootstrap::wire().await;
-        let over = context_on_command_line();
+        let over = context_on_command_line(Options::command());
         match kind {
             Kind::Context => complete_contexts(&services.context).await,
             Kind::Role => complete_roles(&services.context, over.as_ref()).await,
@@ -52,26 +53,19 @@ async fn remote_values(
         return Vec::new();
     };
     let scope = match &resolved.role {
-        Some(role) => format!(
-            "{}.as-{}",
-            resolved.context.name,
-            role.urn
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-                .collect::<String>()
-        ),
+        Some(role) => format!("{}.as-{}", resolved.context.name, role.urn),
         None => resolved.context.name.clone(),
     };
-    let cache = cache_path(&scope, kind);
-    if let Some(cached) = read_cache(&cache, true) {
+    let cache = Cache::new(PROGRAM, &scope, kind);
+    if let Some(cached) = cache.fresh(FRESH) {
         return cached;
     }
     match tokio::time::timeout(PATIENCE, fetch(services, over, kind)).await {
         Ok(Some(values)) => {
-            write_cache(&cache, &values);
+            cache.store(&values);
             values
         }
-        _ => read_cache(&cache, false).unwrap_or_default(),
+        _ => cache.last().unwrap_or_default(),
     }
 }
 
@@ -107,53 +101,4 @@ async fn fetch(
             .map(|deployment| Candidate::new(deployment.name).help(deployment.status.to_string()))
             .collect(),
     })
-}
-
-fn cache_path(context: &str, kind: Kind) -> PathBuf {
-    let base = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CACHE_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| std::env::home_dir().map(|home| home.join(".cache")))
-    }
-    .unwrap_or_else(std::env::temp_dir);
-    base.join("rmra")
-        .join("completion")
-        .join(format!("{context}.{kind:?}").to_lowercase())
-}
-
-/// One `value\thelp` line per candidate; `fresh` only if young enough.
-fn read_cache(path: &PathBuf, fresh: bool) -> Option<Vec<Candidate>> {
-    if fresh {
-        let age = SystemTime::now()
-            .duration_since(std::fs::metadata(path).ok()?.modified().ok()?)
-            .unwrap_or(Duration::MAX);
-        if age > FRESH {
-            return None;
-        }
-    }
-    let text = std::fs::read_to_string(path).ok()?;
-    Some(
-        text.lines()
-            .filter(|line| !line.is_empty())
-            .map(|line| match line.split_once('\t') {
-                Some((value, help)) if !help.is_empty() => Candidate::new(value).help(help),
-                Some((value, _)) => Candidate::new(value),
-                None => Candidate::new(line),
-            })
-            .collect(),
-    )
-}
-
-fn write_cache(path: &PathBuf, values: &[Candidate]) {
-    let text: String = values
-        .iter()
-        .map(|c| format!("{}\t{}\n", c.value, c.help.as_deref().unwrap_or_default()))
-        .collect();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, text);
 }

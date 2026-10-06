@@ -1,10 +1,10 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, Write},
     path::Path,
 };
 
-use error_stack::Report;
+use error_stack::ResultExt;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use remora_convert::adapter::{ContainerFormatAdapter, Error, Result};
 
@@ -14,36 +14,41 @@ pub struct GzipAdapterImpl;
 impl ContainerFormatAdapter for GzipAdapterImpl {
     fn decode_to_raw(&self, input: &Path, output_raw: &Path) -> Result<()> {
         let infile =
-            File::open(input).map_err(|_| Report::new(Error::ReadFile(input.to_path_buf())))?;
+            File::open(input).change_context_lazy(|| Error::ReadFile(input.to_path_buf()))?;
         let mut decoder = GzDecoder::new(BufReader::new(infile));
         let outfile = File::create(output_raw)
-            .map_err(|_| Report::new(Error::WriteFile(output_raw.to_path_buf())))?;
+            .change_context_lazy(|| Error::WriteFile(output_raw.to_path_buf()))?;
         let mut writer = BufWriter::new(outfile);
         std::io::copy(&mut decoder, &mut writer)
-            .map_err(|_| Report::new(Error::ReadFile(input.to_path_buf())))?;
-        Ok(())
+            .change_context_lazy(|| Error::ReadFile(input.to_path_buf()))?;
+        // Explicitly: dropping a BufWriter flushes its tail but swallows the
+        // error, which would leave a truncated image looking decoded.
+        writer
+            .flush()
+            .change_context_lazy(|| Error::WriteFile(output_raw.to_path_buf()))
     }
 
     fn encode_from_raw(&self, input_raw: &Path, output: &Path) -> Result<()> {
         let infile = File::open(input_raw)
-            .map_err(|_| Report::new(Error::ReadFile(input_raw.to_path_buf())))?;
+            .change_context_lazy(|| Error::ReadFile(input_raw.to_path_buf()))?;
         let mut reader = BufReader::new(infile);
-        let outfile = File::create(output)
-            .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
+        let outfile =
+            File::create(output).change_context_lazy(|| Error::WriteFile(output.to_path_buf()))?;
         let mut encoder = GzEncoder::new(BufWriter::new(outfile), Compression::default());
         std::io::copy(&mut reader, &mut encoder)
-            .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
+            .change_context_lazy(|| Error::WriteFile(output.to_path_buf()))?;
+        // `finish` writes the gzip trailer into the BufWriter; flushing that
+        // is a separate, equally fallible step (see `decode_to_raw`).
         encoder
             .finish()
-            .map_err(|_| Report::new(Error::WriteFile(output.to_path_buf())))?;
-        Ok(())
+            .and_then(|mut writer| writer.flush())
+            .change_context_lazy(|| Error::WriteFile(output.to_path_buf()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -14,5 +14,6 @@ error-stack.workspace = true
 thiserror.workspace = true
 # Error::GenerateSshHostKey wraps this crate's own error type directly —
 # same rationale as remora-flash's BlockMap / remora-image's
-# ext4/fatfs errors.
-ssh-key = { version = "0.6", features = ["ed25519", "rand_core", "getrandom"] }
+# ext4/fatfs errors. Only the type: generating keys (ed25519, randomness)
+# is the adapter's business.
+ssh-key = { version = "0.6", default-features = false, features = ["std"] }

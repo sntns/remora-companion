@@ -16,8 +16,6 @@ pub trait ContextStoreAdapter: Send + Sync {
     fn delete(&self, name: &str) -> Result<()>;
     fn current(&self) -> Result<Option<String>>;
     fn set_current(&self, name: Option<&str>) -> Result<()>;
-    /// Where the store lives, for a human (`rmra context ls` footer).
-    fn location(&self) -> String;
 }
 
 #[derive(Clone)]
