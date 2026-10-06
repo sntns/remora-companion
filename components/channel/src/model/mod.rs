@@ -1,7 +1,7 @@
 mod ssh;
 
 pub use ssh::{
-    PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate, SshCommand,
+    PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate, SshCommand, SshKeys,
     SshRequest, SshRole,
 };
 

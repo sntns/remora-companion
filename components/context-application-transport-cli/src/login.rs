@@ -4,14 +4,15 @@ use error_stack::{Report, ResultExt};
 use remora_context::{
     application::ContextService,
     model::{
-        Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride, Secret, Tls,
+        is_role_urn, Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride,
+        Secret, Tls,
     },
 };
 use remora_tui as tui;
 
 use crate::{
     error::{context_error, prompt_error, Error, Result},
-    service::{describe_selection, DEFAULT_ADDRESS},
+    service::{describe_selection, no_context, DEFAULT_ADDRESS},
 };
 
 #[derive(clap::Args)]
@@ -65,11 +66,13 @@ pub struct WhoamiArgs {}
 
 /// `<bin> login`: verify credentials with the selected context's platform,
 /// then store them. With no flags it is a guided prompt -- including, on a
-/// first run, creating the context to log in to.
+/// first run, creating the context to log in to. `program` is the running
+/// binary's name, for the prompt's title.
 pub async fn run_login(
     args: LoginArgs,
     service: &ContextService,
     over: Option<&ContextOverride>,
+    program: &str,
 ) -> Result<()> {
     let interactive = args.identity.is_none() && !args.token_stdin;
     if interactive && !tui::interactive() {
@@ -78,7 +81,7 @@ pub async fn run_login(
         )));
     }
     if interactive {
-        tui::intro(format!("{} login", crate::program()));
+        tui::intro(format!("{program} login"));
     }
 
     let name = match service.selected(over).await.map_err(context_error)? {
@@ -96,11 +99,7 @@ pub async fn run_login(
             name
         }
         None if interactive => first_context(service).await?,
-        None => {
-            return Err(Report::new(Error::Context(
-                remora_context::application::Error::NoContext.to_string(),
-            )))
-        }
+        None => return Err(no_context()),
     };
     // From here on, address the context by name: a first-run context was
     // just created, and an override already named it.
@@ -171,25 +170,32 @@ pub async fn run_login(
 
 /// Asks which role the context should act as: the login itself, one of the
 /// context's roles, or another role by URN. Defaults to what the context
-/// already does.
+/// already does -- also when that is a role it has no alias for.
 async fn prompt_role(service: &ContextService, target: &ContextOverride) -> Result<RoleOverride> {
     #[derive(Clone, PartialEq, Eq)]
     enum Choice {
         Myself,
         Alias(String),
+        Urn(String),
         Other,
     }
-    let (_, roles) = service.roles(Some(target)).await.map_err(context_error)?;
-    let assumed = roles
-        .iter()
-        .find(|role| role.assumed)
-        .map(|role| role.alias.clone());
+    let (_, roles, assumed) = service.roles(Some(target)).await.map_err(context_error)?;
     let mut select = tui::select("Act as")
         .item(Choice::Myself, "Myself", "the login's own account, no role")
         .initial_value(match &assumed {
-            Some(alias) => Choice::Alias(alias.clone()),
+            Some(role) => match &role.alias {
+                Some(alias) => Choice::Alias(alias.clone()),
+                None => Choice::Urn(role.urn.clone()),
+            },
             None => Choice::Myself,
         });
+    if let Some(role) = assumed.as_ref().filter(|role| role.alias.is_none()) {
+        select = select.item(
+            Choice::Urn(role.urn.clone()),
+            &role.urn,
+            "the role it acts as",
+        );
+    }
     for role in &roles {
         select = select.item(Choice::Alias(role.alias.clone()), &role.alias, &role.urn);
     }
@@ -201,11 +207,12 @@ async fn prompt_role(service: &ContextService, target: &ContextOverride) -> Resu
     Ok(match select.interact().map_err(prompt_error)? {
         Choice::Myself => RoleOverride::Drop,
         Choice::Alias(alias) => RoleOverride::Assume(alias),
+        Choice::Urn(urn) => RoleOverride::Assume(urn),
         Choice::Other => {
             let urn: String = tui::input("Role URN")
                 .placeholder("urn:sntns:iam:…:role:…")
                 .validate(|urn: &String| {
-                    if urn.starts_with("urn:") && urn.contains(":role:") {
+                    if is_role_urn(urn) {
                         Ok(())
                     } else {
                         Err("a role URN looks like urn:…:role:…")
@@ -305,6 +312,7 @@ async fn first_context(service: &ContextService) -> Result<String> {
                 assumed_role: None,
                 login: None,
             },
+            RoleOverride::Keep,
             false,
         )
         .await

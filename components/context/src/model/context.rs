@@ -113,6 +113,12 @@ pub enum RoleOverride {
     Drop,
 }
 
+/// Whether `text` reads as an IAM role URN (`urn:…:role:…`) rather than an
+/// alias: the one rule both the use case and a prompt check a URN by.
+pub fn is_role_urn(text: &str) -> bool {
+    text.starts_with("urn:") && text.contains(":role:")
+}
+
 /// A role being assumed: its URN, and the alias it was chosen by, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssumedRole {

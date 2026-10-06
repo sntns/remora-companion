@@ -444,7 +444,11 @@ mod tests {
             PlatformSessionAdapterService::new(Platform),
         );
         contexts
-            .create(resolved.context.clone(), false)
+            .create(
+                resolved.context.clone(),
+                remora_context::model::RoleOverride::Keep,
+                false,
+            )
             .await
             .unwrap();
         contexts

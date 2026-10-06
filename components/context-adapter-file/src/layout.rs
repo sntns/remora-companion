@@ -30,6 +30,9 @@ pub fn default_root() -> PathBuf {
 /// <root>/contexts/<name>/meta.json       the context (no secrets)
 /// <root>/contexts/<name>/credentials.json  0600, written by `rmra login`
 /// ```
+///
+/// A context's directory holds both stores' files: each store removes only
+/// its own, and the directory goes with the last of them.
 #[derive(Debug, Clone)]
 pub(crate) struct Layout {
     pub root: PathBuf,
@@ -62,6 +65,32 @@ pub(crate) fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Removes a file; whether there was one.
+pub(crate) fn remove_file(path: &Path) -> io::Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Removes a directory once nothing is left in it: a context's directory
+/// holds both stores' files, and goes with the last of them.
+pub(crate) fn remove_dir_if_empty(dir: &Path) -> io::Result<()> {
+    match fs::remove_dir(dir) {
+        Ok(()) => Ok(()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            Ok(())
+        }
         Err(e) => Err(e),
     }
 }

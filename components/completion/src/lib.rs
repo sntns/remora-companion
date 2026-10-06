@@ -5,7 +5,8 @@
 //! (`#[arg(add = remora_completion::values(Kind::Device))]`); the binary,
 //! which is what can reach the services, [`install`]s the one provider that
 //! lists them. Transports thus stay free of any service wiring, and an
-//! argument nobody provides for just completes nothing.
+//! argument nobody provides for just completes nothing. A provider listing
+//! remote values keeps them in a [`Cache`] between Tabs.
 //!
 //! [`Args`]/[`instructions`] are the `<bin> completion` command every
 //! binary offers: it prints the line that enables completion in a shell.
@@ -13,7 +14,14 @@
 //! Not a port: completion is a terminal nicety, never behavior a test needs
 //! to substitute (same reasoning as `remora-tui`).
 
-use std::{ffi::OsStr, sync::OnceLock};
+mod cache;
+
+pub use cache::Cache;
+
+use std::{
+    ffi::{OsStr, OsString},
+    sync::OnceLock,
+};
 
 use clap_complete::engine::{
     ArgValueCandidates, ArgValueCompleter, CompletionCandidate, PathCompleter, ValueCompleter,
@@ -66,6 +74,18 @@ static PROVIDER: OnceLock<Provider> = OnceLock::new();
 /// any error it returns nothing, since a shell waits on it at every Tab.
 pub fn install(provider: impl Fn(Kind) -> Vec<Candidate> + Send + Sync + 'static) {
     let _ = PROVIDER.set(Box::new(provider));
+}
+
+/// The command line being completed, from the program's name on (the shell
+/// hands it after a `--`: `COMPLETE=zsh rmra -- rmra -c eu2 ssh <Tab>`) --
+/// for a provider whose values depend on what is typed before, such as the
+/// context devices are listed in.
+pub fn command_line() -> Vec<OsString> {
+    let args: Vec<OsString> = std::env::args_os().collect();
+    match args.iter().position(|arg| arg == "--") {
+        Some(escape) => args[escape + 1..].to_vec(),
+        None => args,
+    }
 }
 
 fn provided(kind: Kind) -> Vec<Candidate> {
