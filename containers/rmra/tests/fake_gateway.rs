@@ -212,6 +212,12 @@ impl Rmra {
             .args(args)
             .env("RMRA_CONFIG", self.config.path())
             .env_remove("RMRA_CONTEXT")
+            .env_remove("RMRA_ADDRESS")
+            .env_remove("RMRA_TOKEN")
+            .env_remove("RMRA_ASSUME_ROLE")
+            .env_remove("RMRA_PLAINTEXT")
+            .env_remove("RMRA_CA_FILE")
+            .env_remove("RMRA_SERVER_NAME")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -219,7 +225,19 @@ impl Rmra {
     }
 
     async fn run(&self, args: &[&str], stdin: &[u8]) -> (i32, String, String) {
-        let mut child = self.command(args).stdin(Stdio::piped()).spawn().unwrap();
+        self.run_with(args, &[], stdin).await
+    }
+
+    /// Runs with `env` set on top: e.g. a context defined by the environment.
+    async fn run_with(
+        &self,
+        args: &[&str],
+        env: &[(&str, &str)],
+        stdin: &[u8],
+    ) -> (i32, String, String) {
+        let mut command = self.command(args);
+        command.envs(env.iter().copied());
+        let mut child = command.stdin(Stdio::piped()).spawn().unwrap();
         let mut input = child.stdin.take().unwrap();
         input.write_all(stdin).await.unwrap();
         drop(input);
@@ -526,4 +544,114 @@ async fn login_whoami_and_a_channel_on_stdio() {
     assert_eq!(code, 255);
     assert!(stderr.contains("not logged in"), "{stderr}");
     assert!(stderr.contains("log in with `rmra --context "), "{stderr}");
+}
+
+/// An ephemeral container's or a CI job's identity: the context defined
+/// whole by the environment, nothing created or logged in beforehand, and
+/// nothing written to the config directory -- not even the token.
+#[tokio::test]
+async fn a_context_defined_by_the_environment() {
+    let address = serve().await;
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+    let env = [
+        ("RMRA_ADDRESS", address.as_str()),
+        ("RMRA_TOKEN", TOKEN),
+        ("RMRA_PLAINTEXT", "1"),
+    ];
+
+    let (code, _, stderr) = rmra.run_with(&["whoami"], &env, b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("urn:sntns:iam:local:acme:user:ada"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("from RMRA_ADDRESS and RMRA_TOKEN"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(TOKEN), "the token leaked: {stderr}");
+
+    let (code, stdout, stderr) = rmra
+        .run_with(
+            &["channel", "open", "525400C0FFEE", "--quiet"],
+            &env,
+            b"from env",
+        )
+        .await;
+    assert_eq!((code, stdout.as_str()), (0, "vne morf"), "{stderr}");
+
+    // Its role, a URN, assumed by every call.
+    let mut as_ops = env.to_vec();
+    as_ops.push(("RMRA_ASSUME_ROLE", OPS_ROLE));
+    let (code, _, stderr) = rmra.run_with(&["whoami"], &as_ops, b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.contains("@ other"), "{stderr}");
+
+    // ls shows it as what runs, never its token.
+    let (code, stdout, _) = rmra
+        .run_with(&["context", "ls", "--format", "json"], &env, b"")
+        .await;
+    assert_eq!(code, 0);
+    assert!(stdout.contains("\"environment\": true"), "{stdout}");
+    assert!(!stdout.contains(TOKEN), "the token leaked: {stdout}");
+
+    // Nothing to log in or out of, no role to change, and no stored
+    // context to change while it is the one that runs.
+    for args in [
+        &["login", "--token-stdin"][..],
+        &["logout"],
+        &["context", "role", "drop"],
+        &["context", "create", "x", "--address", "a:1"],
+    ] {
+        let (code, _, stderr) = rmra.run_with(args, &env, b"token\n").await;
+        assert_eq!(code, 1, "{args:?}: {stderr}");
+        assert!(stderr.contains("defined for this run only"), "{stderr}");
+        assert!(
+            stderr.contains("unset RMRA_ADDRESS and RMRA_TOKEN"),
+            "{stderr}"
+        );
+    }
+
+    let leftovers: Vec<_> = std::fs::read_dir(rmra.config.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert!(leftovers.is_empty(), "written to the config: {leftovers:?}");
+
+    // Half an environment, or one that also names a context: usage errors.
+    let (code, _, stderr) = rmra.run_with(&["whoami"], &env[1..], b"").await;
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("RMRA_TOKEN is set without RMRA_ADDRESS"),
+        "{stderr}"
+    );
+    let mut named = env.to_vec();
+    named.push(("RMRA_CONTEXT", "local"));
+    let (code, _, stderr) = rmra.run_with(&["whoami"], &named, b"").await;
+    assert_eq!(code, 2);
+    assert!(stderr.contains("unset one or the other"), "{stderr}");
+
+    // --context names a stored context over the environment's.
+    let (code, _, stderr) = rmra
+        .run_with(
+            &[
+                "-c",
+                "local",
+                "context",
+                "create",
+                "local",
+                "--address",
+                &address,
+                "--plaintext",
+            ],
+            &env,
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let (code, _, stderr) = rmra.run_with(&["-c", "local", "whoami"], &env, b"").await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("not logged in"), "{stderr}");
 }

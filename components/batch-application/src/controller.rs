@@ -132,10 +132,8 @@ impl BatchServiceInterface for BatchControllerImpl {
                 } => {
                     let serial = DeviceSerial::from_parts(device_name, serial_number_policy, force)
                         .change_context(Error::InvalidStep { index, kind })?;
-                    let step_over = context.map(|name| ContextOverride {
-                        name,
-                        source: Selection::Flag,
-                    });
+                    let step_over =
+                        context.map(|name| ContextOverride::named(name, Selection::Flag));
                     self.factory
                         .provision(
                             step_over.as_ref().or(over),

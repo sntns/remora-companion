@@ -93,9 +93,14 @@ fn main() {
 async fn run() {
     let matches = Options::command().get_matches();
     let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    let over = options.context.over(&matches);
-    let over = over.as_ref();
     let verbose = options.verbose;
+    // A usage error, like clap's own: the environment defines a context
+    // partly, or both defines and names one.
+    let over = options
+        .context
+        .over(&matches)
+        .unwrap_or_else(|report| std::process::exit(fail(report, verbose, 2)));
+    let over = over.as_ref();
 
     let services = bootstrap::wire().await;
 

@@ -96,9 +96,13 @@ impl ContextControllerImpl {
             .transpose()
     }
 
-    /// The selected context itself, which must exist.
+    /// The selected context itself, which must exist: a stored one, or
+    /// the one the invocation defines.
     fn select(&self, over: Option<&ContextOverride>) -> Result<(Context, Selection)> {
         if let Some(over) = over {
+            if let Some(defined) = &over.defined {
+                return Ok((defined.context.clone(), over.source));
+            }
             return Ok((self.existing(&over.name)?, over.source));
         }
         if let Some(current) = self.store.current().change_context(Error::Store)? {
@@ -111,6 +115,22 @@ impl ContextControllerImpl {
             0 => Err(Report::new(Error::NoContext)),
             1 => Ok((contexts.remove(0), Selection::Only)),
             _ => Err(Report::new(Error::Ambiguous)),
+        }
+    }
+
+    /// The selected context, to change it or its login: a stored one only
+    /// -- a defined context has nowhere to keep a change.
+    fn select_stored(&self, over: Option<&ContextOverride>) -> Result<(Context, Selection)> {
+        Self::refuse_defined(over)?;
+        self.select(over)
+    }
+
+    fn refuse_defined(over: Option<&ContextOverride>) -> Result<()> {
+        match over {
+            Some(over) if over.defined.is_some() => {
+                Err(Report::new(Error::Defined(over.name.clone())))
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -338,11 +358,16 @@ impl ContextServiceInterface for ContextControllerImpl {
 
     async fn resolve(&self, over: Option<&ContextOverride>) -> Result<ResolvedContext> {
         let (context, selection) = self.select(over)?;
-        let credentials = self
-            .credentials
-            .get(context.login_name())
-            .change_context(Error::Credentials)?
-            .ok_or_else(|| Report::new(Error::NotLoggedIn(context.login_name().to_owned())))?;
+        // A defined context brings its credentials; its role is verified by
+        // the first call that assumes it, as nothing was logged in before.
+        let credentials = match over.and_then(|over| over.defined.as_ref()) {
+            Some(defined) => defined.credentials.clone(),
+            None => self
+                .credentials
+                .get(context.login_name())
+                .change_context(Error::Credentials)?
+                .ok_or_else(|| Report::new(Error::NotLoggedIn(context.login_name().to_owned())))?,
+        };
         let role = Self::role_of(&context)?;
         Ok(ResolvedContext {
             context,
@@ -358,7 +383,7 @@ impl ContextServiceInterface for ContextControllerImpl {
         credentials: Credentials,
         role: RoleOverride,
     ) -> Result<(String, Principal, Option<(AssumedRole, Option<String>)>)> {
-        let (mut context, _) = self.select(over)?;
+        let (mut context, _) = self.select_stored(over)?;
         // Verified first: storing credentials the platform refuses would
         // only move the failure to the next command, further from its cause.
         let principal = self
@@ -397,7 +422,7 @@ impl ContextServiceInterface for ContextControllerImpl {
     }
 
     async fn logout(&self, over: Option<&ContextOverride>) -> Result<(String, bool)> {
-        let (context, _) = self.select(over)?;
+        let (context, _) = self.select_stored(over)?;
         // The shared login: out of a base and every context declined from it.
         let removed = self
             .credentials
@@ -453,7 +478,7 @@ impl ContextServiceInterface for ContextControllerImpl {
         // Aliases follow context names' rule, and can't look like a URN.
         Self::validate(alias)?;
         Self::validate_role_urn(urn)?;
-        let (mut context, _) = self.select(over)?;
+        let (mut context, _) = self.select_stored(over)?;
         if context.roles.contains_key(alias) {
             return Err(Report::new(Error::RoleExists(alias.to_owned())));
         }
@@ -462,7 +487,7 @@ impl ContextServiceInterface for ContextControllerImpl {
     }
 
     async fn remove_role(&self, over: Option<&ContextOverride>, alias: &str) -> Result<()> {
-        let (mut context, _) = self.select(over)?;
+        let (mut context, _) = self.select_stored(over)?;
         let Some(urn) = context.roles.remove(alias) else {
             return Err(Report::new(Error::UnknownRole(alias.to_owned())));
         };
@@ -477,6 +502,7 @@ impl ContextServiceInterface for ContextControllerImpl {
         over: Option<&ContextOverride>,
         choice: &str,
     ) -> Result<(String, AssumedRole, Option<String>)> {
+        Self::refuse_defined(over)?;
         let resolved = self.resolve(over).await?;
         let role = Self::role_named(&resolved.context, choice)?;
         // Verified first, like a login: storing a role the platform refuses
@@ -493,7 +519,7 @@ impl ContextServiceInterface for ContextControllerImpl {
     }
 
     async fn drop_role(&self, over: Option<&ContextOverride>) -> Result<(String, Option<String>)> {
-        let (mut context, _) = self.select(over)?;
+        let (mut context, _) = self.select_stored(over)?;
         let dropped = context.assumed_role.take();
         if dropped.is_some() {
             self.store.put(&context).change_context(Error::Store)?;
@@ -506,7 +532,7 @@ impl ContextServiceInterface for ContextControllerImpl {
 mod tests {
     use remora_context::{
         adapter::platform::{self, PlatformSessionAdapter},
-        model::{Endpoint, Secret, Tls},
+        model::{DefinedContext, Endpoint, Secret, Tls},
     };
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
 
@@ -577,10 +603,17 @@ mod tests {
     }
 
     fn flag(name: &str) -> ContextOverride {
-        ContextOverride {
-            name: name.into(),
-            source: Selection::Flag,
-        }
+        ContextOverride::named(name, Selection::Flag)
+    }
+
+    /// The environment's context: an endpoint and a token, maybe a role.
+    fn defined(token_: &str, role: Option<&str>) -> ContextOverride {
+        let mut context = context("env");
+        context.assumed_role = role.map(Into::into);
+        ContextOverride::defined(DefinedContext {
+            context,
+            credentials: token(token_),
+        })
     }
 
     #[tokio::test]
@@ -1133,5 +1166,118 @@ mod tests {
         contexts.rename("acme", "acme-ops").await.unwrap();
         assert!(contexts.resolve(Some(&flag("acme-ops"))).await.is_ok());
         assert!(contexts.resolve(None).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_defined_context_needs_nothing_stored_and_stores_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        let env = defined("good", None);
+
+        assert_eq!(
+            contexts.selected(Some(&env)).await.unwrap(),
+            Some(("env".into(), Selection::Defined))
+        );
+        let resolved = contexts.resolve(Some(&env)).await.unwrap();
+        assert_eq!(resolved.selection, Selection::Defined);
+        assert!(resolved.credentials == token("good"));
+        let (_, principal, acting) = contexts.whoami(Some(&env)).await.unwrap();
+        assert_eq!((principal.user_name.as_str(), acting), ("ada", None));
+        let (name, roles, assumed) = contexts.roles(Some(&env)).await.unwrap();
+        assert_eq!((name.as_str(), roles.len(), assumed), ("env", 0, None));
+        assert!(
+            std::fs::read_dir(root.path()).unwrap().next().is_none(),
+            "a defined context wrote to the store"
+        );
+
+        // Refused credentials fail at the first call, as a login would.
+        let report = contexts
+            .whoami(Some(&defined("bad", None)))
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::Verify));
+    }
+
+    #[tokio::test]
+    async fn a_defined_context_wins_over_the_stored_current_one() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
+        contexts.use_context("eu2").await.unwrap();
+
+        // Not logged in to eu2: the defined context's own token is used.
+        let resolved = contexts
+            .resolve(Some(&defined("good", None)))
+            .await
+            .unwrap();
+        assert_eq!(resolved.context.name, "env");
+        assert_eq!(resolved.context.endpoint.address, "env.example:50051");
+        let report = contexts.resolve(None).await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::NotLoggedIn(_)));
+    }
+
+    #[tokio::test]
+    async fn a_defined_context_s_role_is_verified_when_used() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+
+        let ops = defined("good", Some(OPS));
+        let role = contexts.resolve(Some(&ops)).await.unwrap().role.unwrap();
+        assert_eq!((role.alias, role.urn.as_str()), (None, OPS));
+        let (_, _, acting) = contexts.whoami(Some(&ops)).await.unwrap();
+        assert_eq!(acting, Some(Some("other".into())));
+
+        // Nothing verified it beforehand: the first call that assumes it
+        // fails, like a stored context whose role was revoked.
+        let forbidden = defined("good", Some(FORBIDDEN));
+        assert!(contexts.resolve(Some(&forbidden)).await.is_ok());
+        let report = contexts.whoami(Some(&forbidden)).await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::Assume(_)));
+    }
+
+    #[tokio::test]
+    async fn a_defined_context_cannot_be_changed_but_a_named_one_can() {
+        let root = tempfile::tempdir().unwrap();
+        let contexts = controller(root.path());
+        contexts
+            .create(context("eu2"), RoleOverride::Keep, false)
+            .await
+            .unwrap();
+        let env = defined("good", None);
+        let env = Some(&env);
+
+        let refused = |report: Report<Error>| {
+            assert!(
+                matches!(report.current_context(), Error::Defined(name) if name == "env"),
+                "{report:?}"
+            )
+        };
+        refused(
+            contexts
+                .login(env, token("good"), RoleOverride::Keep)
+                .await
+                .unwrap_err(),
+        );
+        refused(contexts.logout(env).await.unwrap_err());
+        refused(contexts.add_role(env, "ops", OPS).await.unwrap_err());
+        refused(contexts.remove_role(env, "ops").await.unwrap_err());
+        refused(contexts.assume_role(env, OPS).await.unwrap_err());
+        refused(contexts.drop_role(env).await.unwrap_err());
+
+        // Naming a stored context (--context) still changes it.
+        let eu2 = flag("eu2");
+        contexts
+            .login(Some(&eu2), token("good"), RoleOverride::Keep)
+            .await
+            .unwrap();
+        contexts.add_role(Some(&eu2), "ops", OPS).await.unwrap();
+        contexts.assume_role(Some(&eu2), "ops").await.unwrap();
+        assert_eq!(
+            contexts.logout(Some(&eu2)).await.unwrap(),
+            ("eu2".into(), true)
+        );
     }
 }

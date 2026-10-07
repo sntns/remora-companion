@@ -12,7 +12,7 @@ use remora_tui as tui;
 
 use crate::{
     error::{context_error, prompt_error, Error, Result},
-    service::{describe_selection, no_context, DEFAULT_ADDRESS},
+    service::{describe_selection, no_context, refuse_defined, DEFAULT_ADDRESS},
 };
 
 #[derive(clap::Args)]
@@ -74,6 +74,8 @@ pub async fn run_login(
     over: Option<&ContextOverride>,
     program: &str,
 ) -> Result<()> {
+    // Before any prompt: a context the environment defines has no login.
+    refuse_defined(over)?;
     let interactive = args.identity.is_none() && !args.token_stdin;
     if interactive && !tui::interactive() {
         return Err(Report::new(Error::Usage(
@@ -103,10 +105,10 @@ pub async fn run_login(
     };
     // From here on, address the context by name: a first-run context was
     // just created, and an override already named it.
-    let target = ContextOverride {
-        name: name.clone(),
-        source: over.map_or(remora_context::model::Selection::Current, |o| o.source),
-    };
+    let target = ContextOverride::named(
+        name.clone(),
+        over.map_or(remora_context::model::Selection::Current, |o| o.source),
+    );
 
     let secret = if let Some(identity) = args.identity {
         let password = if args.password_stdin {

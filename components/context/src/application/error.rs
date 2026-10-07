@@ -27,6 +27,8 @@ pub enum Error {
     Assume(String),
     #[error("contexts {1} use the login of {0:?}: remove them first")]
     InUse(String, String),
+    #[error("context {0:?} is defined for this run only, not stored: there is nothing to change")]
+    Defined(String),
     #[error("failed to access the context store")]
     Store,
     #[error("failed to access the credential store")]

@@ -88,16 +88,54 @@ pub enum Selection {
     Current,
     /// The only context there is.
     Only,
+    /// Defined whole by the environment (`RMRA_ADDRESS`, `RMRA_TOKEN`...),
+    /// not stored: see [`DefinedContext`].
+    Defined,
 }
 
-/// A context named for one invocation (`--context`, `RMRA_CONTEXT`),
-/// overriding the stored current one. Only the context: which role it acts
-/// as is the context's own setting, never a per-command choice.
+/// A context named for one invocation (`--context`, `RMRA_CONTEXT`), or
+/// defined whole for it, overriding the stored current one. Only the
+/// context: which role it acts as is the context's own setting, never a
+/// per-command choice.
 #[derive(Debug, Clone)]
 pub struct ContextOverride {
     /// The context to use instead of the stored current one.
     pub name: String,
     pub source: Selection,
+    /// The context itself, when the invocation defines it (`Defined`)
+    /// rather than naming a stored one.
+    pub defined: Option<DefinedContext>,
+}
+
+impl ContextOverride {
+    /// A stored context, by name.
+    pub fn named(name: impl Into<String>, source: Selection) -> Self {
+        Self {
+            name: name.into(),
+            source,
+            defined: None,
+        }
+    }
+
+    /// A context defined for this invocation only.
+    pub fn defined(defined: DefinedContext) -> Self {
+        Self {
+            name: defined.context.name.clone(),
+            source: Selection::Defined,
+            defined: Some(defined),
+        }
+    }
+}
+
+/// A context defined whole for one invocation, credentials included -- by
+/// the environment, for an ephemeral container or a CI job: never stored,
+/// so nothing of it outlives the process, and nothing about it can be
+/// changed (logged in or out of, given roles...). Its role, if any, is a
+/// URN: it has no aliases.
+#[derive(Debug, Clone)]
+pub struct DefinedContext {
+    pub context: Context,
+    pub credentials: Credentials,
 }
 
 /// The role a context is set to act as, when it is created or logged in

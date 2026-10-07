@@ -111,7 +111,12 @@ fn main() {
 
     let matches = Options::command().get_matches();
     let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    let over = options.context.over(&matches);
+    // A usage error, like clap's own: the environment defines a context
+    // partly, or both defines and names one.
+    let over = options.context.over(&matches).unwrap_or_else(|report| {
+        remora_tui::render_report(&report, options.verbose > 0);
+        std::process::exit(2)
+    });
     init_tracing(&options);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

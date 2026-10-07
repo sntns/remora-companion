@@ -9,8 +9,12 @@ use crate::model::{
 /// out of them.
 ///
 /// Every method that acts on "the" context takes an optional
-/// [`ContextOverride`] (`--context`, `RMRA_CONTEXT`); without one it is the
-/// stored current context, or the only context when there is just one.
+/// [`ContextOverride`] (`--context`, `RMRA_CONTEXT`, or a context defined
+/// whole by the environment); without one it is the stored current context,
+/// or the only context when there is just one. Those that change a context
+/// or its login refuse a defined one ([`Error::Defined`]): it isn't stored.
+///
+/// [`Error::Defined`]: super::Error::Defined
 #[async_trait::async_trait]
 pub trait ContextServiceInterface: Send + Sync {
     async fn list(&self) -> Result<Vec<ContextSummary>>;

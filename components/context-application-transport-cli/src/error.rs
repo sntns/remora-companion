@@ -1,6 +1,8 @@
 use error_stack::Report;
 use remora_context::application::Error as ContextError;
 
+use crate::selection::{ADDRESS_ENV, TOKEN_ENV};
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
@@ -44,7 +46,8 @@ pub(crate) fn context_error(report: Report<ContextError>) -> Report<Error> {
 pub fn hint<C>(report: &Report<C>, program: &str) -> Option<String> {
     Some(match report.downcast_ref::<ContextError>()? {
         ContextError::NoContext => format!(
-            "create one with `{program} context create <name>`, or log in with `{program} login`"
+            "create one with `{program} context create <name>`, or log in with `{program} login` \
+             (or define one with {ADDRESS_ENV} and {TOKEN_ENV})"
         ),
         ContextError::Ambiguous => format!(
             "pick one with `{program} context use <name>`, or `{program} --context <name> …`"
@@ -52,6 +55,10 @@ pub fn hint<C>(report: &Report<C>, program: &str) -> Option<String> {
         ContextError::NotLoggedIn(name) => {
             format!("log in with `{program} --context {name} login`")
         }
+        ContextError::Defined(_) => format!(
+            "unset {ADDRESS_ENV} and {TOKEN_ENV} to use the stored contexts, or name one with \
+             `{program} --context <name> …`"
+        ),
         ContextError::UnknownRole(alias) => format!(
             "add it with `{program} context role add {alias} <role-urn>`, or give the role's URN"
         ),

@@ -151,6 +151,36 @@ with `RMRA_CONFIG`): `contexts/<name>/meta.json` for the endpoint,
 clear for now, like the `sntns` CLI's own configuration; an OS-keyring
 store is planned.
 
+### Without a stored context: CI and containers
+
+An ephemeral container or a CI job can be a platform identity defined by
+the environment alone — no `context create`, no `login`, nothing written to
+disk:
+
+| Variable | |
+|---|---|
+| `RMRA_ADDRESS` | the gateway, `host:port` (or with `http://`/`https://`) — required |
+| `RMRA_TOKEN` | an access key's token — required |
+| `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN (there are no aliases) |
+| `RMRA_PLAINTEXT` | `true` for plaintext h2c (local development stacks only) |
+| `RMRA_CA_FILE` | a PEM certificate authority to trust, on top of the system's |
+| `RMRA_SERVER_NAME` | the name to verify the gateway's certificate against |
+
+```
+export RMRA_ADDRESS=api.eu2.sntns.io:50051 RMRA_TOKEN=…   # from the CI's secrets
+rmra whoami      # context env (from RMRA_ADDRESS and RMRA_TOKEN)
+rmra device ls
+```
+
+It goes by `env` and wins over the current context; `--context` still names
+a stored one over it. `RMRA_ADDRESS` without `RMRA_TOKEN` (or the reverse),
+or `RMRA_CONTEXT` set as well, is a usage error rather than a guess at
+which identity you meant. `context ls` lists it first, marked as from the
+environment; `login`, `logout`, `context create|use|rename|rm` and `context
+role add|rm|assume|drop` refuse to run while it is the one selected (with
+`--context`, they work on that stored context as usual). The role is not
+checked up front: a role the token may not assume fails the first call.
+
 ### List devices
 
 ```
@@ -264,6 +294,22 @@ The same contexts as rmra's, in the same place, with the same commands:
 `remora-etcher login`, `whoami`, `logout`, `context ls|create|use|rename|rm`
 and `context role …`. A context created or logged in with one binary is
 usable with the other; `-c`/`RMRA_CONTEXT` select one, before the command.
+
+`RMRA_ADDRESS` and `RMRA_TOKEN` (plus the optional `RMRA_ASSUME_ROLE`,
+`RMRA_PLAINTEXT`, `RMRA_CA_FILE`, `RMRA_SERVER_NAME`) define a context
+from the environment alone, exactly as for rmra (see [Without a stored
+context](#without-a-stored-context-ci-and-containers)): nothing stored, nothing
+written. E.g. a CI job manufacturing devices from a batch recipe with a
+`factory-provision` step, in a throwaway container:
+
+```
+docker run --rm -v "$PWD:/work" -w /work \
+  -e RMRA_ADDRESS=api.eu2.sntns.io:50051 -e RMRA_TOKEN \
+  -e RMRA_ASSUME_ROLE=urn:sntns:iam:eu2:<tenant>:role:factory \
+  <image-with-remora-etcher> remora-etcher batch run recipe.json
+```
+
+A step's own `"context"` names a stored context over it, as `-c` does.
 
 ### Shell completion
 

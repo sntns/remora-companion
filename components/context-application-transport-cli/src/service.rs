@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use error_stack::{Report, ResultExt};
 use remora_context::{
     application::ContextService,
-    model::{Context, ContextOverride, ContextSummary, Endpoint, Selection, Tls},
+    model::{Context, ContextOverride, ContextSummary, DefinedContext, Endpoint, Selection, Tls},
 };
 use remora_tui as tui;
 use serde::Serialize;
@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::{
     error::{context_error, prompt_error, Error, Result},
     login::RoleArgs,
+    selection::{ADDRESS_ENV, TOKEN_ENV},
 };
 
 /// The production gateway a fresh `login` suggests.
@@ -125,8 +126,19 @@ pub async fn run(
     over: Option<&ContextOverride>,
     program: &str,
 ) -> Result<()> {
+    // Changes to stored contexts wouldn't apply while the environment
+    // defines the context: refused, unless --context names one.
+    if matches!(
+        command,
+        Command::Create { .. }
+            | Command::Use { .. }
+            | Command::Remove { .. }
+            | Command::Rename { .. }
+    ) {
+        refuse_defined(over)?;
+    }
     match command {
-        Command::List { format, quiet } => list(service, format, quiet, program).await,
+        Command::List { format, quiet } => list(service, over, format, quiet, program).await,
         Command::Create {
             name,
             from: Some(base),
@@ -246,6 +258,14 @@ pub async fn run(
         }
         Command::Inspect { names } => {
             let names = if names.is_empty() {
+                if let Some(defined) = defined(over) {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&[Inspected::from_defined(defined)])
+                            .expect("contexts serialize")
+                    );
+                    return Ok(());
+                }
                 vec![selected_name(service, over).await?]
             } else {
                 names
@@ -307,23 +327,46 @@ pub async fn run(
     }
 }
 
-async fn list(service: &ContextService, format: Format, quiet: bool, program: &str) -> Result<()> {
-    let contexts = service.list().await.map_err(context_error)?;
+/// The context the invocation defines, if it does.
+fn defined(over: Option<&ContextOverride>) -> Option<&DefinedContext> {
+    over.and_then(|over| over.defined.as_ref())
+}
+
+async fn list(
+    service: &ContextService,
+    over: Option<&ContextOverride>,
+    format: Format,
+    quiet: bool,
+    program: &str,
+) -> Result<()> {
+    let mut contexts = service.list().await.map_err(context_error)?;
     if quiet {
+        // Names to pass to --context: a defined context has none.
         for summary in &contexts {
             println!("{}", summary.context.name);
         }
         return Ok(());
     }
+    // What runs is the environment's context, first, and no stored one.
+    let defined = defined(over);
+    if defined.is_some() {
+        for summary in &mut contexts {
+            summary.current = false;
+        }
+    }
     match format {
         Format::Json => {
-            let inspected: Vec<_> = contexts.into_iter().map(Inspected::from).collect();
+            let inspected: Vec<_> = defined
+                .map(Inspected::from_defined)
+                .into_iter()
+                .chain(contexts.into_iter().map(Inspected::from))
+                .collect();
             println!(
                 "{}",
                 serde_json::to_string_pretty(&inspected).expect("contexts serialize")
             );
         }
-        Format::Table if contexts.is_empty() => {
+        Format::Table if contexts.is_empty() && defined.is_none() => {
             tui::info(format!(
                 "No context yet. Start with {}",
                 tui::accent(format!("{program} login"))
@@ -331,6 +374,26 @@ async fn list(service: &ContextService, format: Format, quiet: bool, program: &s
         }
         Format::Table => {
             let mut table = tui::Table::new(["name", "address", "login", "role", "description"]);
+            if let Some(defined) = defined {
+                let context = &defined.context;
+                let mut address = context.endpoint.address.clone();
+                if context.endpoint.tls.disabled {
+                    address.push_str(" (plaintext)");
+                }
+                table.row(
+                    [
+                        format!("{} *", context.name),
+                        address,
+                        format!("{} (environment)", defined.credentials.kind()),
+                        context
+                            .assumed_role
+                            .clone()
+                            .unwrap_or_else(|| "—".to_owned()),
+                        format!("defined by {ADDRESS_ENV} and {TOKEN_ENV}, not stored"),
+                    ],
+                    true,
+                );
+            }
             for summary in &contexts {
                 let name = if summary.current {
                     format!("{} *", summary.context.name)
@@ -374,6 +437,19 @@ async fn selected_name(service: &ContextService, over: Option<&ContextOverride>)
     }
 }
 
+/// The service's own refusal to change a context the invocation defines
+/// (`over`), for the commands that change stored contexts without
+/// selecting one (`context create`, `use`...): while the environment
+/// defines the context, a change to the stored ones would not apply.
+pub(crate) fn refuse_defined(over: Option<&ContextOverride>) -> Result<()> {
+    match over {
+        Some(over) if over.defined.is_some() => Err(context_error(Report::new(
+            remora_context::application::Error::Defined(over.name.clone()),
+        ))),
+        _ => Ok(()),
+    }
+}
+
 /// The service's own "no context" failure, for when the transport is the
 /// one finding there's none: it reads, and is hinted, alike.
 pub(crate) fn no_context() -> Report<Error> {
@@ -395,12 +471,14 @@ pub(crate) fn describe_selection(selection: Selection) -> &'static str {
         Selection::Environment => "from RMRA_CONTEXT",
         Selection::Current => "current",
         Selection::Only => "the only context",
+        Selection::Defined => "from RMRA_ADDRESS and RMRA_TOKEN",
     }
 }
 
 /// `context inspect`'s JSON: the stored context plus what isn't in it.
 /// Never any secret -- only the kind of credentials, under a key of its own
 /// (the context's `login` is the context whose login it shares).
+/// A context the environment defines reads as one, marked `environment`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Inspected {
@@ -408,6 +486,8 @@ struct Inspected {
     context: Context,
     current: bool,
     credentials: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    environment: bool,
 }
 
 impl From<ContextSummary> for Inspected {
@@ -416,6 +496,18 @@ impl From<ContextSummary> for Inspected {
             context: summary.context,
             current: summary.current,
             credentials: summary.credentials.map(|kind| kind.to_string()),
+            environment: false,
+        }
+    }
+}
+
+impl Inspected {
+    fn from_defined(defined: &DefinedContext) -> Self {
+        Self {
+            context: defined.context.clone(),
+            current: true,
+            credentials: Some(defined.credentials.kind().to_string()),
+            environment: true,
         }
     }
 }
