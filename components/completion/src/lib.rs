@@ -196,22 +196,30 @@ fn shell_from_env() -> Option<Shell> {
 }
 
 /// The startup file to edit, and the line enabling `bin`'s completion there.
+/// Guarded by `bin` being on the PATH, so the startup file keeps working
+/// (silently, and with a zero status) once `bin` is uninstalled.
 fn enable_line(bin: &str, shell: Shell) -> (&'static str, String) {
     match shell {
-        Shell::Bash => ("~/.bashrc", format!("source <(COMPLETE=bash {bin})")),
-        Shell::Zsh => ("~/.zshrc", format!("source <(COMPLETE=zsh {bin})")),
+        Shell::Bash => (
+            "~/.bashrc",
+            format!("if command -v {bin} >/dev/null; then source <(COMPLETE=bash {bin}); fi"),
+        ),
+        Shell::Zsh => (
+            "~/.zshrc",
+            format!("if command -v {bin} >/dev/null; then source <(COMPLETE=zsh {bin}); fi"),
+        ),
         Shell::Fish => (
             "~/.config/fish/config.fish",
-            format!("COMPLETE=fish {bin} | source"),
+            format!("if command -q {bin}; COMPLETE=fish {bin} | source; end"),
         ),
         Shell::Elvish => (
             "~/.config/elvish/rc.elv",
-            format!("eval (E:COMPLETE=elvish {bin} | slurp)"),
+            format!("if (has-external {bin}) {{ eval (E:COMPLETE=elvish {bin} | slurp) }}"),
         ),
         Shell::Powershell => (
             "$PROFILE",
             format!(
-                "$env:COMPLETE = \"powershell\"; {bin} | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE"
+                "if (Get-Command {bin} -ErrorAction SilentlyContinue) {{ $env:COMPLETE = \"powershell\"; {bin} | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE }}"
             ),
         ),
     }
@@ -249,12 +257,13 @@ mod tests {
             enable_line("remora-etcher", Shell::Zsh),
             (
                 "~/.zshrc",
-                "source <(COMPLETE=zsh remora-etcher)".to_owned()
+                "if command -v remora-etcher >/dev/null; then source <(COMPLETE=zsh remora-etcher); fi"
+                    .to_owned()
             )
         );
         assert_eq!(
             enable_line("rmra", Shell::Powershell).1,
-            "$env:COMPLETE = \"powershell\"; rmra | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE"
+            "if (Get-Command rmra -ErrorAction SilentlyContinue) { $env:COMPLETE = \"powershell\"; rmra | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE }"
         );
     }
 }

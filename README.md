@@ -25,24 +25,38 @@ macOS / Linux:
 
 ```
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/remora-etcher-installer.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion/releases/latest/download/remora-etcher-installer.ps1 | iex"
 ```
 
 Homebrew:
 
 ```
 brew install sntns/tap/rmra
+brew install sntns/tap/remora-etcher
 ```
 
-Use `remora-etcher` in place of `rmra` for the image tool. The installers
-put the binary in `~/.local/bin` (`RMRA_INSTALL_DIR=/path` to choose) and
-add it to your PATH. Linux binaries are static (musl): one binary for any
-distribution.
+Install either one or both. The installers put the binary in
+`~/.local/bin` (`RMRA_INSTALL_DIR=/path` to choose) and add it to your
+PATH. Linux binaries are static (musl): one binary for any distribution.
+
+Then enable shell completion, e.g. for zsh (`rmra completion` gives the
+line for your own shell):
+
+```
+rmra completion zsh >> ~/.zshrc
+remora-etcher completion zsh >> ~/.zshrc
+```
+
+Each appends a line that only loads when its binary is on the PATH, e.g.
+`if command -v rmra >/dev/null; then source <(COMPLETE=zsh rmra); fi`, so
+it stays harmless once the tool is uninstalled.
 
 `rmra update` (or `remora-etcher update`) installs the latest release over
 the running one, the way it was installed (`--check` only tells); a Homebrew
@@ -88,7 +102,7 @@ create) another context.
 
 ```
 rmra completion            # shows the line to add for your shell, e.g. for zsh:
-echo 'source <(COMPLETE=zsh rmra)' >> ~/.zshrc
+rmra completion zsh >> ~/.zshrc     # i.e. if command -v rmra >/dev/null; then source <(COMPLETE=zsh rmra); fi
 ```
 
 Bash, zsh, fish, elvish and PowerShell. Beyond commands and options, Tab
@@ -240,7 +254,7 @@ usable with the other; `-c`/`RMRA_CONTEXT` select one, before the command.
 
 ```
 remora-etcher completion   # shows the line to add for your shell, e.g. for zsh:
-echo 'source <(COMPLETE=zsh remora-etcher)' >> ~/.zshrc
+remora-etcher completion zsh >> ~/.zshrc     # i.e. if command -v remora-etcher >/dev/null; then source <(COMPLETE=zsh remora-etcher); fi
 ```
 
 Same shells and mechanism as rmra's. Beyond commands, options and paths,
