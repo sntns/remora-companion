@@ -42,6 +42,9 @@ allow = [
     # permissive.
     "ISC",
     "CDLA-Permissive-2.0",
+    # libbz2-rs-sys, the pure-Rust bzip2 behind remora-flash-adapter-file
+    # (decompressing Yocto's .wic.bz2): libbzip2's own BSD-style license.
+    "bzip2-1.0.6",
 ]
 # This project is Apache-2.0 (see Cargo.toml `license = "Apache-2.0"`), so
 # copyleft dependencies (GPL, AGPL, LGPL, ...) are not on the allow list

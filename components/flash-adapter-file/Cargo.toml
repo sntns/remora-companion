@@ -1,0 +1,19 @@
+[package]
+name = "remora-flash-adapter-file"
+description = "Concrete ImageSourceAdapter: reads an image file, raw or compressed (bzip2, gzip, zstd), or the one a .bmaptar bundle carries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-flash = { path = "../flash" }
+error-stack.workspace = true
+bmap-parser = "0.2"
+tar = "0.4"
+# Pure-Rust backend by default (libbz2-rs-sys), nothing to link on any host.
+bzip2 = "0.6"
+flate2 = "1"
+# The same zstd (C libzstd, vendored and built by zstd-sys) backhand
+# already links into remora-etcher for squashfs.
+zstd = { version = "0.13", default-features = false }

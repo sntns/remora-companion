@@ -1,3 +1,3 @@
 mod request;
 
-pub use request::{FlashOutcome, FlashRequest};
+pub use request::{BmapSource, FlashOutcome, FlashRequest};

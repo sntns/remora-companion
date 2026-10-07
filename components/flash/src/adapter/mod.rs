@@ -1,5 +1,2 @@
-mod error;
-mod service;
-
-pub use error::{Error, Result};
-pub use service::{BlockMap, BmapAdapter, BmapAdapterService};
+pub mod bmap;
+pub mod source;

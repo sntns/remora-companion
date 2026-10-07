@@ -250,12 +250,19 @@ Tab completes disks (`remora-etcher flash --device <Tab>`, `disk info
 ### Flash an image to a USB stick or SD card
 
 ```
-remora-etcher flash --image remora.wic --device /dev/sdb
+remora-etcher flash --image remora.wic.bmaptar --device /dev/sdb
 ```
 
-Sparse-aware and checksum-verified whenever a `.bmap` file sits next to the
-image (auto-discovered as `<image>.bmap`, same convention as `bmaptool`;
-skip it with `--no-bmap`). The device may be given by any path to it
+The image is best a `.bmaptar`, as meta-remora builds it: the compressed
+image and its `.bmap` in one tar, read in place (nothing to extract first).
+A plain image works too, raw or compressed (bzip2, gzip, zstd,
+decompressed on the fly; bzip2 on every core when it's pbzip2's
+multi-stream output, as Yocto's is). The progress bar follows the copy
+through the image. Sparse-aware and checksum-verified whenever there's a `.bmap`:
+the bundle's own, else one next to the image (`<image>.bmap`, or the
+image's name without its compression extension, `remora.wic.bz2` →
+`remora.wic.bmap`, same convention as `bmaptool`); pass one with `--bmap`,
+or skip it with `--no-bmap`. The device may be given by any path to it
 (`/dev/disk/by-id/…`, a symlink): the checks run on the disk it really
 is. Refuses to overwrite what looks like the system
 disk, refuses a non-removable disk unless you pass `--force`, and makes you
