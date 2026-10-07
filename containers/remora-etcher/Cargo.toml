@@ -20,6 +20,7 @@ remora-disk-application-transport-cli = { path = "../../components/disk-applicat
 remora-flash = { path = "../../components/flash" }
 remora-flash-application = { path = "../../components/flash-application" }
 remora-flash-adapter-bmap = { path = "../../components/flash-adapter-bmap" }
+remora-flash-adapter-file = { path = "../../components/flash-adapter-file" }
 remora-flash-application-transport-cli = { path = "../../components/flash-application-transport-cli" }
 remora-image = { path = "../../components/image" }
 remora-image-application = { path = "../../components/image-application" }

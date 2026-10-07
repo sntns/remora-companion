@@ -1,6 +1,7 @@
 use std::fs::File;
 
 use super::error::Result;
+use crate::adapter::source::ImageStream;
 
 /// Parsed `.bmap` file plus the handful of fields callers need to report
 /// progress (mapped size vs. full image size). Only ever produced by a real
@@ -36,8 +37,13 @@ impl BlockMap {
 /// `bmap-parser` copy for a test double without touching the flash use case.
 pub trait BmapAdapter: Send + Sync {
     fn parse(&self, xml: &str) -> Result<BlockMap>;
-    fn copy_with_bmap(&self, input: &mut File, output: &mut File, map: &BlockMap) -> Result<()>;
-    fn copy_without_bmap(&self, input: &mut File, output: &mut File) -> Result<()>;
+    fn copy_with_bmap(
+        &self,
+        input: &mut ImageStream,
+        output: &mut File,
+        map: &BlockMap,
+    ) -> Result<()>;
+    fn copy_without_bmap(&self, input: &mut ImageStream, output: &mut File) -> Result<()>;
 }
 
 /// Injectable handle to whatever `BmapAdapter` was wired at startup.

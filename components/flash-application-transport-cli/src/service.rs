@@ -2,26 +2,32 @@ use std::path::{Path, PathBuf};
 
 use error_stack::{Report, ResultExt};
 use remora_disk::application::DiskService;
-use remora_flash::{application::FlashService, model::FlashRequest};
+use remora_flash::{
+    application::FlashService,
+    model::{BmapSource, FlashRequest},
+};
 use remora_format::human_size;
 
 use super::error::{Error, Result};
 
 #[derive(Debug, clap::Args)]
 pub struct Command {
-    /// Source disk image.
+    /// Source disk image: a `.bmaptar` bundle (the image and its .bmap in
+    /// one tar, as meta-remora builds them), or a plain image, raw or
+    /// compressed (bzip2, gzip).
     #[arg(long)]
     image: PathBuf,
 
     /// .bmap file describing the image's mapped block ranges. Defaults to
-    /// `<image>.bmap` if that file exists next to the image (same
-    /// convention as bmaptool); pass --no-bmap to skip this.
+    /// the one a `.bmaptar` bundle carries; for a plain image, to
+    /// `<image>.bmap`, else to the image's name without its compression
+    /// extension plus `.bmap` (`x.wic.bz2` -> `x.wic.bmap`), whichever
+    /// exists (same convention as bmaptool); pass --no-bmap to skip this.
     #[arg(long)]
     bmap: Option<PathBuf>,
 
-    /// Skip .bmap auto-discovery and copy the whole image verbatim (no
-    /// sparse skip, no checksum verification), even if a `<image>.bmap`
-    /// file exists next to the image.
+    /// Copy the whole image verbatim (no sparse skip, no checksum
+    /// verification), ignoring any .bmap, bundled or next to the image.
     #[arg(long, conflicts_with = "bmap")]
     no_bmap: bool,
 
@@ -52,10 +58,10 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
         yes,
     } = command;
 
-    let bmap = if no_bmap {
-        None
-    } else {
-        bmap.or_else(|| default_bmap_path(&image))
+    let bmap = match bmap {
+        Some(path) => BmapSource::File(path),
+        None if no_bmap => BmapSource::None,
+        None => BmapSource::Auto,
     };
 
     // Shown before the guard runs, so a refused target is still visible --
@@ -110,16 +116,6 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
     Ok(())
 }
 
-/// The sibling `<image>.bmap` file, if one exists — mirroring bmaptool's own
-/// convention for locating a bmap next to its image, so callers don't need
-/// to pass both paths on the command line.
-fn default_bmap_path(image: &Path) -> Option<PathBuf> {
-    let mut candidate = image.as_os_str().to_owned();
-    candidate.push(".bmap");
-    let candidate = PathBuf::from(candidate);
-    candidate.is_file().then_some(candidate)
-}
-
 fn disk_line(info: &remora_disk::model::DiskInfo) -> String {
     let yes_no = |on: bool| if on { "yes" } else { "no" };
     format!(
@@ -155,62 +151,7 @@ fn confirm(device: &Path) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        sync::atomic::{AtomicU32, Ordering},
-    };
-
     use super::*;
-
-    static FIXTURE_COUNTER: AtomicU32 = AtomicU32::new(0);
-
-    /// A throwaway directory under the OS temp dir, removed on drop.
-    struct TempDir {
-        dir: PathBuf,
-    }
-
-    impl TempDir {
-        fn new() -> Self {
-            let id = FIXTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let dir = std::env::temp_dir().join(format!(
-                "remora-flash-cli-test-{}-{}",
-                std::process::id(),
-                id
-            ));
-            fs::create_dir_all(&dir).unwrap();
-            Self { dir }
-        }
-
-        fn path(&self, name: &str) -> PathBuf {
-            self.dir.join(name)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.dir);
-        }
-    }
-
-    #[test]
-    fn default_bmap_path_finds_a_sibling_bmap_file() {
-        let dir = TempDir::new();
-        let image = dir.path("disk.img");
-        let bmap = dir.path("disk.img.bmap");
-        fs::write(&image, b"image").unwrap();
-        fs::write(&bmap, b"<bmap/>").unwrap();
-
-        assert_eq!(default_bmap_path(&image), Some(bmap));
-    }
-
-    #[test]
-    fn default_bmap_path_is_none_without_a_sibling_bmap_file() {
-        let dir = TempDir::new();
-        let image = dir.path("disk.img");
-        fs::write(&image, b"image").unwrap();
-
-        assert_eq!(default_bmap_path(&image), None);
-    }
 
     #[test]
     fn no_bmap_conflicts_with_bmap_on_the_command_line() {

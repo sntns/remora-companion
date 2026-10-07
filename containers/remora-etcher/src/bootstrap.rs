@@ -34,8 +34,12 @@ use remora_factory::{
 use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
-use remora_flash::{adapter::BmapAdapterService, application::FlashService};
+use remora_flash::{
+    adapter::{bmap::BmapAdapterService, source::ImageSourceAdapterService},
+    application::FlashService,
+};
 use remora_flash_adapter_bmap::BmapAdapterImpl;
+use remora_flash_adapter_file::ImageSourceAdapterImpl;
 use remora_flash_application::FlashControllerImpl;
 use remora_identity::{adapter::KeygenAdapterService, application::IdentityService};
 use remora_identity_adapter_keygen::KeygenAdapterImpl;
@@ -118,6 +122,14 @@ pub async fn wire() -> Services {
         .expect("DiskService was just registered");
 
     container
+        .set_type(ImageSourceAdapterService::new(ImageSourceAdapterImpl))
+        .await;
+    let image_source = container
+        .get_type::<ImageSourceAdapterService>()
+        .await
+        .expect("ImageSourceAdapterService was just registered");
+
+    container
         .set_type(BmapAdapterService::new(BmapAdapterImpl))
         .await;
     let bmap_adapter = container
@@ -128,6 +140,7 @@ pub async fn wire() -> Services {
     container
         .set_type(FlashService::new(FlashControllerImpl::new(
             disk.clone(),
+            image_source,
             bmap_adapter,
         )))
         .await;

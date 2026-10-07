@@ -14,12 +14,12 @@ use super::error::Result;
 /// fed a caller-supplied `DiskInfo` would check whatever disk the caller
 /// described, not the one `request.device` opens.
 ///
-/// `flash` reports coarse `Phase` events through `ctx`, not fine-grained
-/// byte progress: the destination is a raw block device, whose reported
-/// size is its fixed capacity, not "bytes written so far" -- unlike a
-/// regular output file, there's no size to poll (see `FlashControllerImpl`).
-/// `ctx.cancel` is checked before the copy starts; once under way, the
-/// underlying `bmap_parser` copy is not preemptible.
+/// `flash` reports its advancement through `ctx` as `Progress` over the
+/// image (how far into it the copy has read; the image's size from its
+/// `.bmap`, else from the raw image itself, else unknown), not as bytes
+/// landed on the device: a raw block device's size is its fixed capacity,
+/// there's no "written so far" to poll. `ctx.cancel` stops the copy at its
+/// next read of the image.
 #[async_trait::async_trait]
 pub trait FlashServiceInterface: Send + Sync {
     /// The disk `device` resolves to, if it's safe to overwrite: never the
