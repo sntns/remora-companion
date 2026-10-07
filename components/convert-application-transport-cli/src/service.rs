@@ -8,9 +8,10 @@ use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
-    /// Decode `image` (its container format detected from its own
-    /// extension: `.qcow2`, `.gz`, or a plain raw copy for anything else)
-    /// into a plain raw disk image at `--output`.
+    /// Decode `image` (its container format named by its own extension:
+    /// `.qcow2`, `.gz`, `.zst`, `.bz2`, `.bmaptar`, or a plain raw copy for
+    /// anything else, its content checked against it) into a plain, sparse
+    /// raw disk image at `--output`.
     ToRaw {
         image: PathBuf,
 
@@ -20,7 +21,8 @@ pub enum Command {
 
     /// Encode `raw` (a plain raw disk image) into `--output`, whose own
     /// extension names the destination container format (`.qcow2`, `.gz`,
-    /// or a plain raw copy for anything else).
+    /// `.zst`, `.bz2`, `.bmaptar` as meta-remora builds it, its `.bmap` made
+    /// from the raw image's holes, or a plain raw copy for anything else).
     FromRaw {
         raw: PathBuf,
 

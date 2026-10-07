@@ -53,6 +53,9 @@ remora-convert = { path = "../../components/convert" }
 remora-convert-application = { path = "../../components/convert-application" }
 remora-convert-adapter-gzip = { path = "../../components/convert-adapter-gzip" }
 remora-convert-adapter-qcow2 = { path = "../../components/convert-adapter-qcow2" }
+remora-convert-adapter-zstd = { path = "../../components/convert-adapter-zstd" }
+remora-convert-adapter-bzip2 = { path = "../../components/convert-adapter-bzip2" }
+remora-convert-adapter-bmaptar = { path = "../../components/convert-adapter-bmaptar" }
 remora-convert-application-transport-cli = { path = "../../components/convert-application-transport-cli" }
 remora-batch = { path = "../../components/batch" }
 remora-batch-application = { path = "../../components/batch-application" }

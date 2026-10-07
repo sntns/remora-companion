@@ -8,5 +8,6 @@ publish.workspace = true
 
 [dependencies]
 remora-convert = { path = "../convert" }
+remora-unpack = { path = "../unpack" }
 error-stack.workspace = true
 flate2 = "1"

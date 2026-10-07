@@ -1,3 +1,3 @@
 mod controller;
 
-pub use controller::ConvertControllerImpl;
+pub use controller::{ContainerFormats, ConvertControllerImpl};

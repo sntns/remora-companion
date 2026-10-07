@@ -511,12 +511,36 @@ and the acknowledgement.
 ### Convert between image formats
 
 ```
+remora-etcher convert to-raw laplaylist-image-f3apl.wic.bmaptar --output remora.wic
+remora-etcher convert from-raw remora.wic --output laplaylist-image-f3apl.wic.bmaptar
 remora-etcher convert to-raw remora.wic.qcow2 --output remora.wic
-remora-etcher convert from-raw remora.wic --output remora.wic.gz
+remora-etcher convert from-raw remora.wic --output remora.wic.zst
 ```
 
-Reads and writes qcow2 and gzip directly, with the format picked from each
-path's own extension — no `qemu-img` or `gzip` binary required.
+Reads and writes `.bmaptar`, qcow2, zstd, gzip and bzip2 directly, with
+the format picked from each path's own extension (`.bmaptar`, `.qcow2`,
+`.zst`, `.gz`, `.bz2`; anything else is a raw image) — no `bmaptool`,
+`tar`, `zstd`, `qemu-img` or `gzip` binary required. A file read must be
+what its name says: a compressed image or a bundle named as a raw one (or
+as another format) is refused, never copied as is.
+
+A `.bmaptar` is written as meta-remora builds it, so `flash` (or `tar xf`
+then `bmaptool copy`) takes it like a shipped one: a plain tar of
+`<name>.bmap`, then `<name>.zst` (zstd level 3, on every core), where
+`<name>` is the output's name without `.bmaptar`. The `.bmap` is
+`bmaptool create`'s, to the byte: the raw image's data blocks, as its holes
+say, not its zero blocks — a block written with zeros is still written to
+the disk. Decoding one goes the other way, into a sparse raw image: only
+the `.bmap`'s ranges are written, each checked against its checksum. So a
+shipped image converted to raw, provisioned (`image`, `identity`, `config`,
+which keep its holes) and converted back flashes the same blocks plus what
+was added. A raw image decoded from a plain `.zst`/`.gz`/`.bz2` comes out
+sparse too, its zero blocks left as holes (as `zstd -d` does), so a
+`.bmaptar` made from it maps those as unused.
+
+The output is written next to its destination and renamed into place
+once complete: a failed or interrupted conversion leaves no partial file
+behind under the destination's name.
 
 ---
 
@@ -540,8 +564,8 @@ is split further into:
 - `components/<vertical>-application` — the use case, implemented against
   injected ports only.
 - `components/<vertical>-adapter-<name>` — a concrete port implementation
-  (e.g. `-adapter-ext4` wraps `am-fs-ext4`; `convert` has two, one per
-  container format, both implementing the same `ContainerFormatAdapter`
+  (e.g. `-adapter-ext4` wraps `am-fs-ext4`; `convert` has five, one per
+  container format, all implementing the same `ContainerFormatAdapter`
   port).
 - `components/<vertical>-application-transport-cli` — the `clap` subcommands
   for that vertical.
@@ -555,7 +579,8 @@ path really is, and `ota` asks `device`'s `DeviceService` which devices a
 selector names.
 
 Small shared utility crates with no vertical prefix (`remora-fs-walk`,
-`remora-scratch`, `remora-format`, `remora-progress`, `remora-tui`,
+`remora-scratch`, `remora-unpack` — reading a `.bmaptar` or compressed
+image, for `flash` and `convert` — `remora-format`, `remora-progress`, `remora-tui`,
 `remora-completion`, and `remora-platform-grpc` — the vendored
 sntns-platform protos, compiled with the pure-Rust
 [protox](https://docs.rs/protox) so no `protoc` is needed) mirror

@@ -1,0 +1,17 @@
+[package]
+name = "remora-convert-adapter-bzip2"
+description = "Concrete ContainerFormatAdapter: bzip2 via the bzip2 crate, decoded on every core when it's pbzip2's"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-convert = { path = "../convert" }
+remora-unpack = { path = "../unpack" }
+error-stack.workspace = true
+# Pure-Rust backend by default (libbz2-rs-sys), nothing to link on any host.
+bzip2 = "0.6"
+
+[dev-dependencies]
+remora-scratch = { path = "../scratch" }

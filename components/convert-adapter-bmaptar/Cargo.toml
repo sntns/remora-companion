@@ -1,0 +1,26 @@
+[package]
+name = "remora-convert-adapter-bmaptar"
+description = "Concrete ContainerFormatAdapter: a .bmaptar as meta-remora builds it (an uncompressed tar of a bmaptool-style .bmap, then the zstd'd image), read in place and written from a sparse raw image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-convert = { path = "../convert" }
+remora-unpack = { path = "../unpack" }
+error-stack.workspace = true
+# Parsing the bundled .bmap and the checksum-verified sparse copy out of
+# the bundle, the same as flash's.
+bmap-parser = "0.2"
+sha2.workspace = true
+tar = "0.4"
+# zstdmt: compress on every core, as oe-core's `zstd --threads` does.
+zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
+
+[target.'cfg(unix)'.dependencies]
+# lseek(SEEK_DATA/SEEK_HOLE): which blocks of the raw image hold data.
+libc = "0.2"
+
+[dev-dependencies]
+remora-scratch = { path = "../scratch" }

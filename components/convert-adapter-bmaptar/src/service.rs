@@ -2,14 +2,18 @@ use std::path::Path;
 
 use remora_convert::adapter::{ContainerFormatAdapter, Result};
 
-use crate::{decode, encode, header::MAGIC};
+use crate::{decode, encode};
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Qcow2AdapterImpl;
+pub struct BmaptarAdapterImpl;
 
-impl ContainerFormatAdapter for Qcow2AdapterImpl {
+impl ContainerFormatAdapter for BmaptarAdapterImpl {
     fn recognizes(&self, header: &[u8]) -> bool {
-        header.starts_with(&MAGIC)
+        remora_unpack::is_tar(header)
+    }
+
+    fn decoded_size(&self, input: &Path) -> Result<Option<u64>> {
+        decode::open(input).map(|(_, bmap)| Some(bmap.image_size()))
     }
 
     fn decode_to_raw(&self, input: &Path, output_raw: &Path) -> Result<()> {

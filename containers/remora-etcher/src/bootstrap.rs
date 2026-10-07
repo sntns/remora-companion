@@ -18,9 +18,12 @@ use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCreden
 use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
 use remora_convert::application::ConvertService;
+use remora_convert_adapter_bmaptar::BmaptarAdapterImpl;
+use remora_convert_adapter_bzip2::Bzip2AdapterImpl;
 use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
-use remora_convert_application::ConvertControllerImpl;
+use remora_convert_adapter_zstd::ZstdAdapterImpl;
+use remora_convert_application::{ContainerFormats, ConvertControllerImpl};
 use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
 use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
@@ -263,20 +266,20 @@ pub async fn wire() -> Services {
         .await
         .expect("ConfigService was just registered");
 
-    // The convert vertical injects both format adapters directly (like the
+    // The convert vertical injects its format adapters directly (like the
     // image vertical's ext4_fs/vfat_fs above), not through the busybody
-    // container: ContainerFormatAdapter is implemented by two distinct
+    // container: ContainerFormatAdapter is implemented by several distinct
     // concrete types at once, which would collide under the same wrapper
     // TypeId if registered there.
-    let qcow2_adapter: Arc<dyn remora_convert::adapter::ContainerFormatAdapter> =
-        Arc::new(Qcow2AdapterImpl);
-    let gzip_adapter: Arc<dyn remora_convert::adapter::ContainerFormatAdapter> =
-        Arc::new(GzipAdapterImpl);
-
     container
         .set_type(ConvertService::new(ConvertControllerImpl::new(
-            qcow2_adapter,
-            gzip_adapter,
+            ContainerFormats {
+                qcow2: Arc::new(Qcow2AdapterImpl),
+                gzip: Arc::new(GzipAdapterImpl),
+                zstd: Arc::new(ZstdAdapterImpl),
+                bzip2: Arc::new(Bzip2AdapterImpl),
+                bmaptar: Arc::new(BmaptarAdapterImpl),
+            },
         )))
         .await;
     let convert = container

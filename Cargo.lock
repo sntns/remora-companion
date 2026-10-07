@@ -2871,8 +2871,11 @@ dependencies = [
  "remora-context-adapter-file",
  "remora-context-application",
  "remora-convert",
+ "remora-convert-adapter-bmaptar",
+ "remora-convert-adapter-bzip2",
  "remora-convert-adapter-gzip",
  "remora-convert-adapter-qcow2",
+ "remora-convert-adapter-zstd",
  "remora-convert-application",
  "remora-factory",
  "remora-factory-adapter-local",
@@ -3152,12 +3155,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-convert-adapter-bmaptar"
+version = "0.12.1"
+dependencies = [
+ "bmap-parser",
+ "error-stack",
+ "libc",
+ "remora-convert",
+ "remora-scratch",
+ "remora-unpack",
+ "sha2 0.11.0",
+ "tar",
+ "zstd",
+]
+
+[[package]]
+name = "remora-convert-adapter-bzip2"
+version = "0.12.1"
+dependencies = [
+ "bzip2",
+ "error-stack",
+ "remora-convert",
+ "remora-scratch",
+ "remora-unpack",
+]
+
+[[package]]
 name = "remora-convert-adapter-gzip"
 version = "0.12.1"
 dependencies = [
  "error-stack",
  "flate2",
  "remora-convert",
+ "remora-unpack",
 ]
 
 [[package]]
@@ -3169,15 +3199,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-convert-adapter-zstd"
+version = "0.12.1"
+dependencies = [
+ "error-stack",
+ "remora-convert",
+ "remora-scratch",
+ "remora-unpack",
+ "zstd",
+]
+
+[[package]]
 name = "remora-convert-application"
 version = "0.12.1"
 dependencies = [
  "async-trait",
  "error-stack",
  "remora-convert",
+ "remora-convert-adapter-bmaptar",
+ "remora-convert-adapter-bzip2",
  "remora-convert-adapter-gzip",
  "remora-convert-adapter-qcow2",
+ "remora-convert-adapter-zstd",
  "remora-progress",
+ "remora-scratch",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -3318,8 +3363,11 @@ dependencies = [
  "remora-context-application",
  "remora-context-application-transport-cli",
  "remora-convert",
+ "remora-convert-adapter-bmaptar",
+ "remora-convert-adapter-bzip2",
  "remora-convert-adapter-gzip",
  "remora-convert-adapter-qcow2",
+ "remora-convert-adapter-zstd",
  "remora-convert-application",
  "remora-convert-application-transport-cli",
  "remora-device",
@@ -3517,6 +3565,8 @@ dependencies = [
  "bzip2",
  "error-stack",
  "remora-context",
+ "remora-convert",
+ "remora-convert-adapter-bmaptar",
  "remora-disk",
  "remora-flash",
  "remora-flash-adapter-bmap",
@@ -3528,6 +3578,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "zstd",
 ]
 
 [[package]]

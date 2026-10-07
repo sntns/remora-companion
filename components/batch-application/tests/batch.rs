@@ -1,8 +1,8 @@
 //! End-to-end exercise of the batch vertical, reproducing the motivating
-//! example: convert a packaged (gzip) image to raw, provision it (an
-//! identity, a config file, and a directly-injected file), then convert it
-//! back to its original packaged format — as one `BatchService::run` call
-//! instead of five separate ones.
+//! example: convert a packaged (gzip, or a `.bmaptar` as meta-remora ships
+//! it) image to raw, provision it (an identity, a config file, and a
+//! directly-injected file), then convert it back to its original packaged
+//! format — as one `BatchService::run` call instead of five separate ones.
 //!
 //! Disk fixture built the same way as `remora-config-application`'s
 //! `tests/config_upload.rs`: a real MBR partition table (`sfdisk`) plus a
@@ -26,9 +26,12 @@ use remora_config_application::ConfigControllerImpl;
 use remora_context::application::ContextService;
 use remora_context_application::ContextControllerImpl;
 use remora_convert::{adapter::ContainerFormatAdapter, application::ConvertService};
+use remora_convert_adapter_bmaptar::BmaptarAdapterImpl;
+use remora_convert_adapter_bzip2::Bzip2AdapterImpl;
 use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
-use remora_convert_application::ConvertControllerImpl;
+use remora_convert_adapter_zstd::ZstdAdapterImpl;
+use remora_convert_application::{ContainerFormats, ConvertControllerImpl};
 use remora_factory::{
     adapter::{
         credential::CredentialWriterAdapterService,
@@ -216,11 +219,18 @@ fn read_shared_partition_file(disk: &Path, dest_path: &str) -> Vec<u8> {
         .unwrap()
 }
 
+fn convert() -> ConvertService {
+    ConvertService::new(ConvertControllerImpl::new(ContainerFormats {
+        qcow2: Arc::new(Qcow2AdapterImpl),
+        gzip: Arc::new(GzipAdapterImpl),
+        zstd: Arc::new(ZstdAdapterImpl),
+        bzip2: Arc::new(Bzip2AdapterImpl),
+        bmaptar: Arc::new(BmaptarAdapterImpl),
+    }))
+}
+
 fn controller() -> BatchControllerImpl {
-    let convert = ConvertService::new(ConvertControllerImpl::new(
-        Arc::new(Qcow2AdapterImpl),
-        Arc::new(GzipAdapterImpl),
-    ));
+    let convert = convert();
 
     let image = ImageService::new(ImageControllerImpl::new(
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
@@ -265,9 +275,25 @@ fn controller() -> BatchControllerImpl {
     ignore = "requires sfdisk/mke2fs, Linux-only dev tools"
 )]
 async fn runs_the_convert_provision_convert_back_recipe() {
+    convert_provision_convert_back(&GzipAdapterImpl, "gz").await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mke2fs, Linux-only dev tools"
+)]
+async fn runs_the_recipe_on_a_bmaptar() {
+    // What a factory job does with the shipped .wic.bmaptar.
+    convert_provision_convert_back(&BmaptarAdapterImpl, "wic.bmaptar").await;
+}
+
+/// The recipe, from and back to an image packaged by `packager` (named
+/// `*.{extension}`).
+async fn convert_provision_convert_back(packager: &dyn ContainerFormatAdapter, extension: &str) {
     let raw = build_raw_disk_with_shared_partition();
-    let packaged = temp_path("packaged").with_extension("gz");
-    GzipAdapterImpl.encode_from_raw(&raw, &packaged).unwrap();
+    let packaged = temp_path("packaged").with_extension(extension);
+    packager.encode_from_raw(&raw, &packaged).unwrap();
 
     let identity_inputs = temp_path("identity-inputs");
     fs::create_dir_all(&identity_inputs).unwrap();
@@ -280,7 +306,7 @@ async fn runs_the_convert_provision_convert_back_recipe() {
     fs::write(&inject_source, b"hello from batch\n").unwrap();
 
     let working_raw = temp_path("working.raw");
-    let final_packaged = temp_path("final").with_extension("gz");
+    let final_packaged = temp_path("final").with_extension(extension);
 
     let steps = vec![
         BatchStep::ConvertToRaw {
@@ -327,11 +353,11 @@ async fn runs_the_convert_provision_convert_back_recipe() {
     let config_bytes = read_shared_partition_file(&working_raw, "/remora/slot-A/config");
     assert!(!config_bytes.is_empty());
 
-    // The final convert-back step produced a real gzip round-tripping back
-    // to the exact same bytes as the (now fully provisioned) raw image.
+    // The final convert-back step produced a real package round-tripping
+    // back to the exact same bytes as the (now fully provisioned) raw image.
     assert!(final_packaged.exists());
     let round_tripped = temp_path("round-tripped.raw");
-    GzipAdapterImpl
+    packager
         .decode_to_raw(&final_packaged, &round_tripped)
         .unwrap();
     assert_eq!(
@@ -451,10 +477,7 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
 /// standalone `factory provision` invocation would.
 #[tokio::test]
 async fn runs_a_factory_provision_step() {
-    let convert = ConvertService::new(ConvertControllerImpl::new(
-        Arc::new(Qcow2AdapterImpl),
-        Arc::new(GzipAdapterImpl),
-    ));
+    let convert = convert();
     let image = ImageService::new(ImageControllerImpl::new(
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
         Arc::new(Ext4AdapterImpl),

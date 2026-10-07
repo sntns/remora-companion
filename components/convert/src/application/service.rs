@@ -6,21 +6,25 @@ use super::error::Result;
 
 /// The convert vertical's application-facing port: unwrap a whole-disk
 /// image out of (or back into) whatever container format its own path
-/// extension names -- `.qcow2`, `.gz`, or a plain raw copy for anything
-/// else -- entirely inside remora-etcher, with no external tool
-/// (`qemu-img`, `gzip`) shelled out to.
+/// extension names -- `.qcow2`, `.gz`, `.zst`, `.bz2`, `.bmaptar`, or a
+/// plain raw copy for anything else -- entirely inside remora-etcher, with
+/// no external tool (`qemu-img`, `gzip`, `zstd`, `bmaptool`, `tar`) shelled
+/// out to. A file whose content isn't what its name says (a compressed
+/// image named as a raw one, say) is refused, never copied as is.
 ///
 /// Both directions report progress/observe cancellation through `ctx` --
-/// see `ConvertControllerImpl` for how, given neither codec's own loop is
-/// instrumented directly (see its doc comment for why).
+/// see `ConvertControllerImpl` for how, given no codec's own loop is
+/// instrumented directly.
 #[async_trait::async_trait]
 pub trait ConvertServiceInterface: Send + Sync {
     /// Decode `image` into a plain raw disk image at `output_raw`. The
-    /// source format is detected from `image`'s extension.
+    /// source format is the one `image`'s extension names, which its
+    /// content must match.
     async fn to_raw(&self, image: &Path, output_raw: &Path, ctx: &OperationContext) -> Result<()>;
 
-    /// Encode `raw_image` (a plain raw disk image) into `output`. The
-    /// destination format is detected from `output`'s extension.
+    /// Encode `raw_image` (a plain raw disk image, which no format this
+    /// knows recognizes) into `output`. The destination format is detected
+    /// from `output`'s extension.
     #[allow(clippy::wrong_self_convention)] // `from_raw`/`to_raw` name the raw-image direction of the conversion, not a `From` constructor
     async fn from_raw(&self, raw_image: &Path, output: &Path, ctx: &OperationContext)
         -> Result<()>;

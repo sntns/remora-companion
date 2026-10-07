@@ -198,12 +198,12 @@ fn pbzip2(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A `.bmaptar` as meta-remora builds it: the bzip2'd image, then its bmap.
+/// A `.bmaptar` as meta-remora builds it: the bmap, then the zstd'd image.
 fn bmaptar(path: &Path, image: &[u8]) {
     let mut builder = tar::Builder::new(fs::File::create(path).unwrap());
     for (name, data) in [
-        ("src.img.bz2", pbzip2(image)),
         ("src.img.bmap", BMAP_XML.as_bytes().to_vec()),
+        ("src.img.zst", zstd::stream::encode_all(image, 3).unwrap()),
     ] {
         let mut header = tar::Header::new_gnu();
         header.set_size(data.len() as u64);
@@ -212,6 +212,19 @@ fn bmaptar(path: &Path, image: &[u8]) {
         builder.append_data(&mut header, name, &data[..]).unwrap();
     }
     builder.finish().unwrap();
+}
+
+/// The source image as a sparse file: holes but for its two ranges, as a
+/// build (or `remora-etcher convert to-raw`) leaves one.
+fn sparse_source_image(path: &Path) {
+    use std::io::{Seek, SeekFrom, Write};
+    let image = build_source_image();
+    let mut file = fs::File::create(path).unwrap();
+    for (offset, len) in [(RANGE_A_OFFSET, RANGE_A_LEN), (RANGE_B_OFFSET, RANGE_B_LEN)] {
+        file.seek(SeekFrom::Start(offset as u64)).unwrap();
+        file.write_all(&image[offset..offset + len]).unwrap();
+    }
+    file.set_len(IMAGE_SIZE).unwrap();
 }
 
 /// Only the mapped ranges were written, with the source's bytes.
@@ -243,6 +256,50 @@ async fn a_bmaptar_flashes_its_image_with_its_own_bmap() {
         force: false,
     };
     let outcome = controller(removable_non_system_disk(&device_path))
+        .flash(&request, &OperationContext::noop())
+        .await
+        .expect("flash should succeed");
+
+    assert!(outcome.used_bmap);
+    assert_eq!(outcome.bytes_written, (RANGE_A_LEN + RANGE_B_LEN) as u64);
+    assert!(only_mapped_ranges_written(&device_path));
+}
+
+/// What a factory job hands the flasher: the shipped `.bmaptar` converted
+/// to raw, provisioned, and converted back by `remora-etcher convert`.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "sparse files, as Linux filesystems make them"
+)]
+async fn a_bmaptar_made_by_convert_flashes_like_meta_remoras() {
+    use remora_convert::adapter::ContainerFormatAdapter;
+
+    let dir = tempdir("bmaptar-convert");
+    let raw = dir.join("src.img");
+    sparse_source_image(&raw);
+    let bundle = dir.join("src.img.bmaptar");
+    remora_convert_adapter_bmaptar::BmaptarAdapterImpl
+        .encode_from_raw(&raw, &bundle)
+        .unwrap();
+    let device_path = dir.join("dest.img");
+    fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
+
+    let request = FlashRequest {
+        image: bundle.into(),
+        bmap: BmapSource::Auto,
+        device: device_path.clone(),
+        force: false,
+    };
+    let controller = controller(removable_non_system_disk(&device_path));
+    let summary = controller.inspect(&request).await.unwrap();
+    // The same map as bmaptool's, for the same file.
+    assert_eq!(summary.compression, Some(Compression::Zstd));
+    assert_eq!(summary.image_size, Some(IMAGE_SIZE));
+    let bmap = summary.bmap.unwrap();
+    assert_eq!(bmap.mapped_size, (RANGE_A_LEN + RANGE_B_LEN) as u64);
+    assert_eq!(bmap.ranges, 2);
+    let outcome = controller
         .flash(&request, &OperationContext::noop())
         .await
         .expect("flash should succeed");
@@ -576,7 +633,7 @@ async fn inspect_describes_a_bmaptar_without_writing() {
         summary,
         ImageSummary {
             bundle: true,
-            compression: Some(Compression::Bzip2),
+            compression: Some(Compression::Zstd),
             image_size: Some(IMAGE_SIZE),
             bmap: Some(BmapSummary {
                 origin: BmapOrigin::Bundled,
@@ -660,8 +717,8 @@ async fn a_release_artifact_is_flashed_as_it_downloads() {
 
     assert!(outcome.used_bmap);
     assert!(only_mapped_ranges_written(&device_path));
-    // The bundle read like a file: a jump past the image to its .bmap, and
-    // back -- not one download per read.
+    // The bundle read like a file, its .bmap first, then the image where
+    // it sits -- not one download per read.
     assert!(offsets.lock().unwrap().len() <= 4, "{offsets:?}");
     let transfers: Vec<_> = stream
         .filter_map(|event| match event {

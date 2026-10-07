@@ -27,3 +27,7 @@ tokio-stream.workspace = true
 # Building .bmaptar and compressed fixtures, the way meta-remora does.
 tar = "0.4"
 bzip2 = "0.6"
+zstd = { version = "0.13", default-features = false }
+# A .bmaptar as `remora-etcher convert` makes one, flashed.
+remora-convert = { path = "../convert" }
+remora-convert-adapter-bmaptar = { path = "../convert-adapter-bmaptar" }

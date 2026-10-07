@@ -24,10 +24,17 @@ pub struct ScratchDir {
 impl ScratchDir {
     /// A fresh scratch directory named `<prefix>-<random>`.
     pub fn new(prefix: &str) -> io::Result<Self> {
+        Self::new_in(&std::env::temp_dir(), prefix)
+    }
+
+    /// [`Self::new`], in `parent` rather than the OS temp dir: for a file
+    /// made there to be renamed into `parent` once complete, a rename not
+    /// crossing filesystems.
+    pub fn new_in(parent: &Path, prefix: &str) -> io::Result<Self> {
         const ATTEMPTS: u32 = 16;
         let mut last_err = None;
         for _ in 0..ATTEMPTS {
-            let path = std::env::temp_dir().join(format!("{prefix}-{:016x}", random()));
+            let path = parent.join(format!("{prefix}-{:016x}", random()));
             match create_private_dir(&path) {
                 Ok(()) => return Ok(Self { path }),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last_err = Some(e),

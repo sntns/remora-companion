@@ -27,6 +27,9 @@ tempfile.workspace = true
 # end to end — same posture as the other application crates' tests.
 remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }
 remora-convert-adapter-qcow2 = { path = "../convert-adapter-qcow2" }
+remora-convert-adapter-zstd = { path = "../convert-adapter-zstd" }
+remora-convert-adapter-bzip2 = { path = "../convert-adapter-bzip2" }
+remora-convert-adapter-bmaptar = { path = "../convert-adapter-bmaptar" }
 remora-convert-application = { path = "../convert-application" }
 remora-identity-adapter-keygen = { path = "../identity-adapter-keygen" }
 remora-identity-application = { path = "../identity-application" }

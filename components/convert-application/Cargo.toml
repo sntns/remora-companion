@@ -9,12 +9,17 @@ publish.workspace = true
 [dependencies]
 remora-convert = { path = "../convert" }
 remora-progress = { path = "../progress" }
+remora-scratch = { path = "../scratch" }
 error-stack.workspace = true
 async-trait.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }
 remora-convert-adapter-qcow2 = { path = "../convert-adapter-qcow2" }
+remora-convert-adapter-zstd = { path = "../convert-adapter-zstd" }
+remora-convert-adapter-bzip2 = { path = "../convert-adapter-bzip2" }
+remora-convert-adapter-bmaptar = { path = "../convert-adapter-bmaptar" }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true

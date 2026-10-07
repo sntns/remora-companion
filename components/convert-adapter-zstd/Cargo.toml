@@ -1,0 +1,17 @@
+[package]
+name = "remora-convert-adapter-zstd"
+description = "Concrete ContainerFormatAdapter: zstd via the zstd crate (libzstd), multithreaded like oe-core's"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-convert = { path = "../convert" }
+remora-unpack = { path = "../unpack" }
+error-stack.workspace = true
+# zstdmt: compress on every core, as oe-core's `zstd --threads` does.
+zstd = { version = "0.13", default-features = false, features = ["zstdmt"] }
+
+[dev-dependencies]
+remora-scratch = { path = "../scratch" }
