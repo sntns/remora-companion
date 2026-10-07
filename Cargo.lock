@@ -3705,6 +3705,7 @@ dependencies = [
  "async-trait",
  "error-stack",
  "remora-ota",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
 ]
@@ -3742,6 +3743,7 @@ dependencies = [
  "remora-ota-adapter-file",
  "remora-ota-adapter-grpc",
  "remora-progress",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tokio-util",

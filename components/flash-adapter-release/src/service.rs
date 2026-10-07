@@ -4,7 +4,7 @@ use remora_flash::{
     adapter::release::{ArtifactChunks, Error, ReleaseArtifactAdapter, Result},
     model::{DiskImage, ReleaseArtifact},
 };
-use remora_ota::{adapter::gateway, application::OtaService};
+use remora_ota::{adapter::gateway, application::OtaService, model::tags};
 
 /// The tag a release's disk images carry in their tag condition, as
 /// meta-remora's CI publishes them (`board:<machine> && type:diskimage`).
@@ -76,15 +76,6 @@ impl ReleaseArtifactAdapter for ReleaseArtifactAdapterImpl {
     }
 }
 
-/// The tags a tag condition names (`board:rp5 && (type:diskimage)` names
-/// `board:rp5` and `type:diskimage`), whatever the operators around them.
-fn tags(condition: &str) -> Vec<&str> {
-    condition
-        .split(|c: char| !(c.is_alphanumeric() || matches!(c, ':' | '_' | '-' | '.' | '/')))
-        .filter(|tag| tag.contains(':'))
-        .collect()
-}
-
 struct OtaChunks {
     chunks: Box<dyn gateway::ArtifactChunks>,
     name: String,
@@ -97,23 +88,5 @@ impl ArtifactChunks for OtaChunks {
             .next()
             .await
             .change_context_lazy(|| Error::Download(self.name.clone()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tags_are_read_through_the_operators() {
-        assert_eq!(
-            tags("board:f3apl && type:diskimage"),
-            ["board:f3apl", "type:diskimage"]
-        );
-        assert_eq!(
-            tags("(board:rp5 || board:hdc)&&type:diskimage"),
-            ["board:rp5", "board:hdc", "type:diskimage"]
-        );
-        assert!(tags("").is_empty());
     }
 }

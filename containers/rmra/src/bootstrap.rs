@@ -19,10 +19,13 @@ use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::
 use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
 use remora_ota::{
-    adapter::{gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService},
+    adapter::{
+        gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService,
+        target::ArtifactTargetAdapterService,
+    },
     application::OtaService,
 };
-use remora_ota_adapter_file::FileArtifactSourceImpl;
+use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
 use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_update::{
@@ -153,11 +156,20 @@ pub async fn wire() -> Services {
         .expect("ArtifactSourceAdapterService was just registered");
 
     container
+        .set_type(ArtifactTargetAdapterService::new(FileArtifactTargetImpl))
+        .await;
+    let targets = container
+        .get_type::<ArtifactTargetAdapterService>()
+        .await
+        .expect("ArtifactTargetAdapterService was just registered");
+
+    container
         .set_type(OtaService::new(OtaControllerImpl::new(
             context.clone(),
             device.clone(),
             ota_gateway,
             artifacts,
+            targets,
         )))
         .await;
     let ota = container

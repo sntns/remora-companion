@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use remora_context::model::ContextOverride;
+use remora_context::{application::ContextService, model::ContextOverride};
 use remora_ota::{
     application::OtaService,
-    model::{Release, UploadRequest},
+    model::{Artifact, DownloadRequest, Release, UploadRequest},
 };
 use remora_progress::{OperationContext, OperationEvent};
 use remora_tui as tui;
@@ -12,7 +12,7 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::{ota_error, prompt_error, Result},
+    error::{ota_error, prompt_error, Error, Result},
     shared::{labels_line, parse_labels, print_json, Format},
 };
 
@@ -79,6 +79,32 @@ pub enum Command {
         resume: Option<String>,
     },
 
+    /// Download an artifact of a release. Picked by --artifact, --board or
+    /// --type, or asked for when several are left; resumes on its own
+    /// after a dropped connection, and where an interrupted run stopped
+    /// when run again; checked against the release's sha256.
+    Download {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
+        release: String,
+        /// The artifact to download, by file name.
+        #[arg(long)]
+        artifact: Option<String>,
+        /// Only artifacts for this board (their `board:` tag).
+        #[arg(long)]
+        board: Option<String>,
+        /// Only artifacts of this type (their `type:` tag), e.g. diskimage
+        /// or rauc.
+        #[arg(long = "type", value_name = "TYPE")]
+        kind: Option<String>,
+        /// Where to write it: a file, or a directory to write it into under
+        /// its own name (default: the current directory).
+        #[arg(short, long, value_hint = clap::ValueHint::AnyPath)]
+        output: Option<PathBuf>,
+        /// Replace the file if it already exists.
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Set or remove a release's labels.
     Label {
         #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
@@ -106,6 +132,7 @@ pub enum Command {
 pub async fn run(
     command: Command,
     service: &OtaService,
+    contexts: &ContextService,
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     match command {
@@ -213,6 +240,52 @@ pub async fn run(
             )
             .await
         }
+        Command::Download {
+            release,
+            artifact,
+            board,
+            kind,
+            output,
+            force,
+        } => {
+            let found = service
+                .get_release(over, &release)
+                .await
+                .map_err(ota_error)?;
+            let picked = choose(
+                &release,
+                found.artifacts,
+                artifact.as_deref(),
+                board.as_deref(),
+                kind.as_deref(),
+            )?;
+            let path = match output {
+                Some(path) if path.is_dir() => path.join(&picked.file_name),
+                Some(path) => path,
+                None => PathBuf::from(&picked.file_name),
+            };
+            let context = contexts.resolve(over).await.ok();
+            tui::note(
+                "Artifact",
+                artifact_lines(
+                    &release,
+                    &picked,
+                    context.as_ref().map(|c| c.context.name.as_str()),
+                    &path,
+                ),
+            );
+            download(
+                service,
+                over,
+                DownloadRequest {
+                    release,
+                    file_name: picked.file_name,
+                    path,
+                    overwrite: force,
+                },
+            )
+            .await
+        }
         Command::Label { name, set, unset } => {
             service
                 .label_release(over, &name, &parse_labels(&set)?, &unset)
@@ -253,6 +326,133 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// The artifact of `release` to download: the one named, else the only one
+/// left by `board` and `kind`, else the operator's pick.
+fn choose(
+    release: &str,
+    artifacts: Vec<Artifact>,
+    name: Option<&str>,
+    board: Option<&str>,
+    kind: Option<&str>,
+) -> Result<Artifact> {
+    let names = |artifacts: &[Artifact]| {
+        artifacts
+            .iter()
+            .map(|a| a.file_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if artifacts.is_empty() {
+        return Err(error_stack::Report::new(Error::Ota(format!(
+            "release {release:?} has no artifact"
+        ))));
+    }
+    let available = names(&artifacts);
+    let mut candidates: Vec<_> = artifacts
+        .into_iter()
+        .filter(|a| name.is_none_or(|name| a.file_name == name))
+        .filter(|a| board.is_none_or(|board| a.tag_values("board").contains(&board)))
+        .filter(|a| kind.is_none_or(|kind| a.tag_values("type").contains(&kind)))
+        .collect();
+    match candidates.len() {
+        0 => Err(error_stack::Report::new(Error::Ota(format!(
+            "release {release:?} has no such artifact"
+        )))
+        .attach(format!("its artifacts: {available}"))),
+        1 => Ok(candidates.remove(0)),
+        _ if !tui::interactive() => Err(error_stack::Report::new(Error::Ota(format!(
+            "release {release:?} has several such artifacts"
+        )))
+        .attach(format!(
+            "pass --artifact, --board or --type; they are: {}",
+            names(&candidates)
+        ))),
+        _ => {
+            let mut select =
+                tui::select(format!("Artifact of {} to download", tui::accent(release)));
+            for (i, artifact) in candidates.iter().enumerate() {
+                let tags = if artifact.tag_condition.is_empty() {
+                    "for all devices".to_owned()
+                } else {
+                    artifact.tag_condition.clone()
+                };
+                select = select.item(
+                    i,
+                    &artifact.file_name,
+                    format!("{}  {tags}", tui::bytes(artifact.content_length)),
+                );
+            }
+            let picked = select.interact().map_err(prompt_error)?;
+            Ok(candidates.remove(picked))
+        }
+    }
+}
+
+/// The Artifact note: what is downloaded, from where, and to where.
+fn artifact_lines(
+    release: &str,
+    artifact: &Artifact,
+    context: Option<&str>,
+    path: &std::path::Path,
+) -> String {
+    let label = tui::dim;
+    let mut from = format!(
+        "{} {} from release {}",
+        label("download:"),
+        tui::bytes(artifact.content_length),
+        tui::accent(release)
+    );
+    if let Some(context) = context {
+        from.push_str(&format!(", {}", tui::dim(format!("context {context}"))));
+    }
+    let mut lines = vec![tui::accent(&artifact.file_name), from];
+    if !artifact.tag_condition.is_empty() {
+        lines.push(format!("{} {}", label("tags:"), artifact.tag_condition));
+    }
+    if !artifact.checksum_sha256.is_empty() {
+        lines.push(format!("{} {}", label("sha256:"), artifact.checksum_sha256));
+    }
+    lines.push(format!("{} {}", label("to:"), path.display()));
+    lines.join("\n")
+}
+
+/// Downloads one artifact with a live byte bar; Ctrl-C stops it, the
+/// partial file kept for the next run to pick up.
+async fn download(
+    service: &OtaService,
+    over: Option<&ContextOverride>,
+    request: DownloadRequest,
+) -> Result<()> {
+    let path = request.path.clone();
+    let (sink, stream) = remora_progress::channel();
+    let follow = tui::follow(stream);
+    sink.phase("downloading");
+    let ctx = OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
+    let outcome = service.download_file(over, request, &ctx).await;
+    drop(ctx);
+    follow.finish(&outcome).await;
+    let outcome = outcome.map_err(ota_error)?;
+    let mut detail = Vec::new();
+    if outcome.resumed_from > 0 {
+        detail.push(format!("resumed at {}", tui::bytes(outcome.resumed_from)));
+    }
+    detail.push(
+        if outcome.verified {
+            "sha256-verified"
+        } else {
+            "unverified: the release has no sha256"
+        }
+        .to_owned(),
+    );
+    tui::success(format!(
+        "Downloaded {} to {} {}",
+        tui::bytes(outcome.bytes),
+        tui::accent(path.display()),
+        tui::dim(format!("({})", detail.join(", ")))
+    ));
+    Ok(())
 }
 
 /// Uploads one artifact with a live byte bar; Ctrl-C (`cancel`) stops it

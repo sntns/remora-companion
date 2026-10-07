@@ -30,6 +30,52 @@ pub struct Artifact {
     pub tag_condition: String,
 }
 
+impl Artifact {
+    /// The tags its tag condition names (`board:rp5 && (type:rauc)` names
+    /// `board:rp5` and `type:rauc`), whatever the operators around them.
+    pub fn tags(&self) -> Vec<&str> {
+        tags(&self.tag_condition)
+    }
+
+    /// The values its tag condition names for `key` (`board` gives `rp5`).
+    pub fn tag_values(&self, key: &str) -> Vec<&str> {
+        self.tags()
+            .into_iter()
+            .filter_map(|tag| tag.strip_prefix(key)?.strip_prefix(':'))
+            .collect()
+    }
+}
+
+/// The tags a tag condition names, whatever the operators around them.
+pub fn tags(condition: &str) -> Vec<&str> {
+    condition
+        .split(|c: char| !(c.is_alphanumeric() || matches!(c, ':' | '_' | '-' | '.' | '/')))
+        .filter(|tag| tag.contains(':'))
+        .collect()
+}
+
+/// Downloading one artifact of a release to a local file.
+#[derive(Debug, Clone)]
+pub struct DownloadRequest {
+    pub release: String,
+    pub file_name: String,
+    pub path: PathBuf,
+    /// Replace `path` when it already exists.
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadOutcome {
+    pub bytes: u64,
+    /// Where this run started from: 0, or what an interrupted run left.
+    pub resumed_from: u64,
+    /// How many times this run picked a dropped connection up again.
+    pub resumes: usize,
+    /// Whether the file was checked against the release's sha256 (the
+    /// release may not know it).
+    pub verified: bool,
+}
+
 /// Uploading one local file as an artifact of a release.
 #[derive(Debug, Clone)]
 pub struct UploadRequest {
@@ -58,4 +104,22 @@ pub struct UploadOutcome {
     pub resumes: usize,
     /// The token that resumes this upload, should it be interrupted again.
     pub content_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tags_are_read_through_the_operators() {
+        assert_eq!(
+            tags("board:f3apl && type:diskimage"),
+            ["board:f3apl", "type:diskimage"]
+        );
+        assert_eq!(
+            tags("(board:rp5 || board:hdc)&&type:diskimage"),
+            ["board:rp5", "board:hdc", "type:diskimage"]
+        );
+        assert!(tags("").is_empty());
+    }
 }

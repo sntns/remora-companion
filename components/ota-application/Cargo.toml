@@ -24,3 +24,4 @@ remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 tempfile.workspace = true
 tokio-util.workspace = true
+sha2.workspace = true

@@ -60,10 +60,13 @@ use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
 use remora_image_adapter_vfat::VfatAdapterImpl;
 use remora_image_application::ImageControllerImpl;
 use remora_ota::{
-    adapter::{gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService},
+    adapter::{
+        gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService,
+        target::ArtifactTargetAdapterService,
+    },
     application::OtaService,
 };
-use remora_ota_adapter_file::FileArtifactSourceImpl;
+use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
 use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
@@ -365,11 +368,20 @@ pub async fn wire() -> Services {
         .expect("ArtifactSourceAdapterService was just registered");
 
     container
+        .set_type(ArtifactTargetAdapterService::new(FileArtifactTargetImpl))
+        .await;
+    let targets = container
+        .get_type::<ArtifactTargetAdapterService>()
+        .await
+        .expect("ArtifactTargetAdapterService was just registered");
+
+    container
         .set_type(OtaService::new(OtaControllerImpl::new(
             context.clone(),
             device,
             ota_gateway,
             artifacts,
+            targets,
         )))
         .await;
     let ota = container

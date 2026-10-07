@@ -7,8 +7,8 @@ use super::error::Result;
 use crate::adapter::gateway::ArtifactChunks;
 use crate::model::{
     DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
-    DeploymentSummary, Labels, LogEntry, Planned, Release, ReleaseSummary, Targets, UploadOutcome,
-    UploadRequest, WatchOutcome,
+    DeploymentSummary, DownloadOutcome, DownloadRequest, Labels, LogEntry, Planned, Release,
+    ReleaseSummary, Targets, UploadOutcome, UploadRequest, WatchOutcome,
 };
 
 /// The ota vertical's application-facing port: over-the-air updates as an
@@ -58,6 +58,18 @@ pub trait OtaServiceInterface: Send + Sync {
         file_name: &str,
         offset: u64,
     ) -> Result<Box<dyn ArtifactChunks>>;
+    /// Downloads an artifact to a local file, reporting bytes through
+    /// `ctx`: into a partial file next to it, picked up again where it
+    /// stopped after a dropped connection and, across runs, after an
+    /// interrupted one; checked against the release's sha256 before it
+    /// becomes the file. Cancelled through `ctx`, it fails with
+    /// [`super::Error::DownloadCancelled`], the partial file kept.
+    async fn download_file(
+        &self,
+        over: Option<&ContextOverride>,
+        request: DownloadRequest,
+        ctx: &OperationContext,
+    ) -> Result<DownloadOutcome>;
 
     /// The devices `targets` names: as given, or every device matching the
     /// selector. Lets a transport show (and confirm) a rollout's reach --

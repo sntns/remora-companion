@@ -152,7 +152,7 @@ async fn run() {
             verbose,
         ),
         Commands::Release(command) => exit_on_error(
-            ota::run_release(command, &services.ota, over).await,
+            ota::run_release(command, &services.ota, &services.context, over).await,
             verbose,
         ),
         Commands::Deployment(command) => exit_on_error(

@@ -303,3 +303,81 @@ async fn an_interrupted_upload_resumes_with_the_printed_token() {
         bytes
     );
 }
+
+#[tokio::test]
+async fn download_picks_an_artifact_by_board_and_type() {
+    let (gateway, resolved) = TestGateway::serve().await;
+    let rmra = Rmra::new(&resolved.context.endpoint.address);
+    let dir = tempfile::tempdir().unwrap();
+    let image: Vec<u8> = (0..2_500_000u32).map(|i| (i % 241) as u8).collect();
+    let bundle: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();
+    std::fs::write(dir.path().join("disk-rp5.wic.bmaptar"), &image).unwrap();
+    std::fs::write(dir.path().join("update-rp5.raucb"), &bundle).unwrap();
+
+    let (code, _, stderr) = rmra
+        .run(&["release", "create", "R1", "--version", "1.0.0"])
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    for (file, tags) in [
+        ("disk-rp5.wic.bmaptar", "board:rp5 && type:diskimage"),
+        ("update-rp5.raucb", "board:rp5 && type:rauc"),
+    ] {
+        let path = dir.path().join(file);
+        let (code, _, stderr) = rmra
+            .run(&[
+                "release",
+                "upload",
+                "R1",
+                path.to_str().unwrap(),
+                "--tag-condition",
+                tags,
+            ])
+            .await;
+        assert_eq!(code, 0, "{stderr}");
+    }
+
+    // Two artifacts for rp5 and nobody at the terminal: it says which.
+    let out = tempfile::tempdir().unwrap();
+    let out_dir = out.path().to_str().unwrap();
+    let (code, _, stderr) = rmra
+        .run(&["release", "download", "R1", "--board", "rp5", "-o", out_dir])
+        .await;
+    assert_ne!(code, 0);
+    assert!(stderr.contains("several such artifacts"), "{stderr}");
+
+    gateway.0.lock().unwrap().fail_next_download_after = Some(1_000_000);
+    let (code, _, stderr) = rmra
+        .run(&[
+            "release",
+            "download",
+            "R1",
+            "--board",
+            "rp5",
+            "--type",
+            "diskimage",
+            "-o",
+            out_dir,
+        ])
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.contains("Downloaded"), "{stderr}");
+    assert_eq!(
+        std::fs::read(out.path().join("disk-rp5.wic.bmaptar")).unwrap(),
+        image
+    );
+
+    // Already there: kept, unless --force.
+    let (code, _, stderr) = rmra
+        .run(&[
+            "release",
+            "download",
+            "R1",
+            "--artifact",
+            "disk-rp5.wic.bmaptar",
+            "-o",
+            out_dir,
+        ])
+        .await;
+    assert_ne!(code, 0);
+    assert!(stderr.contains("already exists"), "{stderr}");
+}

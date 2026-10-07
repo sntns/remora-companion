@@ -10,12 +10,14 @@ use remora_ota::{
     adapter::{
         gateway::{self, ArtifactChunks, ArtifactSink, InitialUpload, OtaGatewayAdapterService},
         source::{self, ArtifactSourceAdapterService},
+        target::ArtifactTargetAdapterService,
     },
     application::{Error, OtaServiceInterface, Result},
     model::{
         DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
-        DeploymentSummary, Labels, LogEntry, Planned, PlannedOutcome, Release, ReleaseSummary,
-        Targets, UploadOutcome, UploadRequest, WatchOutcome,
+        DeploymentSummary, DownloadOutcome, DownloadRequest, Labels, LogEntry, Planned,
+        PlannedOutcome, Release, ReleaseSummary, Targets, UploadOutcome, UploadRequest,
+        WatchOutcome,
     },
 };
 use remora_progress::OperationContext;
@@ -28,6 +30,10 @@ const CHUNK: usize = 1024 * 1024;
 /// operator can still resume it later with the printed token).
 const UPLOAD_ATTEMPTS: usize = 4;
 
+/// How many times in a row a dropped download is picked up again before
+/// giving up (running it again resumes it still).
+const DOWNLOAD_ATTEMPTS: usize = 4;
+
 /// The ota vertical's use case: the gateway port and where artifacts are
 /// read from, the context vertical's application port for which platform,
 /// as whom, and the device vertical's for which devices a selector picks.
@@ -36,6 +42,7 @@ pub struct OtaControllerImpl {
     devices: DeviceService,
     gateway: OtaGatewayAdapterService,
     artifacts: ArtifactSourceAdapterService,
+    targets: ArtifactTargetAdapterService,
 }
 
 /// Why one upload attempt stopped short.
@@ -52,12 +59,14 @@ impl OtaControllerImpl {
         devices: DeviceService,
         gateway: OtaGatewayAdapterService,
         artifacts: ArtifactSourceAdapterService,
+        targets: ArtifactTargetAdapterService,
     ) -> Self {
         Self {
             contexts,
             devices,
             gateway,
             artifacts,
+            targets,
         }
     }
 
@@ -254,6 +263,155 @@ impl OtaServiceInterface for OtaControllerImpl {
                 file: file_name.to_owned(),
                 release: release.to_owned(),
             })
+    }
+
+    async fn download_file(
+        &self,
+        over: Option<&ContextOverride>,
+        request: DownloadRequest,
+        ctx: &OperationContext,
+    ) -> Result<DownloadOutcome> {
+        let DownloadRequest {
+            release,
+            file_name,
+            path,
+            overwrite,
+        } = request;
+        let context = self.resolve(over).await?;
+        let artifact = self
+            .gateway
+            .get_release(&context, &release)
+            .await
+            .change_context_lazy(|| Error::GetRelease(release.clone()))?
+            .artifacts
+            .into_iter()
+            .find(|artifact| artifact.file_name == file_name)
+            .ok_or_else(|| {
+                Report::new(Error::NoArtifact {
+                    file: file_name.clone(),
+                    release: release.clone(),
+                })
+            })?;
+        let write_error = || Error::WriteArtifact(path.clone());
+        if !overwrite
+            && self
+                .targets
+                .exists(&path)
+                .await
+                .change_context_lazy(write_error)?
+        {
+            return Err(Report::new(Error::Exists(path)));
+        }
+        let size = artifact.content_length;
+        // What an interrupted run left, unless it can't be this artifact's.
+        let mut position = self
+            .targets
+            .partial(&path)
+            .await
+            .change_context_lazy(write_error)?;
+        if position > size {
+            position = 0;
+        }
+        let resumed_from = position;
+        if resumed_from > 0 {
+            ctx.sink.log(format!("resuming at byte {resumed_from}"));
+        }
+        let mut writer = self
+            .targets
+            .open(&path, position)
+            .await
+            .change_context_lazy(write_error)?;
+        let download_error = || Error::Download {
+            file: file_name.clone(),
+            release: release.clone(),
+        };
+        let mut resumes = 0;
+        let mut streams = 0;
+        let mut failures = 0;
+        ctx.sink.progress_bytes(position, size);
+        while position < size {
+            if ctx.cancel.is_cancelled() {
+                break;
+            }
+            let chunks = tokio::select! {
+                chunks = self.gateway.download(&context, &release, &file_name, position) => chunks,
+                _ = ctx.cancel.cancelled() => break,
+            };
+            let mut chunks = match chunks {
+                Ok(chunks) => chunks,
+                Err(report) if retryable(&report) && failures + 1 < DOWNLOAD_ATTEMPTS => {
+                    failures += 1;
+                    tokio::time::sleep(Duration::from_millis(500 * failures as u64)).await;
+                    continue;
+                }
+                Err(report) => return Err(report.change_context(download_error())),
+            };
+            // Every stream after this run's first picks a dropped one up.
+            if streams > 0 {
+                resumes += 1;
+                ctx.sink.log(format!("resuming at byte {position}"));
+            }
+            streams += 1;
+            loop {
+                let next = tokio::select! {
+                    next = chunks.next() => next,
+                    _ = ctx.cancel.cancelled() => break,
+                };
+                match next {
+                    Ok(Some(chunk)) => {
+                        writer
+                            .write(&chunk)
+                            .await
+                            .change_context_lazy(write_error)?;
+                        position += chunk.len() as u64;
+                        failures = 0;
+                        ctx.sink.progress_bytes(position, size);
+                    }
+                    Ok(None) => break,
+                    Err(report) if retryable(&report) && failures + 1 < DOWNLOAD_ATTEMPTS => {
+                        failures += 1;
+                        tokio::time::sleep(Duration::from_millis(500 * failures as u64)).await;
+                        break;
+                    }
+                    Err(report) => return Err(report.change_context(download_error())),
+                }
+            }
+            if position < size && failures == 0 && !ctx.cancel.is_cancelled() {
+                // The stream ended cleanly, short of the artifact's length.
+                return Err(Report::new(download_error())
+                    .attach(format!("the stream ended at byte {position} of {size}")));
+            }
+        }
+        let digest = writer.finish().await.change_context_lazy(write_error)?;
+        if position < size {
+            return Err(Report::new(Error::DownloadCancelled {
+                file: file_name,
+                at: position,
+            }));
+        }
+        let verified = !artifact.checksum_sha256.is_empty();
+        if verified && !digest.eq_ignore_ascii_case(&artifact.checksum_sha256) {
+            self.targets
+                .discard(&path)
+                .await
+                .change_context_lazy(write_error)?;
+            return Err(
+                Report::new(Error::Checksum { file: file_name }).attach(format!(
+                    "expected {}, got {digest}",
+                    artifact.checksum_sha256
+                )),
+            );
+        }
+        self.targets
+            .commit(&path)
+            .await
+            .change_context_lazy(write_error)?;
+        Ok(DownloadOutcome {
+            bytes: size,
+            resumed_from,
+            resumes,
+            verified,
+        })
     }
 
     async fn get_release(&self, over: Option<&ContextOverride>, name: &str) -> Result<Release> {
@@ -597,7 +755,7 @@ mod tests {
         gateway::OtaGatewayAdapter,
         source::{ArtifactReader, ArtifactSourceAdapter},
     };
-    use remora_ota_adapter_file::FileArtifactSourceImpl;
+    use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
     use remora_ota_adapter_grpc::{test_gateway::TestGateway, OtaGatewayAdapterImpl};
     use tokio_util::sync::CancellationToken;
 
@@ -725,6 +883,7 @@ mod tests {
                 devices,
                 OtaGatewayAdapterService::new(OtaGatewayAdapterImpl),
                 artifacts,
+                ArtifactTargetAdapterService::new(FileArtifactTargetImpl),
             ),
             gateway,
         )
@@ -1164,5 +1323,131 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(report.current_context(), Error::NameForMany));
+    }
+
+    /// A release "r1" holding `bytes` as `update-rp5.raucb`, uploaded
+    /// through the controller itself.
+    async fn published(ota: &OtaControllerImpl, dir: &Path, size: usize) -> Vec<u8> {
+        ota.create_release(None, "r1", "1.0.0", &Labels::new())
+            .await
+            .unwrap();
+        let (path, bytes) = bundle(dir, size);
+        let ctx = OperationContext::noop();
+        ota.upload(None, upload(&path, None), &ctx).await.unwrap();
+        std::fs::remove_file(path).unwrap();
+        bytes
+    }
+
+    fn fetch(path: &Path, overwrite: bool) -> DownloadRequest {
+        DownloadRequest {
+            release: "r1".into(),
+            file_name: "update-rp5.raucb".into(),
+            path: path.to_path_buf(),
+            overwrite,
+        }
+    }
+
+    /// Sets the sha256 the fake's release says its artifact has.
+    fn checksum(gateway: &TestGateway, sha256: &str) {
+        let mut state = gateway.0.lock().unwrap();
+        let release = state.releases.get_mut("r1").unwrap();
+        release.artifacts[0].checksum_sha256 = sha256.to_owned();
+    }
+
+    fn sha256(bytes: &[u8]) -> String {
+        use sha2::Digest;
+        sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_download_resumes_by_itself_and_is_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ota, gateway) = controller(dir.path()).await;
+        let bytes = published(&ota, dir.path(), 3 * CHUNK + 77).await;
+        checksum(&gateway, &sha256(&bytes));
+        gateway.0.lock().unwrap().fail_next_download_after = Some(CHUNK + 5);
+
+        let out = dir.path().join("out.raucb");
+        let outcome = ota
+            .download_file(None, fetch(&out, false), &OperationContext::noop())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), bytes);
+        assert_eq!(outcome.bytes, bytes.len() as u64);
+        assert_eq!(outcome.resumes, 1);
+        assert!(outcome.verified);
+        let offsets: Vec<u64> = gateway
+            .0
+            .lock()
+            .unwrap()
+            .downloads
+            .iter()
+            .map(|(_, offset)| *offset)
+            .collect();
+        assert_eq!(offsets, [0, CHUNK as u64 + 5]);
+    }
+
+    #[tokio::test]
+    async fn a_download_picks_up_what_an_interrupted_run_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ota, gateway) = controller(dir.path()).await;
+        let bytes = published(&ota, dir.path(), 200_000).await;
+        checksum(&gateway, &sha256(&bytes));
+        let out = dir.path().join("out.raucb");
+        std::fs::write(dir.path().join("out.raucb.part"), &bytes[..150_000]).unwrap();
+
+        let outcome = ota
+            .download_file(None, fetch(&out, false), &OperationContext::noop())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.resumed_from, 150_000);
+        assert_eq!(std::fs::read(&out).unwrap(), bytes);
+        assert!(!dir.path().join("out.raucb.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_download_that_does_not_match_its_sha256_is_discarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ota, gateway) = controller(dir.path()).await;
+        published(&ota, dir.path(), 10_000).await;
+        checksum(&gateway, &sha256(b"something else"));
+        let out = dir.path().join("out.raucb");
+
+        let report = ota
+            .download_file(None, fetch(&out, false), &OperationContext::noop())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(report.current_context(), Error::Checksum { .. }));
+        assert!(!out.exists());
+        assert!(!dir.path().join("out.raucb.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_download_never_replaces_a_file_unasked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ota, _gateway) = controller(dir.path()).await;
+        let bytes = published(&ota, dir.path(), 1_000).await;
+        let out = dir.path().join("out.raucb");
+        std::fs::write(&out, b"mine").unwrap();
+
+        let report = ota
+            .download_file(None, fetch(&out, false), &OperationContext::noop())
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::Exists(_)));
+        assert_eq!(std::fs::read(&out).unwrap(), b"mine");
+
+        let outcome = ota
+            .download_file(None, fetch(&out, true), &OperationContext::noop())
+            .await
+            .unwrap();
+        assert!(!outcome.verified);
+        assert_eq!(std::fs::read(&out).unwrap(), bytes);
     }
 }

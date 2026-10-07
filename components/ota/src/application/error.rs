@@ -31,6 +31,16 @@ pub enum Error {
     },
     #[error("failed to download {file} of release {release:?}")]
     Download { file: String, release: String },
+    #[error("release {release:?} has no artifact {file}")]
+    NoArtifact { file: String, release: String },
+    #[error("{0} already exists (pass --force to replace it)")]
+    Exists(std::path::PathBuf),
+    #[error("failed to write {0}")]
+    WriteArtifact(std::path::PathBuf),
+    #[error("{file} doesn't match the release's sha256: the download was discarded")]
+    Checksum { file: String },
+    #[error("the download of {file} was stopped at {at} bytes (run it again to resume)")]
+    DownloadCancelled { file: String, at: u64 },
     #[error("failed to find the devices to deploy to")]
     Targets,
     #[error("no device matches {0}")]

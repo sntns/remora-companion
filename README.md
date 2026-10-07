@@ -215,6 +215,21 @@ a local read error) stops an upload without the platform committing what
 was sent; it prints the `rmra release upload … --resume <token>` command
 that continues it.
 
+### Download an artifact
+
+```
+rmra release download 2026.10.0 --board rp5 --type diskimage -o ~/images/
+rmra release download 2026.10.0 --artifact remora-hdc.raucb
+```
+
+Picks the artifact like `remora-etcher flash --release` does: by file name
+(`--artifact`), or by the `board:` and `type:` tags of its tag condition
+(`--board`, `--type`); with several left and nobody to ask, it says which.
+It's written to `<file>.part` until it's whole and matches the release's
+sha256, then renamed (`--force` replaces an existing file). A dropped
+connection is picked up where it stopped, and so is an interrupted run:
+run the same command again.
+
 ### Roll it out and follow it
 
 ```
