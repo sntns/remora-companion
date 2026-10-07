@@ -18,6 +18,8 @@ use remora_context_application::ContextControllerImpl;
 use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
 use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
+use remora_install::application::InstallService;
+use remora_install_application::InstallControllerImpl;
 use remora_ota::{
     adapter::{
         gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService,
@@ -39,6 +41,7 @@ pub struct Services {
     pub context: ContextService,
     pub channel: ChannelService,
     pub ota: OtaService,
+    pub install: InstallService,
     pub device: DeviceService,
     pub update: UpdateService,
 }
@@ -177,6 +180,19 @@ pub async fn wire() -> Services {
         .await
         .expect("OtaService was just registered");
 
+    // Install after channel and ota: each step runs over the channel, a
+    // release's bundle comes through ota.
+    container
+        .set_type(InstallService::new(InstallControllerImpl::new(
+            channel.clone(),
+            ota.clone(),
+        )))
+        .await;
+    let install = container
+        .get_type::<InstallService>()
+        .await
+        .expect("InstallService was just registered");
+
     container
         .set_type(ReleaseFeedAdapterService::new(GithubReleaseFeedImpl::new(
             RELEASES_REPO,
@@ -211,6 +227,7 @@ pub async fn wire() -> Services {
         context,
         channel,
         ota,
+        install,
         device,
         update,
     }

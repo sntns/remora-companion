@@ -198,12 +198,20 @@ fn sshd(dir: &Path, port: u16) -> std::process::Child {
         ALIAS,
         dir.join("host_key.pub").to_str().unwrap(),
     ]);
-    std::fs::write(dir.join("principals"), format!("user@{ALIAS}\n")).unwrap();
+    std::fs::write(
+        dir.join("principals"),
+        format!("user@{ALIAS}\nadmin@{ALIAS}\n"),
+    )
+    .unwrap();
+    // The device's own tools, faked (see `device_tools`), ahead of the
+    // system's.
+    std::fs::create_dir_all(dir.join("device-bin")).unwrap();
     let config = format!(
         "Port {port}\nListenAddress 127.0.0.1\nHostKey {d}/host_key\nHostCertificate {d}/host_key-cert.pub\n\
          TrustedUserCAKeys {d}/user_ca.pub\nAuthorizedPrincipalsFile {d}/principals\n\
          AuthorizedKeysFile none\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n\
-         UsePAM no\nStrictModes no\nPidFile {d}/sshd.pid\nSubsystem sftp internal-sftp\n",
+         UsePAM no\nStrictModes no\nPidFile {d}/sshd.pid\nSubsystem sftp internal-sftp\n\
+         SetEnv PATH={d}/device-bin:/usr/bin:/bin\n",
         d = dir.display()
     );
     std::fs::write(dir.join("sshd_config"), config).unwrap();
@@ -382,4 +390,153 @@ async fn rmra_ssh_runs_a_command_on_a_real_sshd() {
     assert!(stderr.contains("debug: context   local"), "{stderr}");
     assert!(stderr.contains(&format!("@{ALIAS}")), "{stderr}");
     assert!(stderr.contains("ProxyCommand="), "{stderr}");
+}
+
+/// What the device runs an install with, faked in `dir/device-bin`, their
+/// state in `dir/device-state`: `remora-otactl` (install copies the bundle
+/// to `installed` and draws RAUC's progress the way the real one does;
+/// validate touches `validated`), `rauc status` (the booted slot, from
+/// `slot`) and `reboot` (boots slot B).
+fn device_tools(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let state = dir.join("device-state");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("slot"), "A\n").unwrap();
+    let s = state.display();
+    let tools = [
+        (
+            "remora-otactl",
+            format!(
+                "#!/bin/sh\n\
+                 case \"$1\" in\n\
+                 install) shift; [ \"$1\" = --no-reboot ] && shift\n\
+                   [ -f \"$1\" ] || {{ echo \"no bundle $1\" >&2; exit 1; }}\n\
+                   printf 'Installing %s\\n' \"$1\"\n\
+                   printf '\\r\\033[2K[████░░░░]  50%% Copying image to bootimg.1'\n\
+                   printf '\\r\\033[2K[████████] 100%% Copying image to bootimg.1\\n'\n\
+                   cp \"$1\" {s}/installed; echo 'Install succeeded'; exit 0;;\n\
+                 validate) touch {s}/validated; echo 'Slot marked good';;\n\
+                 *) exit 2;;\n\
+                 esac\n"
+            ),
+        ),
+        (
+            "rauc",
+            format!(
+                "#!/bin/sh\n[ \"$1\" = status ] && echo \"RAUC_SYSTEM_BOOTED_BOOTNAME='$(cat {s}/slot)'\"\n"
+            ),
+        ),
+        ("reboot", format!("#!/bin/sh\necho B > {s}/slot\n")),
+    ];
+    for (name, script) in tools {
+        let path = dir.join("device-bin").join(name);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    state
+}
+
+#[tokio::test]
+async fn rmra_install_uploads_resumes_installs_reboots_and_validates() {
+    use sha2::Digest;
+    let available = |tool: &str| {
+        std::process::Command::new(tool)
+            .arg("-V")
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+    };
+    if !Path::new("/usr/sbin/sshd").exists() || !available("ssh") {
+        eprintln!("skipped: no OpenSSH server/client here");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let mut server = sshd(dir.path(), port);
+    let state = device_tools(dir.path());
+    for _ in 0..50 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let login = std::env::var("USER").unwrap_or_else(|_| "root".into());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(pb::channel_service_server::ChannelServiceServer::new(
+                Gateway {
+                    dir: dir.path().to_path_buf(),
+                    sshd_port: port,
+                    login,
+                },
+            ))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+    );
+    let config = dir.path().join("rmra");
+    std::fs::create_dir_all(config.join("contexts/local")).unwrap();
+    std::fs::write(
+        config.join("contexts/local/meta.json"),
+        format!(
+            r#"{{"name":"local","endpoint":{{"address":"{address}","tls":{{"disabled":true}}}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        config.join("contexts/local/credentials.json"),
+        r#"{"kind":"access-key","token":"t"}"#,
+    )
+    .unwrap();
+
+    // A bundle, half of it already on the device from an interrupted run.
+    let bundle: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    let local = dir.path().join("update.raucb");
+    std::fs::write(&local, &bundle).unwrap();
+    let sha256: String = sha2::Sha256::digest(&bundle)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let remote_dir = dir.path().join("data-cache");
+    std::fs::create_dir_all(&remote_dir).unwrap();
+    std::fs::write(
+        remote_dir.join(format!("rmra-install-{}.raucb.part", &sha256[..16])),
+        &bundle[..1_200_000],
+    )
+    .unwrap();
+
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
+        .args(["install", SERIAL])
+        .arg(&local)
+        .arg("--remote-dir")
+        .arg(&remote_dir)
+        .env("RMRA_CONFIG", &config)
+        .env_remove("RMRA_CONTEXT")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
+    let _ = server.kill();
+    let _ = server.wait();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    assert_eq!(std::fs::read(state.join("installed")).unwrap(), bundle);
+    assert!(state.join("validated").exists(), "{stderr}");
+    assert_eq!(std::fs::read_to_string(state.join("slot")).unwrap(), "B\n");
+    // The bundle is gone from the device once installed.
+    assert_eq!(std::fs::read_dir(&remote_dir).unwrap().count(), 0);
+    // Each phase on its line, the resume and the slots said.
+    for said in [
+        "uploading",
+        "verifying",
+        "installing",
+        "rebooting",
+        "validating",
+        "resumed at",
+        "slot A → B",
+    ] {
+        assert!(stderr.contains(said), "{said:?} not in {stderr}");
+    }
 }

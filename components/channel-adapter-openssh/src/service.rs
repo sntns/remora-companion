@@ -3,8 +3,10 @@ use std::{io::Write, path::Path};
 use error_stack::ResultExt;
 use remora_channel::{
     adapter::ssh::{Error, Result, SshClientAdapter},
-    model::{SshCommand, SshKeys},
+    model::{ExecInput, ExecOutcome, SshCommand, SshKeys},
 };
+use remora_progress::OperationContext;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// Runs `ssh` as a child on this process's terminal.
 ///
@@ -34,6 +36,176 @@ impl SshClientAdapter for OpenSshClientImpl {
         let status = relay_until_exit(&mut child).await?;
         Ok(exit_code(status))
     }
+
+    async fn exec(
+        &self,
+        command: &SshCommand,
+        keys: &SshKeys,
+        input: Option<&ExecInput>,
+        echo: bool,
+        ctx: &OperationContext,
+    ) -> Result<ExecOutcome> {
+        let (_workdir, key_options) = write_keys(keys)?;
+        let mut child = tokio::process::Command::new(&command.program)
+            .args(&key_options)
+            .args(&command.arguments)
+            .stdin(if input.is_some() {
+                std::process::Stdio::piped()
+            } else {
+                std::process::Stdio::null()
+            })
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .change_context_lazy(|| Error::Spawn(command.program.clone()))?;
+
+        let stdin = child.stdin.take();
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let stderr = child.stderr.take().expect("stderr is piped");
+        let feeding = async {
+            match (input, stdin) {
+                (Some(input), Some(stdin)) => feed(input, stdin, ctx).await,
+                _ => Ok(0),
+            }
+        };
+        let reading = async {
+            tokio::join!(
+                collect(stdout, echo.then_some(ctx)),
+                collect(stderr, echo.then_some(ctx))
+            )
+        };
+        let run = async {
+            let (sent, (out, err)) = tokio::join!(feeding, reading);
+            let status = child.wait().await.change_context(Error::Wait)?;
+            Ok::<_, error_stack::Report<Error>>((sent, out, err, status))
+        };
+        let (sent, stdout, stderr, status): (Result<u64>, _, _, _) = tokio::select! {
+            ran = run => ran?,
+            // Dropping the run drops the child, which kill_on_drop kills.
+            _ = ctx.cancel.cancelled() => return Err(error_stack::Report::new(Error::Cancelled)),
+        };
+        Ok(ExecOutcome {
+            code: exit_code(status),
+            stdout,
+            stderr,
+            // A command that ends without reading all of it (the connection
+            // dropping) leaves the rest unsent: the caller tells from the
+            // device what it got.
+            sent: sent?,
+        })
+    }
+}
+
+/// Streams `input` from its offset to `stdin`, reporting the bytes sent
+/// (counted from the file's start) out of its size; closes stdin at the
+/// end so the remote command sees EOF. A write failing means the command
+/// or the connection went away: what was sent until then is returned.
+async fn feed(
+    input: &ExecInput,
+    mut stdin: tokio::process::ChildStdin,
+    ctx: &OperationContext,
+) -> Result<u64> {
+    let read_error = || Error::Input(input.path.clone());
+    let mut file = tokio::fs::File::open(&input.path)
+        .await
+        .change_context_lazy(read_error)?;
+    let size = file.metadata().await.change_context_lazy(read_error)?.len();
+    file.seek(std::io::SeekFrom::Start(input.offset))
+        .await
+        .change_context_lazy(read_error)?;
+    let mut buffer = vec![0; 1024 * 1024];
+    let mut sent = 0u64;
+    ctx.sink.progress_bytes(input.offset, size);
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .await
+            .change_context_lazy(read_error)?;
+        if read == 0 {
+            break;
+        }
+        if stdin.write_all(&buffer[..read]).await.is_err() {
+            break;
+        }
+        sent += read as u64;
+        ctx.sink.progress_bytes(input.offset + sent, size);
+    }
+    let _ = stdin.shutdown().await;
+    Ok(sent)
+}
+
+/// Everything `stream` says, as text, one line per line it drew: split at
+/// carriage returns too -- a progress bar redrawn in place is one line per
+/// redraw -- and without terminal escapes (colours, cursor moves, line
+/// clears), which a program drawing for a terminal sends regardless. Each
+/// non-blank line is logged through `echo` as it comes.
+async fn collect(
+    mut stream: impl tokio::io::AsyncRead + Unpin,
+    echo: Option<&OperationContext>,
+) -> String {
+    let mut text = String::new();
+    let mut pending = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let flush = |pending: &mut Vec<u8>, text: &mut String| {
+        let line = plain(&String::from_utf8_lossy(pending));
+        pending.clear();
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            return;
+        }
+        if let Some(ctx) = echo {
+            ctx.sink.log(line.trim().to_owned());
+        }
+        text.push_str(line);
+        text.push('\n');
+    };
+    loop {
+        let read = match stream.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        for &byte in &buffer[..read] {
+            if byte == b'\n' || byte == b'\r' {
+                flush(&mut pending, &mut text);
+            } else {
+                pending.push(byte);
+            }
+        }
+    }
+    flush(&mut pending, &mut text);
+    text
+}
+
+/// `text` without its terminal escape sequences: CSI (`ESC [ … letter`),
+/// OSC (`ESC ] … BEL`) and two-character ones.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                for c in chars.by_ref() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Writes `keys` to a fresh private (0700) directory, each file 0600 --
@@ -243,5 +415,14 @@ mod tests {
             ["PRIVATE KEY", "CERT", "@cert-authority * HOSTCA"]
         );
         assert!(!std::path::Path::new(lines[2]).exists());
+    }
+
+    #[test]
+    fn terminal_escapes_are_stripped() {
+        assert_eq!(
+            plain("\u{1b}[2K\u{1b}[36m[████░░] 45%\u{1b}[0m Copying"),
+            "[████░░] 45% Copying"
+        );
+        assert_eq!(plain("\u{1b}]0;title\u{7}done"), "done");
     }
 }

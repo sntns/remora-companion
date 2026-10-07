@@ -1,6 +1,6 @@
 [package]
-name = "remora-channel"
-description = "Domain crate for the channel vertical: reaching inside a device through sntns-platform's remora channel -- the gateway and ssh-client ports, and the channel application port (open, ssh)"
+name = "remora-install"
+description = "Domain crate for the install vertical: installing an OS image (a RAUC bundle) on a device over its remora channel, and the install application port"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,9 @@ publish.workspace = true
 
 [dependencies]
 remora-context = { path = "../context" }
+remora-channel = { path = "../channel" }
 remora-progress = { path = "../progress" }
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
-zeroize.workspace = true

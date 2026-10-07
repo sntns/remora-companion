@@ -260,6 +260,25 @@ sha256, then renamed (`--force` replaces an existing file). A dropped
 connection is picked up where it stopped, and so is an interrupted run:
 run the same command again.
 
+### Install an image on one device, over its channel
+
+```
+rmra install 525400C0FFEE update-rp5.raucb
+rmra install 525400C0FFEE --release 2026.10.0 --board rp5
+```
+
+For a bundle that isn't (or shouldn't be) rolled out through a
+deployment -- a development build, a device to repair. Over the device's
+ssh channel, as the `admin` role: uploads the bundle to `/data/cache`
+(`--remote-dir`), picking up where an earlier upload stopped (a dropped
+channel, or Ctrl-C and run again); checks its sha256 on the device;
+installs it with `remora-otactl`; reboots into the new slot and waits
+for the device to come back on it; validates it (`--no-validate` to do
+it yourself, `--no-reboot` to stop after installing). Each step shows
+its progress and what the device says. `--release` picks a `type:rauc`
+artifact the way `release download` does, downloaded first into
+`~/.cache/rmra/bundles`, reused by later runs.
+
 ### Roll it out and follow it
 
 ```

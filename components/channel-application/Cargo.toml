@@ -13,6 +13,8 @@ async-trait.workspace = true
 error-stack.workspace = true
 ssh-key.workspace = true
 rand_core.workspace = true
+remora-progress = { path = "../progress" }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 remora-context-application = { path = "../context-application" }

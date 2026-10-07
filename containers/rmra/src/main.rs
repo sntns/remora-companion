@@ -69,6 +69,11 @@ enum Commands {
     /// Deploy a release to devices (same as `rmra deployment create`).
     Deploy(remora_ota_application_transport_cli::DeployArgs),
 
+    /// Install an OS image (a RAUC bundle, local or a release's) on a
+    /// device over its channel: upload (resumable), verify, install,
+    /// reboot into it and validate it.
+    Install(remora_install_application_transport_cli::Args),
+
     /// Update rmra itself to its latest release.
     Update(remora_update_application_transport_cli::Args),
 
@@ -167,6 +172,17 @@ async fn run() {
         Commands::Deploy(args) => {
             exit_on_error(ota::run_deploy(args, &services.ota, over).await, verbose)
         }
+        Commands::Install(args) => exit_on_error(
+            remora_install_application_transport_cli::run(
+                args,
+                &services.install,
+                &services.ota,
+                &services.context,
+                over,
+            )
+            .await,
+            verbose,
+        ),
     };
     // Exit now rather than return: `channel open` may still have a thread
     // blocked reading stdin, which would otherwise keep the runtime alive.

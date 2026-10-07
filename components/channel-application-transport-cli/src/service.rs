@@ -236,7 +236,7 @@ pub async fn run_scp(
 /// This program's own `channel open`, quoted for the shell ssh runs a
 /// ProxyCommand with, under the context and for the device the session
 /// resolved to.
-fn proxy_command() -> Result<ProxyCommandBuilder> {
+pub fn proxy_command() -> Result<ProxyCommandBuilder> {
     let executable = std::env::current_exe().change_context(Error::SelfPath)?;
     Ok(Arc::new(move |target: &ProxyTarget| {
         // The context names the role too: it acts as the one the key was

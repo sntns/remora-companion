@@ -6,6 +6,10 @@ pub enum Error {
     Spawn(std::path::PathBuf),
     #[error("failed waiting for ssh to finish")]
     Wait,
+    #[error("failed to read {0}")]
+    Input(std::path::PathBuf),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

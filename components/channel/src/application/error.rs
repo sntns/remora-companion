@@ -16,6 +16,8 @@ pub enum Error {
     Certify(String),
     #[error("failed to run the ssh client")]
     Ssh,
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

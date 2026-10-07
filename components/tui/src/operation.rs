@@ -76,9 +76,21 @@ pub struct Phase {
     /// Set once the phase reports a transfer (a download feeding it): its
     /// throughput and total, for a third line.
     transfer: Option<(Rate, u64)>,
-    /// The line under the bar, as last drawn.
+    /// The bytes line under a byte bar, as last drawn.
     detail: String,
+    /// The phase's last log lines, under everything else.
+    logs: VecDeque<String>,
+    /// Off a terminal: the last line printed, its digits blanked, and
+    /// when -- a counter ticking ("waiting … (14s)") isn't news each tick.
+    printed: Option<(String, Instant)>,
 }
+
+/// Off a terminal, how often a line that only differs from the previous
+/// one by its numbers is printed again.
+const REPEAT_EVERY: Duration = Duration::from_secs(30);
+
+/// How many of a phase's log lines stay on screen under it.
+const LOG_LINES: usize = 3;
 
 impl Phase {
     fn start(name: String) -> Self {
@@ -98,6 +110,8 @@ impl Phase {
             rate: None,
             transfer: None,
             detail: String::new(),
+            logs: VecDeque::new(),
+            printed: None,
         }
     }
 
@@ -115,7 +129,10 @@ impl Phase {
                 let detail = self.rate.as_ref().map(|rate| rate.detail(done, total));
                 let transfer = self.transfer_line();
                 let line = [detail, transfer].into_iter().flatten().collect::<Vec<_>>();
-                eprintln!("  {}%  {}", tenth * 10, line.join(" · "));
+                match line.is_empty() {
+                    true => eprintln!("  {}%", tenth * 10),
+                    false => eprintln!("  {}%  {}", tenth * 10, line.join(" · ")),
+                }
             }
             return;
         };
@@ -125,12 +142,13 @@ impl Phase {
             // anything else (files for a copy) a percentage and an ETA.
             line.clear();
             let name = self.name.replace('{', "{{").replace('}', "}}");
+            // `{msg}` holds the lines under the bar, each starting with its
+            // own newline: none at all when there's nothing to show.
             let template = match self.rate {
-                Some(_) => format!(
-                    "{name} [{{bar:30.cyan/blue}}] {{percent:>3}}%\n{}  {{msg}}",
-                    crate::dim("│")
-                ),
-                None => format!("{name} [{{bar:30.cyan/blue}}] {{percent:>3}}% · {{eta}} left"),
+                Some(_) => format!("{name} [{{bar:30.cyan/blue}}] {{percent:>3}}%{{msg}}"),
+                None => {
+                    format!("{name} [{{bar:30.cyan/blue}}] {{percent:>3}}% · {{eta}} left{{msg}}")
+                }
             };
             let bar = cliclack::progress_bar(total).with_template(&template);
             bar.start("");
@@ -143,8 +161,8 @@ impl Phase {
         }
         if let Some(rate) = &self.rate {
             self.detail = rate.detail(done, total);
-            self.redraw();
         }
+        self.redraw();
     }
 
     fn transfer(&mut self, done: u64, total: u64) {
@@ -173,28 +191,49 @@ impl Phase {
         })
     }
 
-    /// The lines under a bar: its detail, then the transfer feeding it.
+    /// The lines under the phase's bar or spinner: the bytes detail, the
+    /// transfer feeding it, then its last log lines -- each on its own
+    /// line, after a newline, so that none means nothing at all.
+    fn lines(&self) -> String {
+        let detail = (!self.detail.is_empty()).then(|| self.detail.clone());
+        detail
+            .into_iter()
+            .chain(self.transfer_line())
+            .chain(self.logs.iter().cloned())
+            .map(|line| format!("\n{}  {}", crate::dim("│"), crate::dim(line)))
+            .collect()
+    }
+
     fn redraw(&self) {
-        let Some(bar) = self.line.as_ref().filter(|_| self.bar) else {
-            return;
-        };
-        let mut message = crate::dim(&self.detail);
-        if let Some(transfer) = self.transfer_line() {
-            message = format!("{message}\n{}  {}", crate::dim("│"), crate::dim(transfer));
+        match &self.line {
+            // A bar's name is in its template.
+            Some(bar) if self.bar => bar.set_message(self.lines()),
+            Some(spinner) => spinner.set_message(format!("{}{}", self.name, self.lines())),
+            None => {}
         }
-        bar.set_message(message);
     }
 
     fn log(&mut self, message: &str) {
-        match &self.line {
-            // A bar's name is in its template: the message is the detail.
-            Some(_) if self.bar => {
-                self.detail = message.to_owned();
-                self.redraw();
+        if self.line.is_none() {
+            let shape: String = message
+                .chars()
+                .map(|c| if c.is_ascii_digit() { '#' } else { c })
+                .collect();
+            let repeat = self
+                .printed
+                .as_ref()
+                .is_some_and(|(last, at)| *last == shape && at.elapsed() < REPEAT_EVERY);
+            if !repeat {
+                eprintln!("  {message}");
+                self.printed = Some((shape, Instant::now()));
             }
-            Some(line) => line.set_message(format!("{} {}", self.name, crate::dim(message))),
-            None => eprintln!("  {message}"),
+            return;
         }
+        if self.logs.len() == LOG_LINES {
+            self.logs.pop_front();
+        }
+        self.logs.push_back(message.to_owned());
+        self.redraw();
     }
 
     fn done(self) {
@@ -224,14 +263,22 @@ impl Phase {
     }
 }
 
-/// How long the throughput is averaged over: long enough not to flicker,
-/// short enough to follow a disk slowing down as its cache fills.
-const RATE_WINDOW: Duration = Duration::from_secs(5);
+/// How long the throughput is averaged over: long enough not to swing
+/// with a link's bursts, short enough to follow a disk slowing down as its
+/// cache fills.
+const RATE_WINDOW: Duration = Duration::from_secs(15);
+
+/// How much of it it takes before a throughput (and a time left) is shown:
+/// the first seconds of a transfer mostly measure buffers filling.
+const RATE_SETTLE: Duration = Duration::from_secs(3);
 
 /// A byte count's throughput, over the last [`RATE_WINDOW`].
 struct Rate {
     started: Instant,
     samples: VecDeque<(Instant, u64)>,
+    /// Where the count started: a resumed transfer's bytes before this run
+    /// aren't its own.
+    first: Option<u64>,
     last: u64,
 }
 
@@ -240,11 +287,13 @@ impl Rate {
         Self {
             started: Instant::now(),
             samples: VecDeque::new(),
+            first: None,
             last: 0,
         }
     }
 
     fn sample(&mut self, done: u64) {
+        self.first.get_or_insert(done);
         let now = Instant::now();
         self.samples.push_back((now, done));
         self.last = done;
@@ -260,6 +309,9 @@ impl Rate {
     /// Bytes per second, once there's enough to tell.
     fn per_second(&self) -> Option<f64> {
         let (first, last) = (self.samples.front()?, self.samples.back()?);
+        if self.started.elapsed() < RATE_SETTLE {
+            return None;
+        }
         let elapsed = last.0.duration_since(first.0).as_secs_f64();
         (elapsed >= 0.5).then(|| last.1.saturating_sub(first.1) as f64 / elapsed)
     }
@@ -280,13 +332,15 @@ impl Rate {
         }
     }
 
-    /// `634.1 MiB in 21s, 30.2 MiB/s`
+    /// `634.1 MiB in 21s, 30.2 MiB/s`: what this run moved, not what a
+    /// resumed transfer started from.
     fn summary(&self) -> String {
         let elapsed = self.started.elapsed();
-        let speed = self.last as f64 / elapsed.as_secs_f64().max(0.001);
+        let moved = self.last.saturating_sub(self.first.unwrap_or(0));
+        let speed = moved as f64 / elapsed.as_secs_f64().max(0.001);
         format!(
             "{} in {}, {}/s",
-            crate::bytes(self.last),
+            crate::bytes(moved),
             duration(elapsed),
             crate::bytes(speed as u64)
         )
@@ -320,11 +374,25 @@ mod tests {
         rate.sample(0);
         assert_eq!(rate.detail(0, 1024 * 1024), "0 B of 1.0 MiB");
 
+        // Settled: some seconds in.
+        rate.started = Instant::now() - Duration::from_secs(5);
         let start = Instant::now() - Duration::from_secs(2);
         rate.samples = VecDeque::from([(start, 0), (start + Duration::from_secs(2), 2 << 20)]);
         assert_eq!(
             rate.detail(2 << 20, 6 << 20),
             "2.0 MiB of 6.0 MiB · 1.0 MiB/s · 4s left"
+        );
+    }
+
+    #[test]
+    fn a_resumed_transfer_sums_up_what_this_run_moved() {
+        let mut rate = Rate::new();
+        rate.sample(43 << 20);
+        rate.sample(177 << 20);
+        assert!(
+            rate.summary().starts_with("134.0 MiB in "),
+            "{}",
+            rate.summary()
         );
     }
 }

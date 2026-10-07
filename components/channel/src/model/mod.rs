@@ -1,8 +1,8 @@
 mod ssh;
 
 pub use ssh::{
-    PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate, SshCommand, SshKeys,
-    SshRequest, SshRole,
+    shell_quote, ExecInput, ExecOutcome, ExecRequest, PreparedSsh, ProxyCommandBuilder,
+    ProxyTarget, ScpRequest, SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
 };
 
 /// What a channel profile resolved to on the device's side.

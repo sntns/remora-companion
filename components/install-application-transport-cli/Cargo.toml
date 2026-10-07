@@ -1,0 +1,21 @@
+[package]
+name = "remora-install-application-transport-cli"
+description = "CLI transport for the install vertical: rmra install"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-install = { path = "../install" }
+remora-context = { path = "../context" }
+remora-ota = { path = "../ota" }
+remora-ota-application-transport-cli = { path = "../ota-application-transport-cli" }
+remora-channel-application-transport-cli = { path = "../channel-application-transport-cli" }
+remora-progress = { path = "../progress" }
+remora-tui = { path = "../tui" }
+remora-completion = { path = "../completion" }
+remora-format = { path = "../format" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true

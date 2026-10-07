@@ -252,7 +252,7 @@ pub async fn run(
                 .get_release(over, &release)
                 .await
                 .map_err(ota_error)?;
-            let picked = choose(
+            let picked = choose_artifact(
                 &release,
                 found.artifacts,
                 artifact.as_deref(),
@@ -328,9 +328,10 @@ pub async fn run(
     }
 }
 
-/// The artifact of `release` to download: the one named, else the only one
-/// left by `board` and `kind`, else the operator's pick.
-fn choose(
+/// The artifact of `release` to use: the one named, else the only one
+/// left by `board` and `kind`, else the operator's pick (with nobody at
+/// the terminal, an error listing them).
+pub fn choose_artifact(
     release: &str,
     artifacts: Vec<Artifact>,
     name: Option<&str>,
@@ -370,8 +371,7 @@ fn choose(
             names(&candidates)
         ))),
         _ => {
-            let mut select =
-                tui::select(format!("Artifact of {} to download", tui::accent(release)));
+            let mut select = tui::select(format!("Artifact of {} to use", tui::accent(release)));
             for (i, artifact) in candidates.iter().enumerate() {
                 let tags = if artifact.tag_condition.is_empty() {
                     "for all devices".to_owned()

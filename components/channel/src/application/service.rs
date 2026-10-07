@@ -1,9 +1,10 @@
 use remora_context::model::ContextOverride;
+use remora_progress::OperationContext;
 
 use super::error::Result;
 use crate::{
     adapter::gateway::Channel,
-    model::{PreparedSsh, ScpRequest, SshRequest},
+    model::{ExecOutcome, ExecRequest, PreparedSsh, ScpRequest, SshRequest},
 };
 
 /// The channel vertical's application-facing port.
@@ -33,6 +34,13 @@ pub trait ChannelServiceInterface: Send + Sync {
     /// Runs a prepared ssh or scp session; returns the client's exit code.
     /// The key material is on disk only while the client runs.
     async fn run_ssh(&self, prepared: PreparedSsh) -> Result<i32>;
+
+    /// Runs a command on a device without a terminal (see
+    /// [`ExecRequest`]), with the same pinning as `ssh`. A certified key
+    /// is reused for the commands that follow on the same device, as the
+    /// same role and context, while its certificate is still fresh: an
+    /// operation running several steps certifies once.
+    async fn exec(&self, request: ExecRequest, ctx: &OperationContext) -> Result<ExecOutcome>;
 }
 
 #[derive(Clone)]

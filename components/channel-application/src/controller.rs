@@ -1,3 +1,9 @@
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use error_stack::{Report, ResultExt};
 use remora_channel::{
     adapter::{
@@ -6,14 +12,15 @@ use remora_channel::{
     },
     application::{ChannelServiceInterface, Error, Result},
     model::{
-        ChannelKind, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshCertificate,
-        SshCommand, SshKeys, SshRequest, SshRole,
+        ChannelKind, ExecOutcome, ExecRequest, PreparedSsh, ProxyCommandBuilder, ProxyTarget,
+        ScpRequest, SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
     },
 };
 use remora_context::{
     application::ContextService,
     model::{ContextOverride, ResolvedContext},
 };
+use remora_progress::OperationContext;
 use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
 
 use crate::arguments::{self, Operand};
@@ -25,7 +32,19 @@ pub struct ChannelControllerImpl {
     contexts: ContextService,
     gateway: ChannelGatewayAdapterService,
     ssh: SshClientAdapterService,
+    /// Keys certified for `exec`, by context override, device and role,
+    /// with when: reused while their certificate is fresh.
+    certified: tokio::sync::Mutex<HashMap<CertifiedFor, (Arc<Session>, Instant)>>,
 }
+
+/// What a key certified for `exec` was certified for: the context override
+/// (empty for the current context), the device and the ssh role.
+type CertifiedFor = (String, String, SshRole);
+
+/// How long a key certified for `exec` is reused: well within its
+/// certificate's 15 minutes, which only has to hold when a connection
+/// authenticates.
+const REUSE_CERTIFIED: Duration = Duration::from_secs(10 * 60);
 
 impl ChannelControllerImpl {
     pub fn new(
@@ -37,7 +56,40 @@ impl ChannelControllerImpl {
             contexts,
             gateway,
             ssh,
+            certified: Default::default(),
         }
+    }
+
+    /// A session certified for `request`'s device and role: the one
+    /// certified last for them, while fresh, else a new one.
+    async fn exec_session(&self, request: &ExecRequest) -> Result<Arc<Session>> {
+        let key = (
+            request
+                .over
+                .as_ref()
+                .map(|over| over.name.clone())
+                .unwrap_or_default(),
+            request.device.clone(),
+            request.role,
+        );
+        let mut certified = self.certified.lock().await;
+        if let Some((session, at)) = certified.get(&key) {
+            if at.elapsed() < REUSE_CERTIFIED {
+                return Ok(session.clone());
+            }
+        }
+        let session = Arc::new(
+            self.certify(
+                request.over.as_ref(),
+                &request.device,
+                request.role,
+                &request.proxy_command,
+                vec!["BatchMode=yes".to_owned()],
+            )
+            .await?,
+        );
+        certified.insert(key, (session.clone(), Instant::now()));
+        Ok(session)
     }
 
     /// What every ssh-family session needs: a throwaway ed25519 key,
@@ -255,6 +307,41 @@ impl ChannelServiceInterface for ChannelControllerImpl {
             .run(&prepared.command, &prepared.keys)
             .await
             .change_context(Error::Ssh)
+    }
+
+    async fn exec(&self, request: ExecRequest, ctx: &OperationContext) -> Result<ExecOutcome> {
+        let session = self.exec_session(&request).await?;
+        let login = request
+            .login
+            .clone()
+            .unwrap_or_else(|| session.certified.user.clone());
+        let mut arguments = session.pinning.clone();
+        arguments.push("-T".to_owned());
+        arguments.push(format!("{login}@{}", session.certified.host_key_alias));
+        arguments.push(request.command.clone());
+        let command = SshCommand {
+            program: request.binary.clone(),
+            arguments,
+        };
+        self.ssh
+            .exec(
+                &command,
+                &session.keys,
+                request.input.as_ref(),
+                request.echo,
+                ctx,
+            )
+            .await
+            .map_err(|report| {
+                if matches!(
+                    report.current_context(),
+                    remora_channel::adapter::ssh::Error::Cancelled
+                ) {
+                    report.change_context(Error::Cancelled)
+                } else {
+                    report.change_context(Error::Ssh)
+                }
+            })
     }
 }
 
