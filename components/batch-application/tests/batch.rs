@@ -80,14 +80,16 @@ fn temp_path(label: &str) -> PathBuf {
     path
 }
 
-/// A raw disk image with a single MBR partition (index 1 ==
-/// `PartitionRole::Shared`) at `PARTITION_OFFSET`, formatted ext4.
+/// A raw disk image with Remora's 4-partition MBR layout, its shared
+/// partition (index 1 == `PartitionRole::Shared`) at `PARTITION_OFFSET`,
+/// formatted ext4; slotA/slotB/data are 1 MiB placeholders, unformatted.
 fn build_raw_disk_with_shared_partition() -> PathBuf {
     let disk = temp_path("disk-raw");
     fs::File::create(&disk).unwrap().set_len(DISK_SIZE).unwrap();
 
     let script = format!(
-        "label: dos\nunit: sectors\n\nstart=2048, size={SFDISK_PARTITION_SECTORS}, type=83\n"
+        "label: dos\nunit: sectors\n\nstart=2048, size={SFDISK_PARTITION_SECTORS}, type=83\n\
+         size=2048, type=83\nsize=2048, type=83\nsize=2048, type=83\n"
     );
     let mut child = std::process::Command::new("sfdisk")
         .arg(&disk)
@@ -303,7 +305,6 @@ async fn runs_the_convert_provision_convert_back_recipe() {
             source: inject_source.clone(),
             dest_path: "/hello.txt".to_string(),
             partition: PartitionSelector::Index(1),
-            boot_mode: None,
             mode: 0o644,
         }),
         BatchStep::ConvertFromRaw {
@@ -381,7 +382,6 @@ async fn stops_at_the_first_failing_step_without_running_the_rest() {
             source: inject_source.clone(),
             dest_path: "/does/not/exist/hello.txt".to_string(),
             partition: PartitionSelector::Index(1),
-            boot_mode: None,
             mode: 0o644,
         }),
         // Must never run.

@@ -322,13 +322,16 @@ Linux only for now — Windows/macOS disk enumeration isn't implemented yet.
 ### Inspect an image's partitions
 
 ```
-remora-etcher image inspect remora.wic --boot-mode efi
-remora-etcher image partition list remora.wic --boot-mode efi
+remora-etcher image inspect remora.wic
+remora-etcher image partition list remora.wic
 ```
 
-Works on a raw image file or directly on a block device. With
-`--boot-mode efi|bios|uboot|rpi`, each partition is labeled with its Remora
-role (shared/efi/slotA/slotB/data).
+Works on a raw image file or directly on a block device. Each partition is
+labeled with its Remora role (shared/efi/slotA/slotB/data), found from the
+image's own layout: on GPT by partition name (`boot`, `slotA`, `slotB`,
+`data`; the EFI partition by its type, an unnamed slotB as the one unnamed
+partition between slotA and data), on MBR by position in Remora's one
+4-partition layout (shared, slotA, slotB, data).
 
 ### Provision an image before you flash it
 
@@ -340,7 +343,7 @@ remora-etcher image partition cp ./my-config.json /play/tplst-app-config/config.
   --image remora.wic --partition data
 
 remora-etcher image partition mkdir /play/tplst-app-config \
-  --image remora.wic --partition shared --boot-mode efi
+  --image remora.wic --partition shared
 ```
 
 Works against ext4 or vfat partitions, auto-detected from the partition

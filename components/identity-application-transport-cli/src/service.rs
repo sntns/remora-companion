@@ -27,8 +27,9 @@ pub enum Command {
     },
 
     /// Build identity.squashfs (like `identity build`) and inject it into
-    /// `Shared:/remora/identity` of `image` in one shot. Boot mode and
-    /// filesystem kind (vfat/ext4) are auto-detected — no `--boot-mode` flag.
+    /// `Shared:/remora/identity` of `image` in one shot. The shared
+    /// partition and its filesystem kind (vfat/ext4) are detected from the
+    /// image itself.
     Create {
         inputs: Vec<PathBuf>,
 

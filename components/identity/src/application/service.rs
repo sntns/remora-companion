@@ -29,8 +29,8 @@ pub trait IdentityServiceInterface: Send + Sync {
 
     /// Build `identity.squashfs` from `inputs`/`hostname`/`machine_id` (see
     /// `build`) and inject it into `Shared:/remora/identity` of `image` in
-    /// one shot. Boot mode and filesystem kind (vfat/ext4) are
-    /// auto-detected — no `--boot-mode` flag.
+    /// one shot. The shared partition and its filesystem kind (vfat/ext4)
+    /// are detected from the image itself.
     async fn create(
         &self,
         inputs: &[PathBuf],

@@ -41,11 +41,11 @@ pub trait ImageServiceInterface: Send + Sync {
     async fn cp_dir(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()>;
 
     /// Write `contents` to `dest_path` inside whichever partition has role
-    /// `role` — resolved from the table's own detected kind (GPT/MBR), no
-    /// boot mode needed (unlike `inject`, which resolves a caller-supplied
-    /// `PartitionSelector::Role` and *does* require one). Used by verticals
-    /// that generate their own content (identity, config) rather than
-    /// acting on a CLI-supplied `--partition`/`--boot-mode` pair.
+    /// `role` — resolved from the image's own layout (see
+    /// `PartitionTable::select_role`), same as `inject` with a
+    /// `PartitionSelector::Role`. Used by verticals that generate their own
+    /// content (identity, config) rather than acting on a CLI-supplied
+    /// `--partition`.
     async fn inject_by_role(
         &self,
         image: &Path,

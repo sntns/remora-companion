@@ -56,7 +56,7 @@ const FAT32_FILSYSTYPE_OFFSET: usize = 0x52;
 
 /// Determine whether the partition at `partition_offset` inside `image` is
 /// ext4 or vfat by reading its own on-disk signature, rather than inferring
-/// it from a boot-mode label the caller would otherwise have to supply.
+/// it from the partition's role.
 fn detect_fs_kind(image: &Path, partition_offset: u64) -> Result<FsKind> {
     let mut file = File::open(image).change_context_lazy(|| Error::Open(image.to_path_buf()))?;
 

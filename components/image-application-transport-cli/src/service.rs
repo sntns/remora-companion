@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 
-use clap::ValueEnum;
 use error_stack::ResultExt;
 use remora_format::human_size;
 use remora_image::{
     application::ImageService,
     model::{
-        BootMode, CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionSelector,
+        CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionSelector,
         PartitionTable, TableKind,
     },
 };
@@ -15,15 +14,12 @@ use super::error::{Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
-    /// Show the partition table kind and a summary of an image or device.
+    /// Show the partition table kind and a summary of an image or device,
+    /// each partition annotated with the Remora role (shared/efi/slotA/
+    /// slotB/data) its layout gives it.
     Inspect {
         /// Image file or block device path.
         image: PathBuf,
-
-        /// Annotate each partition with its Remora role (shared/efi/slotA/
-        /// slotB/data) for this boot mode.
-        #[arg(long, value_enum)]
-        boot_mode: Option<BootModeArg>,
     },
 
     /// List, inspect, and manipulate partitions.
@@ -34,12 +30,7 @@ pub enum Command {
 #[derive(clap::Subcommand)]
 pub enum PartitionCommand {
     /// List the partitions of an image or device.
-    List {
-        image: PathBuf,
-
-        #[arg(long, value_enum)]
-        boot_mode: Option<BootModeArg>,
-    },
+    List { image: PathBuf },
 
     /// Copy a local file or directory into one partition's filesystem. For
     /// a file, `dest_path` is its destination path and its parent directory
@@ -62,13 +53,10 @@ pub enum PartitionCommand {
         image: PathBuf,
 
         /// Which partition: a raw index (as printed by `partition list`),
-        /// or a Remora role name (shared/efi/slota/slotb/data — requires
-        /// --boot-mode).
+        /// or a Remora role name (shared/efi/slota/slotb/data), found from
+        /// the image's own layout.
         #[arg(long)]
         partition: String,
-
-        #[arg(long, value_enum)]
-        boot_mode: Option<BootModeArg>,
 
         /// File mode (permission bits) for the created file. Ignored when
         /// `src` is a directory (each entry keeps its own host mode).
@@ -88,37 +76,15 @@ pub enum PartitionCommand {
         image: PathBuf,
 
         /// Which partition: a raw index (as printed by `partition list`),
-        /// or a Remora role name (shared/efi/slota/slotb/data — requires
-        /// --boot-mode).
+        /// or a Remora role name (shared/efi/slota/slotb/data), found from
+        /// the image's own layout.
         #[arg(long)]
         partition: String,
-
-        #[arg(long, value_enum)]
-        boot_mode: Option<BootModeArg>,
 
         /// Directory mode (permission bits) for the created directory.
         #[arg(long, default_value_t = 0o755)]
         mode: u16,
     },
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum BootModeArg {
-    Efi,
-    Bios,
-    Uboot,
-    Rpi,
-}
-
-impl From<BootModeArg> for BootMode {
-    fn from(value: BootModeArg) -> Self {
-        match value {
-            BootModeArg::Efi => BootMode::Efi,
-            BootModeArg::Bios => BootMode::Bios,
-            BootModeArg::Uboot => BootMode::Uboot,
-            BootModeArg::Rpi => BootMode::Rpi,
-        }
-    }
 }
 
 fn parse_partition_selector(s: &str) -> Result<PartitionSelector> {
@@ -142,7 +108,7 @@ fn parse_partition_selector(s: &str) -> Result<PartitionSelector> {
 
 pub async fn run(command: Command, service: &ImageService) -> Result<()> {
     match command {
-        Command::Inspect { image, boot_mode } => {
+        Command::Inspect { image } => {
             let table = service.inspect(&image).await.change_context(Error::Image)?;
             remora_tui::info(format!(
                 "{}: {} table, {} bytes/sector, {} partition(s)",
@@ -154,12 +120,12 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                 table.sector_size,
                 table.partitions.len(),
             ));
-            print_partitions(&table, boot_mode.map(BootMode::from));
+            print_partitions(&table);
             Ok(())
         }
-        Command::Partition(PartitionCommand::List { image, boot_mode }) => {
+        Command::Partition(PartitionCommand::List { image }) => {
             let table = service.inspect(&image).await.change_context(Error::Image)?;
-            print_partitions(&table, boot_mode.map(BootMode::from));
+            print_partitions(&table);
             Ok(())
         }
         Command::Partition(PartitionCommand::Cp {
@@ -167,7 +133,6 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
             dest_path,
             image,
             partition,
-            boot_mode,
             mode,
         }) => {
             let selector = parse_partition_selector(&partition)?;
@@ -177,7 +142,6 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     source_dir: src,
                     dest_path: dest_path.clone(),
                     partition: selector,
-                    boot_mode: boot_mode.map(BootMode::from),
                 };
                 let (sink, stream) = remora_progress::channel();
                 let follow = remora_tui::follow(stream);
@@ -199,7 +163,6 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     source: src,
                     dest_path: dest_path.clone(),
                     partition: selector,
-                    boot_mode: boot_mode.map(BootMode::from),
                     mode,
                 };
                 service
@@ -217,7 +180,6 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
             dest_path,
             image,
             partition,
-            boot_mode,
             mode,
         }) => {
             let selector = parse_partition_selector(&partition)?;
@@ -225,7 +187,6 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                 image: image.clone(),
                 dest_path: dest_path.clone(),
                 partition: selector,
-                boot_mode: boot_mode.map(BootMode::from),
                 mode,
             };
             service.mkdir(&request).await.change_context(Error::Image)?;
@@ -238,24 +199,11 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
     }
 }
 
-fn print_partitions(table: &PartitionTable, boot_mode: Option<BootMode>) {
-    // A boot mode's role indices only mean something on the table kind it
-    // lays out: BIOS's `data` index is GPT's slotB.
-    let boot_mode = boot_mode.filter(|mode| {
-        let fits = mode.table_kind() == table.kind;
-        if !fits {
-            remora_tui::warning(format!(
-                "Boot mode {mode:?} lays out a {:?} table, this one is {:?}: roles not shown",
-                mode.table_kind(),
-                table.kind
-            ));
-        }
-        fits
-    });
+fn print_partitions(table: &PartitionTable) {
     let mut rows = remora_tui::Table::new(["#", "start", "size", "type", "label", "role"]);
     for entry in &table.partitions {
-        let role = boot_mode
-            .and_then(|mode| mode.role_of(entry.index))
+        let role = table
+            .role_of(entry.index)
             .map(|role| format!("{role:?}"))
             .unwrap_or_else(|| "-".to_string());
         rows.row(

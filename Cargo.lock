@@ -2903,6 +2903,7 @@ dependencies = [
  "error-stack",
  "remora-batch",
  "remora-context",
+ "remora-image",
  "remora-progress",
  "remora-tui",
  "serde_json",

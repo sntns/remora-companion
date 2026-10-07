@@ -54,6 +54,8 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
+    use remora_image::model::{PartitionRole, PartitionSelector};
+
     use super::*;
 
     /// Never actually run in these tests -- they only exercise the
@@ -140,5 +142,24 @@ mod tests {
         .await
         .unwrap();
         let _ = std::fs::remove_file(&recipe);
+    }
+
+    #[test]
+    fn still_parses_a_recipe_naming_a_boot_mode() {
+        // Roles used to need one; they're now found from the image's own
+        // layout, and a recipe written before that keeps working.
+        let steps: Vec<BatchStep> = serde_json::from_str(
+            r#"[{"step": "image-inject", "image": "remora.wic", "source": "a.json",
+                 "dest_path": "/a.json", "partition": {"role": "data"},
+                 "boot_mode": "efi", "mode": 420}]"#,
+        )
+        .unwrap();
+        let [BatchStep::ImageInject(request)] = steps.as_slice() else {
+            panic!("expected one image-inject step, got {steps:?}");
+        };
+        assert_eq!(
+            request.partition,
+            PartitionSelector::Role(PartitionRole::Data)
+        );
     }
 }

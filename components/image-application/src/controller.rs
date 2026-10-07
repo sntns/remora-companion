@@ -22,8 +22,8 @@ use remora_progress::OperationContext;
 
 /// The image vertical's use case: partition-table reading/selection, and
 /// dispatching writes to whichever of the ext4/vfat backends the target
-/// partition's own on-disk signature says it is — never assumed from a
-/// boot-mode label. `ext4` serves the standalone `ext4_file_*` operations,
+/// partition's own on-disk signature says it is — never assumed from the
+/// partition's role. `ext4` serves the standalone `ext4_file_*` operations,
 /// whose image is a filesystem in its own right rather than a partition.
 ///
 /// Every operation is blocking file I/O on an image that can be gigabytes,
@@ -108,7 +108,7 @@ impl ImageControllerImpl {
     fn cp_dir_blocking(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()> {
         let (entry, backend) = self.resolve(&request.image, |table| {
             table
-                .select(request.partition, request.boot_mode)
+                .select(request.partition)
                 .cloned()
                 .change_context(Error::SelectPartition)
         })?;
@@ -181,7 +181,7 @@ impl ImageServiceInterface for ImageControllerImpl {
         self.blocking(move |this| {
             let (entry, backend) = this.resolve(&request.image, |table| {
                 table
-                    .select(request.partition, request.boot_mode)
+                    .select(request.partition)
                     .cloned()
                     .change_context(Error::SelectPartition)
             })?;
@@ -208,7 +208,7 @@ impl ImageServiceInterface for ImageControllerImpl {
         self.blocking(move |this| {
             let (entry, backend) = this.resolve(&request.image, |table| {
                 table
-                    .select(request.partition, request.boot_mode)
+                    .select(request.partition)
                     .cloned()
                     .change_context(Error::SelectPartition)
             })?;

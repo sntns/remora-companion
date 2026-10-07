@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::partition_table::{BootMode, PartitionSelector};
+use super::partition_table::PartitionSelector;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InjectRequest {
@@ -11,7 +11,6 @@ pub struct InjectRequest {
     /// already exist.
     pub dest_path: String,
     pub partition: PartitionSelector,
-    pub boot_mode: Option<BootMode>,
     /// File mode (permission bits only), e.g. `0o644`.
     pub mode: u16,
 }
@@ -24,7 +23,6 @@ pub struct MkdirRequest {
     /// not recursive, same narrow-surface rule as `InjectRequest`.
     pub dest_path: String,
     pub partition: PartitionSelector,
-    pub boot_mode: Option<BootMode>,
     /// Directory mode (permission bits only), e.g. `0o755`.
     pub mode: u16,
 }
@@ -39,5 +37,4 @@ pub struct CpDirRequest {
     /// not created by this request (see `mkdir`).
     pub dest_path: String,
     pub partition: PartitionSelector,
-    pub boot_mode: Option<BootMode>,
 }

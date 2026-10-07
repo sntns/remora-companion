@@ -136,7 +136,6 @@ async fn run_cp_dir_round_trip(mkfs: &str) {
                 source_dir: source.clone(),
                 dest_path: "/".to_string(),
                 partition: PartitionSelector::Index(1),
-                boot_mode: None,
             },
             &remora_progress::OperationContext::noop(),
         )

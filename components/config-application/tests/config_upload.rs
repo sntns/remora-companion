@@ -69,15 +69,17 @@ fn temp_path(label: &str) -> PathBuf {
     path
 }
 
-/// A disk image with a single MBR partition (index 1 == `PartitionRole::Shared`)
-/// at `PARTITION_OFFSET`, containing a real filesystem of kind `mkfs`
-/// ("ext4" or "vfat").
+/// A disk image with Remora's 4-partition MBR layout, its shared partition
+/// (index 1 == `PartitionRole::Shared`) at `PARTITION_OFFSET` containing a
+/// real filesystem of kind `mkfs` ("ext4" or "vfat"); slotA/slotB/data are
+/// 1 MiB placeholders, unformatted.
 fn build_disk_with_shared_partition(mkfs: &str) -> PathBuf {
     let disk = temp_path("disk");
     fs::File::create(&disk).unwrap().set_len(DISK_SIZE).unwrap();
 
     let script = format!(
-        "label: dos\nunit: sectors\n\nstart=2048, size={SFDISK_PARTITION_SECTORS}, type=83\n"
+        "label: dos\nunit: sectors\n\nstart=2048, size={SFDISK_PARTITION_SECTORS}, type=83\n\
+         size=2048, type=83\nsize=2048, type=83\nsize=2048, type=83\n"
     );
     let mut child = Command::new("sfdisk")
         .arg(&disk)
