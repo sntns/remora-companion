@@ -81,6 +81,9 @@ the remote-values `Cache` and `command_line()` for providers),
 `remora-progress` (progress events, `OperationContext`, and
 `cancelled_by_ctrl_c()`: the token every transport hands a long operation,
 so Ctrl-C stops it between steps), `remora-format`,
+`remora-unpack` (reading an image file -- a `.bmaptar` in place, bzip2/
+gzip/zstd on the fly -- and writing a sparse raw: shared by flash's and
+convert's adapters, each behind its own port),
 `remora-platform-grpc` (the vendored protos and the gateway connection), and
 `remora-station-protocol` (the provisioning station's HTTP wire types and
 error codes: one definition, used by the station's HTTP transport and by
