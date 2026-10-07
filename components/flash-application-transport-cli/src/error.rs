@@ -4,6 +4,8 @@ pub enum Error {
     Disk,
     #[error("failed to flash image")]
     Flash,
+    #[error("no usable context to download the image as")]
+    Context,
     #[error("release {0:?} has no disk image to flash")]
     NoDiskImage(String),
     #[error("release {0:?} has disk images for several boards")]

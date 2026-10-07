@@ -106,6 +106,19 @@ pub fn alert(message: impl std::fmt::Display) {
 /// A titled block of detail lines, e.g. a context's settings.
 pub fn note(title: impl std::fmt::Display, body: impl std::fmt::Display) {
     if decorated() {
+        // cliclack dims a note's whole body, which greys out the names
+        // `accent` highlights in it: each line starts back at normal
+        // intensity instead (SGR 22), and what's secondary is `dim`med
+        // explicitly.
+        let body = body.to_string();
+        let body = if console::colors_enabled_stderr() {
+            body.lines()
+                .map(|line| format!("\x1b[22m{line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            body
+        };
         let _ = cliclack::note(title, body);
     } else {
         eprintln!("{title}\n{body}");

@@ -122,6 +122,7 @@ impl ReleaseArtifactAdapter for StubRelease {
             file_name: "src.img.bmaptar".into(),
             boards: vec!["rp5".into()],
             size: self.bytes.len() as u64,
+            tag_condition: "board:rp5 && type:diskimage".into(),
         }])
     }
 
@@ -642,6 +643,7 @@ async fn a_release_artifact_is_flashed_as_it_downloads() {
             release: "r1".into(),
             file_name: images[0].file_name.clone(),
             size: images[0].size,
+            tag_condition: images[0].tag_condition.clone(),
         }),
         bmap: BmapSource::Auto,
         device: device_path.clone(),

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use error_stack::{Report, ResultExt};
-use remora_context::model::ContextOverride;
+use remora_context::{
+    application::ContextService,
+    model::{ContextOverride, ResolvedContext},
+};
 use remora_disk::application::DiskService;
 use remora_flash::{
     application::FlashService,
@@ -73,6 +76,7 @@ pub async fn run(
     command: Command,
     disk: &DiskService,
     flash: &FlashService,
+    contexts: &ContextService,
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     let Command {
@@ -106,6 +110,7 @@ pub async fn run(
                 release,
                 file_name: chosen.file_name,
                 size: chosen.size,
+                tag_condition: chosen.tag_condition,
             })
         }
         (None, None) => unreachable!("clap requires --image or --release"),
@@ -121,7 +126,20 @@ pub async fn run(
     // was: the image as it reads, the target as the disk it resolves to,
     // not the name it was given.
     let summary = flash.inspect(&request).await.change_context(Error::Flash)?;
-    remora_tui::note("Image", image_lines(&request.image, &summary));
+    // Where a download comes from: the context it runs as.
+    let remote = match &request.image {
+        ImageOrigin::Artifact(_) => Some(
+            contexts
+                .resolve(over)
+                .await
+                .change_context(Error::Context)?,
+        ),
+        ImageOrigin::File(_) => None,
+    };
+    remora_tui::note(
+        "Image",
+        image_lines(&request.image, remote.as_ref(), &summary),
+    );
     let info = disk
         .info(&request.device)
         .await
@@ -219,23 +237,45 @@ fn choose(
     }
 }
 
-fn image_lines(origin: &ImageOrigin, summary: &ImageSummary) -> String {
-    let name = match origin {
-        ImageOrigin::File(path) => path
-            .file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy()
-            .into_owned(),
-        ImageOrigin::Artifact(artifact) => format!(
-            "{}  {}",
-            artifact.file_name,
-            remora_tui::dim(format!(
-                "release {}, {}, downloaded as it's flashed",
-                artifact.release,
-                human_size(artifact.size)
-            ))
-        ),
-    };
+/// The Image note: the image's name, where a release's is downloaded
+/// from, then one line each for its format, sizes and `.bmap`.
+fn image_lines(
+    origin: &ImageOrigin,
+    remote: Option<&ResolvedContext>,
+    summary: &ImageSummary,
+) -> String {
+    let mut lines = Vec::new();
+    match origin {
+        ImageOrigin::File(path) => lines.push(remora_tui::accent(
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy(),
+        )),
+        ImageOrigin::Artifact(artifact) => {
+            lines.push(remora_tui::accent(&artifact.file_name));
+            let mut from = format!(
+                "{} {} from release {}",
+                remora_tui::dim("download:"),
+                human_size(artifact.size),
+                remora_tui::accent(&artifact.release)
+            );
+            if let Some(remote) = remote {
+                let mut context = format!("context {}", remote.context.name);
+                if let Some(role) = &remote.role {
+                    context.push_str(&format!(" as {}", role.display_name()));
+                }
+                from.push_str(&format!(", {}", remora_tui::dim(context)));
+            }
+            lines.push(from);
+            if !artifact.tag_condition.is_empty() {
+                lines.push(format!(
+                    "{} {}",
+                    remora_tui::dim("tags:"),
+                    artifact.tag_condition
+                ));
+            }
+        }
+    }
     let format = match (summary.bundle, summary.compression) {
         (true, Some(compression)) => format!("bmaptar bundle, {compression}-compressed"),
         (true, None) => "bmaptar bundle, raw".to_owned(),
@@ -267,24 +307,29 @@ fn image_lines(origin: &ImageOrigin, summary: &ImageSummary) -> String {
         ),
         None => "none: the whole image is copied as is, unverified".to_owned(),
     };
-    format!(
-        "{}  {}\nsize: {}  to write: {}\nbmap: {}",
-        remora_tui::accent(name),
-        format,
-        size,
-        to_write,
-        bmap
-    )
+    let label = remora_tui::dim;
+    lines.push(format!("{} {format}", label("format:")));
+    lines.push(format!(
+        "{} {size}  {} {to_write}",
+        label("size:"),
+        label("to write:")
+    ));
+    lines.push(format!("{} {bmap}", label("bmap:")));
+    lines.join("\n")
 }
 
 fn disk_line(info: &remora_disk::model::DiskInfo) -> String {
     let yes_no = |on: bool| if on { "yes" } else { "no" };
+    let label = remora_tui::dim;
     format!(
-        "{}  {}\nsize: {}  removable: {}  system: {}",
+        "{}  {}\n{} {}  {} {}  {} {}",
         remora_tui::accent(info.path.display()),
         info.model.as_deref().unwrap_or("-"),
+        label("size:"),
         human_size(info.size_bytes),
+        label("removable:"),
         yes_no(info.is_removable),
+        label("system:"),
         yes_no(info.is_system_disk),
     )
 }

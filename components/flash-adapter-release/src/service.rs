@@ -46,6 +46,7 @@ impl ReleaseArtifactAdapter for ReleaseArtifactAdapterImpl {
                         .collect(),
                     file_name: artifact.file_name,
                     size: artifact.content_length,
+                    tag_condition: artifact.tag_condition.clone(),
                 })
             })
             .collect();

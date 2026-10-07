@@ -34,6 +34,9 @@ pub struct ReleaseArtifact {
     pub release: String,
     pub file_name: String,
     pub size: u64,
+    /// Which devices it's for, as the release says (`board:rp5 &&
+    /// type:diskimage`); empty is all.
+    pub tag_condition: String,
 }
 
 impl fmt::Display for ReleaseArtifact {
@@ -50,4 +53,6 @@ pub struct DiskImage {
     /// The `board:` values of its tag condition; empty when it names none.
     pub boards: Vec<String>,
     pub size: u64,
+    /// Its whole tag condition, as the release says.
+    pub tag_condition: String,
 }

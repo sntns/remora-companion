@@ -281,6 +281,7 @@ mod tests {
                 release: "r1".into(),
                 file_name: "disk.wic.bmaptar".into(),
                 size: bytes().len() as u64,
+                tag_condition: String::new(),
             },
             handle,
             CancellationToken::new(),
