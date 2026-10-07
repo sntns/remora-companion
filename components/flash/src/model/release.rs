@@ -4,6 +4,7 @@ use remora_context::model::ContextOverride;
 
 /// Where the image to flash is.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)] // one per flash, never stored in bulk: its size doesn't matter
 pub enum ImageOrigin {
     /// A local file.
     File(PathBuf),
