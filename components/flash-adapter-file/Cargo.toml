@@ -17,3 +17,6 @@ flate2 = "1"
 # The same zstd (C libzstd, vendored and built by zstd-sys) backhand
 # already links into remora-etcher for squashfs.
 zstd = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+tokio-util.workspace = true

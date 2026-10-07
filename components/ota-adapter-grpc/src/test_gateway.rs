@@ -58,6 +58,11 @@ pub struct State {
     /// Upload streams that ended without being committed (failed, reset by
     /// the client, or the client gone).
     pub abandoned_uploads: usize,
+    /// The next download stream fails after sending this many bytes, once:
+    /// a dropped connection.
+    pub fail_next_download_after: Option<usize>,
+    /// Every download call, as `(file name, offset)`.
+    pub downloads: Vec<(String, u64)>,
     pub devices: BTreeMap<String, HashMap<String, String>>,
     deployments: BTreeMap<String, StoredDeployment>,
     /// Manufactured serials, with how many times each was signed.
@@ -183,8 +188,63 @@ fn terminal(status: &str) -> bool {
     matches!(status, "SUCCEEDED" | "FAILED" | "CANCELED" | "REJECTED")
 }
 
+/// How the fake streams a download back: small, so a test sees several.
+const DOWNLOAD_CHUNK: usize = 64 * 1024;
+
 #[tonic::async_trait]
 impl pb::release_service_server::ReleaseService for TestGateway {
+    type DownloadReleaseArtifactStream = std::pin::Pin<
+        Box<
+            dyn tokio_stream::Stream<
+                    Item = Result<pb::ReleaseServiceDownloadReleaseArtifactResponse, Status>,
+                > + Send,
+        >,
+    >;
+
+    async fn download_release_artifact(
+        &self,
+        request: Request<pb::ReleaseServiceDownloadReleaseArtifactRequest>,
+    ) -> Result<Response<Self::DownloadReleaseArtifactStream>, Status> {
+        let request = request.into_inner();
+        let Some(bytes) = self.artifact_bytes(&request.release_name, &request.artifact_file_name)
+        else {
+            return Err(Status::not_found("the artifact has not been found"));
+        };
+        let offset = request.artifact_content_offset.unwrap_or(0);
+        let length = request
+            .artifact_content_length
+            .unwrap_or(bytes.len() as i64 - offset);
+        if offset < 0 || length < 0 || offset + length > bytes.len() as i64 {
+            return Err(Status::out_of_range("the range is past the artifact's end"));
+        }
+        let fail_after = {
+            let mut state = self.state();
+            state
+                .downloads
+                .push((request.artifact_file_name.clone(), offset as u64));
+            state.fail_next_download_after.take()
+        };
+        let range = bytes[offset as usize..(offset + length) as usize].to_vec();
+        let mut chunks: Vec<Result<_, Status>> = Vec::new();
+        let mut sent = 0;
+        for chunk in range.chunks(DOWNLOAD_CHUNK) {
+            if let Some(limit) = fail_after {
+                if sent + chunk.len() > limit {
+                    chunks.push(Ok(pb::ReleaseServiceDownloadReleaseArtifactResponse {
+                        artifact_chunk: chunk[..limit - sent].to_vec(),
+                    }));
+                    chunks.push(Err(Status::unavailable("connection reset")));
+                    break;
+                }
+            }
+            sent += chunk.len();
+            chunks.push(Ok(pb::ReleaseServiceDownloadReleaseArtifactResponse {
+                artifact_chunk: chunk.to_vec(),
+            }));
+        }
+        Ok(Response::new(Box::pin(tokio_stream::iter(chunks))))
+    }
+
     async fn create_release(
         &self,
         request: Request<pb::ReleaseServiceCreateReleaseRequest>,

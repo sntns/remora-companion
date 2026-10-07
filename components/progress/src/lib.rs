@@ -11,13 +11,27 @@ pub enum OperationEvent {
     /// A coarse step change, e.g. "formatting", "copying".
     Phase(String),
     /// Fine-grained advancement, when it's known (bytes, clusters, files —
-    /// whatever unit the operation counts in). `total == 0` means unknown
-    /// (e.g. decoding a container format that doesn't cheaply expose its
-    /// decoded size up front) — `done` is still a real, monotonically
-    /// growing count, just not a percentage of anything.
-    Progress { done: u64, total: u64 },
+    /// whatever unit the operation counts in, `unit` says if it's bytes).
+    /// `total == 0` means unknown (e.g. decoding a container format that
+    /// doesn't cheaply expose its decoded size up front) — `done` is still a
+    /// real, monotonically growing count, just not a percentage of anything.
+    Progress { done: u64, total: u64, unit: Unit },
+    /// Bytes received from where the operation reads (a download being
+    /// flashed as it arrives), when that's not what `Progress` counts.
+    /// `total == 0` means unknown.
+    Transfer { done: u64, total: u64 },
     /// A free-text detail line, for a log panel rather than a progress bar.
     Log(String),
+}
+
+/// What a [`OperationEvent::Progress`] counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Unit {
+    /// Items of the operation's own (clusters, files...).
+    #[default]
+    Count,
+    /// Bytes: a listener may show sizes and a throughput.
+    Bytes,
 }
 
 /// The sending half of an operation's progress channel. Cheap to clone (an
@@ -40,7 +54,24 @@ impl ProgressSink {
     }
 
     pub fn progress(&self, done: u64, total: u64) {
-        self.send(OperationEvent::Progress { done, total });
+        self.send(OperationEvent::Progress {
+            done,
+            total,
+            unit: Unit::Count,
+        });
+    }
+
+    /// [`Self::progress`], counted in bytes.
+    pub fn progress_bytes(&self, done: u64, total: u64) {
+        self.send(OperationEvent::Progress {
+            done,
+            total,
+            unit: Unit::Bytes,
+        });
+    }
+
+    pub fn transfer(&self, done: u64, total: u64) {
+        self.send(OperationEvent::Transfer { done, total });
     }
 
     pub fn log(&self, message: impl Into<String>) {
@@ -187,7 +218,11 @@ mod tests {
         );
         assert_eq!(
             stream.next().await,
-            Some(OperationEvent::Progress { done: 1, total: 4 })
+            Some(OperationEvent::Progress {
+                done: 1,
+                total: 4,
+                unit: Unit::Count
+            })
         );
         assert_eq!(
             stream.next().await,

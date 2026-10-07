@@ -21,6 +21,9 @@ use remora_convert::application::ConvertService;
 use remora_convert_adapter_gzip::GzipAdapterImpl;
 use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
 use remora_convert_application::ConvertControllerImpl;
+use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
+use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
+use remora_device_application::DeviceControllerImpl;
 use remora_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_disk_adapter_native::DiskAdapterImpl;
 use remora_disk_application::DiskControllerImpl;
@@ -35,11 +38,15 @@ use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
 use remora_flash::{
-    adapter::{bmap::BmapAdapterService, source::ImageSourceAdapterService},
+    adapter::{
+        bmap::BmapAdapterService, release::ReleaseArtifactAdapterService,
+        source::ImageSourceAdapterService,
+    },
     application::FlashService,
 };
 use remora_flash_adapter_bmap::BmapAdapterImpl;
 use remora_flash_adapter_file::ImageSourceAdapterImpl;
+use remora_flash_adapter_release::ReleaseArtifactAdapterImpl;
 use remora_flash_application::FlashControllerImpl;
 use remora_identity::{adapter::KeygenAdapterService, application::IdentityService};
 use remora_identity_adapter_keygen::KeygenAdapterImpl;
@@ -52,6 +59,13 @@ use remora_image_adapter_ext4::Ext4AdapterImpl;
 use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
 use remora_image_adapter_vfat::VfatAdapterImpl;
 use remora_image_application::ImageControllerImpl;
+use remora_ota::{
+    adapter::{gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService},
+    application::OtaService,
+};
+use remora_ota_adapter_file::FileArtifactSourceImpl;
+use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
+use remora_ota_application::OtaControllerImpl;
 use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
 use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
 use remora_squashfs_application::SquashfsControllerImpl;
@@ -79,6 +93,7 @@ use remora_update_application::UpdateControllerImpl;
 /// -> `dyn DiskServiceInterface`), so call sites just do `services.disk.list()`.
 pub struct Services {
     pub context: ContextService,
+    pub ota: OtaService,
     pub disk: DiskService,
     pub flash: FlashService,
     pub image: ImageService,
@@ -136,18 +151,6 @@ pub async fn wire() -> Services {
         .get_type::<BmapAdapterService>()
         .await
         .expect("BmapAdapterService was just registered");
-
-    container
-        .set_type(FlashService::new(FlashControllerImpl::new(
-            disk.clone(),
-            image_source,
-            bmap_adapter,
-        )))
-        .await;
-    let flash = container
-        .get_type::<FlashService>()
-        .await
-        .expect("FlashService was just registered");
 
     container
         .set_type(PartitionTableAdapterService::new(PartitionTableAdapterImpl))
@@ -323,6 +326,80 @@ pub async fn wire() -> Services {
         .await
         .expect("ContextService was just registered");
 
+    // Flash after context: a release's disk image is downloaded through
+    // the ota vertical, as the selected context. OTA's own deployments pick
+    // devices through DeviceService, hence device first.
+    container
+        .set_type(DeviceGatewayAdapterService::new(DeviceGatewayAdapterImpl))
+        .await;
+    let device_gateway = container
+        .get_type::<DeviceGatewayAdapterService>()
+        .await
+        .expect("DeviceGatewayAdapterService was just registered");
+
+    container
+        .set_type(DeviceService::new(DeviceControllerImpl::new(
+            context.clone(),
+            device_gateway,
+        )))
+        .await;
+    let device = container
+        .get_type::<DeviceService>()
+        .await
+        .expect("DeviceService was just registered");
+
+    container
+        .set_type(OtaGatewayAdapterService::new(OtaGatewayAdapterImpl))
+        .await;
+    let ota_gateway = container
+        .get_type::<OtaGatewayAdapterService>()
+        .await
+        .expect("OtaGatewayAdapterService was just registered");
+
+    container
+        .set_type(ArtifactSourceAdapterService::new(FileArtifactSourceImpl))
+        .await;
+    let artifacts = container
+        .get_type::<ArtifactSourceAdapterService>()
+        .await
+        .expect("ArtifactSourceAdapterService was just registered");
+
+    container
+        .set_type(OtaService::new(OtaControllerImpl::new(
+            context.clone(),
+            device,
+            ota_gateway,
+            artifacts,
+        )))
+        .await;
+    let ota = container
+        .get_type::<OtaService>()
+        .await
+        .expect("OtaService was just registered");
+
+    container
+        .set_type(ReleaseArtifactAdapterService::new(
+            ReleaseArtifactAdapterImpl::new(ota.clone()),
+        ))
+        .await;
+    let releases = container
+        .get_type::<ReleaseArtifactAdapterService>()
+        .await
+        .expect("ReleaseArtifactAdapterService was just registered");
+
+    container
+        .set_type(FlashService::new(FlashControllerImpl::new(
+            disk.clone(),
+            image_source,
+            bmap_adapter,
+            releases,
+        )))
+        .await;
+    let flash = container
+        .get_type::<FlashService>()
+        .await
+        .expect("FlashService was just registered");
+
     // Manufactures as the selected context, over the gateway's gRPC API;
     // the device key and remora-factory.yaml stay local.
     container
@@ -481,6 +558,7 @@ pub async fn wire() -> Services {
 
     Services {
         context,
+        ota,
         disk,
         flash,
         image,

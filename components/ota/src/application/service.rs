@@ -4,6 +4,7 @@ use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
 use super::error::Result;
+use crate::adapter::gateway::ArtifactChunks;
 use crate::model::{
     DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
     DeploymentSummary, Labels, LogEntry, Planned, Release, ReleaseSummary, Targets, UploadOutcome,
@@ -47,6 +48,16 @@ pub trait OtaServiceInterface: Send + Sync {
         request: UploadRequest,
         ctx: &OperationContext,
     ) -> Result<UploadOutcome>;
+    /// Streams the artifact `file_name` of `release` from byte `offset` to
+    /// its end. A range of it is a fresh call from another offset: reading
+    /// one like a file means one call per jump.
+    async fn download(
+        &self,
+        over: Option<&ContextOverride>,
+        release: &str,
+        file_name: &str,
+        offset: u64,
+    ) -> Result<Box<dyn ArtifactChunks>>;
 
     /// The devices `targets` names: as given, or every device matching the
     /// selector. Lets a transport show (and confirm) a rollout's reach --

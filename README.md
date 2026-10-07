@@ -265,23 +265,34 @@ Tab completes disks (`remora-etcher flash --device <Tab>`, `disk info
 
 ```
 remora-etcher flash --image remora.wic.bmaptar --device /dev/sdb
+remora-etcher flash --release v2026.10.0 --board f3apl --device /dev/sdb
 ```
+
+`--release` flashes a release's disk image straight from the platform,
+as the selected context: one of its artifacts tagged `type:diskimage`
+(`--board` picks it by its `board:` tag, `--artifact` by file name; with
+several and neither, it asks). It's downloaded while it's written, read
+like a local file -- the bundle's `.bmap` first, then the image streamed
+to the disk, a dropped connection picked up where it stopped -- with a
+third progress line for the download.
 
 The image is best a `.bmaptar`, as meta-remora builds it: the compressed
 image and its `.bmap` in one tar, read in place (nothing to extract first).
 A plain image works too, raw or compressed (bzip2, gzip, zstd,
 decompressed on the fly; bzip2 on every core when it's pbzip2's
-multi-stream output, as Yocto's is). The progress bar follows the copy
-through the image. Sparse-aware and checksum-verified whenever there's a `.bmap`:
+multi-stream output, as Yocto's is). It first shows the image (format,
+size, what will actually be written, its `.bmap`) and the target disk,
+then the copy: a progress bar, with what's written, the speed and the time
+left under it. Sparse-aware and checksum-verified whenever there's a `.bmap`:
 the bundle's own, else one next to the image (`<image>.bmap`, or the
 image's name without its compression extension, `remora.wic.bz2` →
 `remora.wic.bmap`, same convention as `bmaptool`); pass one with `--bmap`,
 or skip it with `--no-bmap`. The device may be given by any path to it
 (`/dev/disk/by-id/…`, a symlink): the checks run on the disk it really
 is. Refuses to overwrite what looks like the system
-disk, refuses a non-removable disk unless you pass `--force`, and makes you
-type the device path back to confirm — unless `--yes`, which a run with
-nobody at the terminal (a script, CI) needs.
+disk, a non-removable disk unless you pass `--force`, and a disk smaller
+than the image; it doesn't ask for confirmation otherwise. Ctrl-C stops
+the copy (twice: at once).
 
 ### List and inspect disks
 

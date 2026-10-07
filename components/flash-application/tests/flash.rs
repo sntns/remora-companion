@@ -24,9 +24,16 @@ use remora_disk::{
     model::DiskInfo,
 };
 use remora_flash::{
-    adapter::{bmap::BmapAdapterService, source::ImageSourceAdapterService},
+    adapter::{
+        bmap::BmapAdapterService,
+        release::{self, ArtifactChunks, ReleaseArtifactAdapter, ReleaseArtifactAdapterService},
+        source::ImageSourceAdapterService,
+    },
     application::{Error, FlashServiceInterface},
-    model::{BmapSource, FlashRequest},
+    model::{
+        BmapOrigin, BmapSource, BmapSummary, Compression, DiskImage, FlashRequest, ImageOrigin,
+        ImageSummary, ReleaseArtifact,
+    },
 };
 use remora_flash_adapter_bmap::BmapAdapterImpl;
 use remora_flash_adapter_file::ImageSourceAdapterImpl;
@@ -75,11 +82,61 @@ impl DiskServiceInterface for StubDisk {
 }
 
 fn controller(disk: DiskInfo) -> FlashControllerImpl {
+    controller_with(disk, StubRelease::default())
+}
+
+fn controller_with(disk: DiskInfo, release: StubRelease) -> FlashControllerImpl {
     FlashControllerImpl::new(
         DiskService::new(StubDisk { disk: Some(disk) }),
         ImageSourceAdapterService::new(ImageSourceAdapterImpl),
         BmapAdapterService::new(BmapAdapterImpl),
+        ReleaseArtifactAdapterService::new(release),
     )
+}
+
+/// A release holding one artifact, `bytes`, served from any offset in
+/// small chunks; records each download's offset.
+#[derive(Default)]
+struct StubRelease {
+    bytes: Vec<u8>,
+    offsets: std::sync::Arc<std::sync::Mutex<Vec<u64>>>,
+}
+
+struct StubChunks(std::vec::IntoIter<Vec<u8>>);
+
+#[async_trait::async_trait]
+impl ArtifactChunks for StubChunks {
+    async fn next(&mut self) -> release::Result<Option<Vec<u8>>> {
+        Ok(self.0.next())
+    }
+}
+
+#[async_trait::async_trait]
+impl ReleaseArtifactAdapter for StubRelease {
+    async fn disk_images(
+        &self,
+        _: Option<&remora_context::model::ContextOverride>,
+        _: &str,
+    ) -> release::Result<Vec<DiskImage>> {
+        Ok(vec![DiskImage {
+            file_name: "src.img.bmaptar".into(),
+            boards: vec!["rp5".into()],
+            size: self.bytes.len() as u64,
+        }])
+    }
+
+    async fn download(
+        &self,
+        _: &ReleaseArtifact,
+        offset: u64,
+    ) -> release::Result<Box<dyn ArtifactChunks>> {
+        self.offsets.lock().unwrap().push(offset);
+        let pieces: Vec<_> = self.bytes[offset as usize..]
+            .chunks(64 * 1024)
+            .map(<[u8]>::to_vec)
+            .collect();
+        Ok(Box::new(StubChunks(pieces.into_iter())))
+    }
 }
 
 fn build_source_image() -> Vec<u8> {
@@ -179,7 +236,7 @@ async fn a_bmaptar_flashes_its_image_with_its_own_bmap() {
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
 
     let request = FlashRequest {
-        image: bundle,
+        image: bundle.into(),
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
@@ -205,7 +262,7 @@ async fn a_bmaptar_with_a_corrupted_image_is_refused() {
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
 
     let request = FlashRequest {
-        image: bundle,
+        image: bundle.into(),
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
@@ -227,7 +284,7 @@ async fn a_compressed_image_falls_back_to_its_sibling_bmap() {
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
@@ -250,7 +307,7 @@ async fn a_compressed_image_without_a_bmap_is_copied_whole() {
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
@@ -271,7 +328,7 @@ async fn bmap_copy_only_touches_mapped_ranges() {
     let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
@@ -324,7 +381,7 @@ async fn bmap_copy_rejects_a_corrupted_image() {
     let (image_path, bmap_path, device_path) = fixture(&dir, &corrupted);
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
@@ -348,7 +405,7 @@ async fn flash_through_a_symlink_writes_the_disk_it_resolves_to() {
     std::os::unix::fs::symlink(&device_path, &link).unwrap();
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: link,
         force: false,
@@ -370,7 +427,7 @@ async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
     fs::write(&checked, b"").unwrap();
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
@@ -393,7 +450,7 @@ async fn flash_refuses_the_system_disk_without_a_separate_preflight() {
     let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
 
     let request = FlashRequest {
-        image: image_path,
+        image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: true,
@@ -414,44 +471,46 @@ async fn flash_refuses_the_system_disk_without_a_separate_preflight() {
 #[tokio::test]
 async fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
     let dir = tempdir("system-disk-guard");
-    let device_path = dir.join("dest.img");
-    fs::write(&device_path, vec![MARKER; 1024]).unwrap();
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
 
     let disk = DiskInfo {
         is_system_disk: true,
         ..removable_non_system_disk(&device_path)
     };
 
-    assert!(controller(disk)
-        .preflight(&device_path, /* force */ true)
-        .await
-        .is_err());
+    let request = FlashRequest {
+        image: image_path.into(),
+        bmap: BmapSource::File(bmap_path),
+        device: device_path,
+        force: true,
+    };
+    assert!(controller(disk).preflight(&request).await.is_err());
 }
 
 #[tokio::test]
 async fn preflight_refuses_a_non_removable_disk_without_force() {
     let dir = tempdir("non-removable-guard");
-    let device_path = dir.join("dest.img");
-    fs::write(&device_path, vec![MARKER; 1024]).unwrap();
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
 
     let disk = DiskInfo {
         is_removable: false,
         ..removable_non_system_disk(&device_path)
     };
 
-    assert!(controller(disk.clone())
-        .preflight(&device_path, false)
-        .await
-        .is_err());
-    let checked = controller(disk)
-        .preflight(&device_path, true)
-        .await
-        .unwrap();
+    let mut request = FlashRequest {
+        image: image_path.into(),
+        bmap: BmapSource::File(bmap_path),
+        device: device_path.clone(),
+        force: false,
+    };
+    assert!(controller(disk.clone()).preflight(&request).await.is_err());
+    request.force = true;
+    let checked = controller(disk).preflight(&request).await.unwrap();
     assert_eq!(checked.path, fs::canonicalize(&device_path).unwrap());
 }
 
 #[tokio::test]
-async fn flash_reports_its_progress_over_the_image() {
+async fn flash_reports_the_bytes_copied_then_syncs() {
     use remora_progress::OperationEvent;
     use tokio_stream::StreamExt;
 
@@ -462,7 +521,7 @@ async fn flash_reports_its_progress_over_the_image() {
     fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
 
     let request = FlashRequest {
-        image: bundle,
+        image: bundle.into(),
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
@@ -475,14 +534,141 @@ async fn flash_reports_its_progress_over_the_image() {
         .expect("flash should succeed");
     drop(ctx);
 
-    let progress: Vec<(u64, u64)> = stream
+    let events: Vec<OperationEvent> = stream.collect().await;
+    let progress: Vec<(u64, u64)> = events
+        .iter()
         .filter_map(|event| match event {
-            OperationEvent::Progress { done, total } => Some((done, total)),
+            OperationEvent::Progress { done, total, .. } => Some((*done, *total)),
+            _ => None,
+        })
+        .collect();
+    // Over the mapped ranges only: skipping the unmapped ones isn't work
+    // the copy reports.
+    let mapped = (RANGE_A_LEN + RANGE_B_LEN) as u64;
+    assert_eq!(progress.last(), Some(&(mapped, mapped)));
+    assert_eq!(
+        events.last(),
+        Some(&OperationEvent::Phase("syncing".into()))
+    );
+}
+
+#[tokio::test]
+async fn inspect_describes_a_bmaptar_without_writing() {
+    let dir = tempdir("inspect");
+    let bundle = dir.join("src.img.bmaptar");
+    bmaptar(&bundle, &build_source_image());
+    let device_path = dir.join("dest.img");
+    fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
+
+    let request = FlashRequest {
+        image: bundle.into(),
+        bmap: BmapSource::Auto,
+        device: device_path.clone(),
+        force: false,
+    };
+    let summary = controller(removable_non_system_disk(&device_path))
+        .inspect(&request)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        summary,
+        ImageSummary {
+            bundle: true,
+            compression: Some(Compression::Bzip2),
+            image_size: Some(IMAGE_SIZE),
+            bmap: Some(BmapSummary {
+                origin: BmapOrigin::Bundled,
+                mapped_size: (RANGE_A_LEN + RANGE_B_LEN) as u64,
+                ranges: 2,
+                checksum: "sha256",
+            }),
+        }
+    );
+    assert!(untouched(&device_path));
+}
+
+#[tokio::test]
+async fn an_image_larger_than_the_disk_is_refused_before_writing() {
+    let dir = tempdir("too-large");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+    // Every mapped range would fit; the image's own end would not.
+    let small = DiskInfo {
+        size_bytes: IMAGE_SIZE / 2,
+        ..removable_non_system_disk(&device_path)
+    };
+
+    let request = FlashRequest {
+        image: image_path.into(),
+        bmap: BmapSource::File(bmap_path),
+        device: device_path.clone(),
+        force: true,
+    };
+    let controller = controller(small);
+    let err = controller.preflight(&request).await.unwrap_err();
+    assert!(matches!(err.current_context(), Error::ImageTooLarge { .. }));
+    let err = controller
+        .flash(&request, &OperationContext::noop())
+        .await
+        .unwrap_err();
+    assert!(matches!(err.current_context(), Error::ImageTooLarge { .. }));
+    assert!(untouched(&device_path));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_release_artifact_is_flashed_as_it_downloads() {
+    use remora_progress::OperationEvent;
+    use tokio_stream::StreamExt;
+
+    let dir = tempdir("release");
+    let bundle = dir.join("src.img.bmaptar");
+    bmaptar(&bundle, &build_source_image());
+    let bytes = fs::read(&bundle).unwrap();
+    let device_path = dir.join("dest.img");
+    fs::write(&device_path, vec![MARKER; IMAGE_SIZE as usize]).unwrap();
+
+    let release = StubRelease {
+        bytes: bytes.clone(),
+        ..Default::default()
+    };
+    let offsets = release.offsets.clone();
+    let controller = controller_with(removable_non_system_disk(&device_path), release);
+    let images = controller.disk_images(None, "r1").await.unwrap();
+    assert_eq!(images[0].boards, ["rp5"]);
+
+    let request = FlashRequest {
+        image: ImageOrigin::Artifact(ReleaseArtifact {
+            over: None,
+            release: "r1".into(),
+            file_name: images[0].file_name.clone(),
+            size: images[0].size,
+        }),
+        bmap: BmapSource::Auto,
+        device: device_path.clone(),
+        force: false,
+    };
+    let summary = controller.inspect(&request).await.unwrap();
+    assert_eq!(summary.bmap.unwrap().origin, BmapOrigin::Bundled);
+
+    offsets.lock().unwrap().clear();
+    let (sink, stream) = remora_progress::channel();
+    let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
+    let outcome = controller.flash(&request, &ctx).await.unwrap();
+    drop(ctx);
+
+    assert!(outcome.used_bmap);
+    assert!(only_mapped_ranges_written(&device_path));
+    // The bundle read like a file: a jump past the image to its .bmap, and
+    // back -- not one download per read.
+    assert!(offsets.lock().unwrap().len() <= 4, "{offsets:?}");
+    let transfers: Vec<_> = stream
+        .filter_map(|event| match event {
+            OperationEvent::Transfer { done, total } => Some((done, total)),
             _ => None,
         })
         .collect()
         .await;
-    // Over the whole image, up to the end of its last mapped range.
-    let last = (RANGE_B_OFFSET + RANGE_B_LEN) as u64;
-    assert_eq!(progress.last(), Some(&(last, IMAGE_SIZE)));
+    let (done, total) = *transfers.last().unwrap();
+    assert_eq!(total, bytes.len() as u64);
+    assert!(done > 0);
 }

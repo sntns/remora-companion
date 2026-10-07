@@ -150,7 +150,8 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             verbose,
         ),
         Commands::Flash(cmd) => exit_on_error(
-            remora_flash_application_transport_cli::run(cmd, &services.disk, &services.flash).await,
+            remora_flash_application_transport_cli::run(cmd, &services.disk, &services.flash, over)
+                .await,
             verbose,
         ),
         Commands::Image(cmd) => exit_on_error(

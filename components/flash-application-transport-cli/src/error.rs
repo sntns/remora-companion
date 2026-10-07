@@ -4,10 +4,12 @@ pub enum Error {
     Disk,
     #[error("failed to flash image")]
     Flash,
-    #[error("I/O error while confirming the target device")]
-    Confirm,
-    #[error("nobody at the terminal to confirm overwriting the device: pass --yes")]
-    Unattended,
+    #[error("release {0:?} has no disk image to flash")]
+    NoDiskImage(String),
+    #[error("release {0:?} has disk images for several boards")]
+    SeveralDiskImages(String),
+    #[error("failed to read the disk image to flash")]
+    Choose,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

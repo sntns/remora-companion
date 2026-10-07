@@ -28,6 +28,20 @@ impl BlockMap {
         self.inner.total_mapped_size()
     }
 
+    /// How many mapped ranges, each with its own checksum.
+    pub fn ranges(&self) -> usize {
+        self.inner.block_map().len()
+    }
+
+    /// The checksum algorithm the ranges are verified with.
+    pub fn checksum(&self) -> &'static str {
+        match self.inner.checksum_type() {
+            bmap_parser::HashType::Sha256 => "sha256",
+            // Non-exhaustive: one bmap-parser may verify with later.
+            _ => "checksum",
+        }
+    }
+
     pub fn as_parsed(&self) -> &bmap_parser::Bmap {
         &self.inner
     }

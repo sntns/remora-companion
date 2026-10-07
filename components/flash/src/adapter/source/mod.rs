@@ -2,4 +2,6 @@ mod error;
 mod service;
 
 pub use error::{Error, Result};
-pub use service::{ImageSourceAdapter, ImageSourceAdapterService, ImageStream, SourceImage};
+pub use service::{
+    ImageFile, ImageSourceAdapter, ImageSourceAdapterService, ImageStream, SourceImage,
+};

@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
+use super::ImageOrigin;
+
 #[derive(Debug, Clone)]
 pub struct FlashRequest {
-    /// A `.bmaptar` bundle, or a plain image (raw or compressed).
-    pub image: PathBuf,
+    /// A `.bmaptar` bundle, or a plain image (raw or compressed); local, or
+    /// an artifact of a release.
+    pub image: ImageOrigin,
     pub bmap: BmapSource,
     pub device: PathBuf,
     /// Bypass the removable-disk check (still refuses a disk identified as

@@ -8,7 +8,7 @@ use remora_context::{
 use remora_device::application::DeviceService;
 use remora_ota::{
     adapter::{
-        gateway::{self, ArtifactSink, InitialUpload, OtaGatewayAdapterService},
+        gateway::{self, ArtifactChunks, ArtifactSink, InitialUpload, OtaGatewayAdapterService},
         source::{self, ArtifactSourceAdapterService},
     },
     application::{Error, OtaServiceInterface, Result},
@@ -237,6 +237,23 @@ impl OtaServiceInterface for OtaControllerImpl {
             .list_releases(&context, labels)
             .await
             .change_context(Error::ListReleases)
+    }
+
+    async fn download(
+        &self,
+        over: Option<&ContextOverride>,
+        release: &str,
+        file_name: &str,
+        offset: u64,
+    ) -> Result<Box<dyn ArtifactChunks>> {
+        let context = self.resolve(over).await?;
+        self.gateway
+            .download(&context, release, file_name, offset)
+            .await
+            .change_context_lazy(|| Error::Download {
+                file: file_name.to_owned(),
+                release: release.to_owned(),
+            })
     }
 
     async fn get_release(&self, over: Option<&ContextOverride>, name: &str) -> Result<Release> {
@@ -775,7 +792,7 @@ mod tests {
                 remora_progress::OperationEvent::Log(line) => {
                     resumed |= line.contains("resuming at byte")
                 }
-                remora_progress::OperationEvent::Progress { done, total } => {
+                remora_progress::OperationEvent::Progress { done, total, .. } => {
                     last = Some((done, total))
                 }
                 _ => {}

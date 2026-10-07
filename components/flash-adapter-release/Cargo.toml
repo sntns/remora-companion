@@ -1,0 +1,14 @@
+[package]
+name = "remora-flash-adapter-release"
+description = "Concrete ReleaseArtifactAdapter: a release's disk images, and their bytes from any offset, through the ota vertical"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-flash = { path = "../flash" }
+remora-ota = { path = "../ota" }
+remora-context = { path = "../context" }
+error-stack.workspace = true
+async-trait.workspace = true

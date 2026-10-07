@@ -10,6 +10,7 @@ members = [
     "components/flash-application",
     "components/flash-adapter-bmap",
     "components/flash-adapter-file",
+    "components/flash-adapter-release",
     "components/flash-application-transport-cli",
     "components/image",
     "components/image-application",

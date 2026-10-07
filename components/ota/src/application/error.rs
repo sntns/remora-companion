@@ -29,6 +29,8 @@ pub enum Error {
         release: String,
         content_id: String,
     },
+    #[error("failed to download {file} of release {release:?}")]
+    Download { file: String, release: String },
     #[error("failed to find the devices to deploy to")]
     Targets,
     #[error("no device matches {0}")]

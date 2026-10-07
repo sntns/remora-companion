@@ -32,6 +32,14 @@ pub trait ArtifactSink: Send {
     async fn abort(self: Box<Self>);
 }
 
+/// An artifact download in flight: its bytes, in order, a chunk at a time.
+/// Dropping it cancels the call.
+#[async_trait::async_trait]
+pub trait ArtifactChunks: Send {
+    /// The next chunk; `None` once the requested bytes are all in.
+    async fn next(&mut self) -> Result<Option<Vec<u8>>>;
+}
+
 /// sntns-platform's remora gateway, as far as over-the-air updates need it:
 /// releases, their artifacts, and deployments. Devices to target come from
 /// the device vertical.
@@ -71,6 +79,14 @@ pub trait OtaGatewayAdapter: Send + Sync {
         context: &ResolvedContext,
         upload: InitialUpload,
     ) -> Result<Box<dyn ArtifactSink>>;
+    /// Streams `file_name` of `release`, from byte `offset` to its end.
+    async fn download(
+        &self,
+        context: &ResolvedContext,
+        release: &str,
+        file_name: &str,
+        offset: u64,
+    ) -> Result<Box<dyn ArtifactChunks>>;
 
     async fn create_deployment(
         &self,

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package sntns.service.remora.v1;
 
+import "google/protobuf/wrappers.proto";
 import "sntns/service/v1/model.proto";
 
 // Releases: a version and the artifacts (e.g. RAUC bundles) devices install.
@@ -17,6 +18,8 @@ service ReleaseService {
     // How many bytes are already persisted for a resume token, so a resumed
     // upload continues from there; the server appends from that offset.
     rpc GetReleaseArtifactUploadOffset(ReleaseServiceGetReleaseArtifactUploadOffsetRequest) returns (ReleaseServiceGetReleaseArtifactUploadOffsetResponse);
+    // Server-streaming: an artifact's bytes, whole or a range of them.
+    rpc DownloadReleaseArtifact(ReleaseServiceDownloadReleaseArtifactRequest) returns (stream ReleaseServiceDownloadReleaseArtifactResponse);
 }
 
 message ReleaseArtifact {
@@ -123,4 +126,18 @@ message ReleaseServiceGetReleaseArtifactUploadOffsetRequest {
 
 message ReleaseServiceGetReleaseArtifactUploadOffsetResponse {
     int64 artifact_content_offset = 1;
+}
+
+message ReleaseServiceDownloadReleaseArtifactRequest {
+    string release_name = 1;
+    string artifact_file_name = 2;
+    // Byte range of the artifact's content to stream back. Unset offset: from
+    // the start; unset length: to the end. A range past the end fails with
+    // OUT_OF_RANGE.
+    google.protobuf.Int64Value artifact_content_offset = 3;
+    google.protobuf.Int64Value artifact_content_length = 4;
+}
+
+message ReleaseServiceDownloadReleaseArtifactResponse {
+    bytes artifact_chunk = 1;
 }

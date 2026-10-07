@@ -8,7 +8,9 @@ publish.workspace = true
 
 [dependencies]
 remora-disk = { path = "../disk" }
+remora-context = { path = "../context" }
 remora-progress = { path = "../progress" }
+remora-format = { path = "../format" }
 busybody.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

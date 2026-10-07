@@ -7,7 +7,9 @@ use std::{
 use error_stack::{Report, ResultExt};
 use remora_context::model::ResolvedContext;
 use remora_ota::{
-    adapter::gateway::{ArtifactSink, Error, InitialUpload, OtaGatewayAdapter, Result},
+    adapter::gateway::{
+        ArtifactChunks, ArtifactSink, Error, InitialUpload, OtaGatewayAdapter, Result,
+    },
     model::{
         Artifact, Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary, Labels,
         LogEntry, LogProgress, Release, ReleaseSummary,
@@ -234,6 +236,29 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         }))
     }
 
+    async fn download(
+        &self,
+        context: &ResolvedContext,
+        release: &str,
+        file_name: &str,
+        offset: u64,
+    ) -> Result<Box<dyn ArtifactChunks>> {
+        let offset = i64::try_from(offset)
+            .change_context(Error::InvalidArgument)
+            .attach("offset past any artifact")?;
+        let stream = Releases::new(channel(context).await?)
+            .download_release_artifact(pb::ReleaseServiceDownloadReleaseArtifactRequest {
+                release_name: release.to_owned(),
+                artifact_file_name: file_name.to_owned(),
+                artifact_content_offset: (offset > 0).then_some(offset),
+                artifact_content_length: None,
+            })
+            .await
+            .map_err(classify)?
+            .into_inner();
+        Ok(Box::new(GrpcArtifactChunks(stream)))
+    }
+
     async fn create_deployment(
         &self,
         context: &ResolvedContext,
@@ -375,6 +400,21 @@ enum Outgoing {
 /// aborted mid-way) never ends the stream: a clean end is what makes the
 /// platform commit, so a truncated upload must only ever be reset -- which
 /// the sink does by dropping the call (hyper then sends RST_STREAM).
+/// A download's response stream, chunk by chunk.
+struct GrpcArtifactChunks(tonic::Streaming<pb::ReleaseServiceDownloadReleaseArtifactResponse>);
+
+#[async_trait::async_trait]
+impl ArtifactChunks for GrpcArtifactChunks {
+    async fn next(&mut self) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .0
+            .message()
+            .await
+            .map_err(classify)?
+            .map(|response| response.artifact_chunk))
+    }
+}
+
 struct UntilEnd(mpsc::Receiver<Outgoing>);
 
 impl Stream for UntilEnd {
@@ -543,6 +583,57 @@ mod tests {
         let release = adapter.get_release(&context, "r1").await.unwrap();
         assert_eq!(release.artifacts[0].tag_condition, "board:rp5");
         assert_eq!(release.artifacts[0].content_length, 12);
+    }
+
+    #[tokio::test]
+    async fn an_artifact_downloads_whole_or_from_an_offset() {
+        let (_gateway, context) = TestGateway::serve().await;
+        let adapter = OtaGatewayAdapterImpl;
+        adapter
+            .create_release(&context, "r1", "1", &Labels::new())
+            .await
+            .unwrap();
+        let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let mut sink = adapter
+            .begin_upload(
+                &context,
+                InitialUpload {
+                    release: "r1".into(),
+                    file_name: "disk.wic.bmaptar".into(),
+                    content_type: "application/x-tar".into(),
+                    tag_condition: "board:rp5 && type:diskimage".into(),
+                    content_id: "id-1".into(),
+                },
+            )
+            .await
+            .unwrap();
+        sink.send(bytes.clone()).await.unwrap();
+        sink.finish().await.unwrap();
+
+        let read_all = |offset| {
+            let adapter = &adapter;
+            let context = &context;
+            async move {
+                let mut chunks = adapter
+                    .download(context, "r1", "disk.wic.bmaptar", offset)
+                    .await
+                    .unwrap();
+                let mut out = Vec::new();
+                while let Some(chunk) = chunks.next().await.unwrap() {
+                    out.extend(chunk);
+                }
+                out
+            }
+        };
+        assert_eq!(read_all(0).await, bytes);
+        assert_eq!(read_all(150_000).await, bytes[150_000..]);
+
+        let err = adapter
+            .download(&context, "r1", "missing", 0)
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(err.current_context(), Error::NotFound));
     }
 
     #[tokio::test]

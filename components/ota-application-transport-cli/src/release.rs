@@ -290,14 +290,14 @@ async fn upload(
         tokio::select! {
             result = &mut upload => break result,
             Some(event) = events.next() => match event {
-                OperationEvent::Progress { done, total } => bar
+                OperationEvent::Progress { done, total, .. } => bar
                     .get_or_insert_with(|| tui::Progress::bytes(total, &title))
                     .set(done),
                 OperationEvent::Log(line) => match &bar {
                     Some(bar) => bar.note(line),
                     None => tui::step(line),
                 },
-                OperationEvent::Phase(_) => {}
+                OperationEvent::Phase(_) | OperationEvent::Transfer { .. } => {}
             },
         }
     };

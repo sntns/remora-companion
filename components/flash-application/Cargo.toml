@@ -15,6 +15,8 @@ remora-flash = { path = "../flash" }
 error-stack.workspace = true
 remora-format = { path = "../format" }
 tokio-util.workspace = true
+remora-context = { path = "../context" }
+tracing = "0.1"
 
 [dev-dependencies]
 # Real (not mocked) adapter, for an integration-style test of the use case

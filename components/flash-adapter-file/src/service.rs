@@ -7,7 +7,10 @@ use std::{
 use bmap_parser::Discarder;
 use error_stack::{Report, ResultExt};
 use flate2::bufread::MultiGzDecoder;
-use remora_flash::adapter::source::{Error, ImageSourceAdapter, ImageStream, Result, SourceImage};
+use remora_flash::{
+    adapter::source::{Error, ImageFile, ImageSourceAdapter, ImageStream, Result, SourceImage},
+    model::Compression,
+};
 
 use crate::parallel_bzip2::ParallelBzDecoder;
 
@@ -20,24 +23,35 @@ pub struct ImageSourceAdapterImpl;
 
 impl ImageSourceAdapter for ImageSourceAdapterImpl {
     fn open(&self, path: &Path) -> Result<SourceImage> {
-        let mut file = File::open(path).change_context(Error::Read)?;
-        if is_tar(&mut file).change_context(Error::Read)? {
-            return open_bundle(file);
-        }
+        let file = File::open(path).change_context(Error::Read)?;
         let len = file.metadata().change_context(Error::Read)?.len();
-        // A raw image keeps its file's real seeks, to skip unmapped ranges.
-        let (stream, raw) =
-            image_stream(BufReader::new(file), ImageStream::new).change_context(Error::Read)?;
-        Ok(SourceImage {
-            stream,
-            bundled_bmap: None,
-            size: raw.then_some(len),
-        })
+        open_any(file, len)
+    }
+
+    fn open_file(&self, file: Box<dyn ImageFile>, len: u64) -> Result<SourceImage> {
+        open_any(file, len)
     }
 }
 
+/// A file's image: the one its `.bmaptar` bundle holds, or itself.
+fn open_any<F: Read + Seek + Send + 'static>(mut file: F, len: u64) -> Result<SourceImage> {
+    if is_tar(&mut file).change_context(Error::Read)? {
+        return open_bundle(file);
+    }
+    // A raw image keeps its file's real seeks, to skip unmapped ranges.
+    let (stream, compression) =
+        image_stream(BufReader::new(file), ImageStream::new).change_context(Error::Read)?;
+    Ok(SourceImage {
+        stream,
+        bundled_bmap: None,
+        bundle: false,
+        compression,
+        size: compression.is_none().then_some(len),
+    })
+}
+
 /// Whether `file` starts with a tar header; leaves it rewound either way.
-fn is_tar(file: &mut File) -> io::Result<bool> {
+fn is_tar<F: Read + Seek>(file: &mut F) -> io::Result<bool> {
     let mut header = Vec::with_capacity(TAR_MAGIC_OFFSET + TAR_MAGIC.len());
     file.by_ref()
         .take(header.capacity() as u64)
@@ -48,7 +62,7 @@ fn is_tar(file: &mut File) -> io::Result<bool> {
 
 /// A `.bmaptar`: exactly one `.bmap` and one image, in either order. The
 /// image is read where it sits in the tar, never extracted.
-fn open_bundle(file: File) -> Result<SourceImage> {
+fn open_bundle<F: Read + Seek + Send + 'static>(file: F) -> Result<SourceImage> {
     let mut archive = tar::Archive::new(file);
     let mut bmap = None;
     let mut image = None;
@@ -82,24 +96,26 @@ fn open_bundle(file: File) -> Result<SourceImage> {
     let mut file = archive.into_inner();
     file.seek(SeekFrom::Start(offset))
         .change_context(Error::Read)?;
-    let (stream, raw) = image_stream(BufReader::new(file.take(size)), |raw| {
+    let (stream, compression) = image_stream(BufReader::new(file.take(size)), |raw| {
         ImageStream::new(Discarder::new(raw))
     })
     .change_context(Error::Read)?;
     Ok(SourceImage {
         stream,
         bundled_bmap: Some(bmap),
-        size: raw.then_some(size),
+        bundle: true,
+        compression,
+        size: compression.is_none().then_some(size),
     })
 }
 
 /// `reader` decompressed when its magic says bzip2 (on every core, see
 /// `ParallelBzDecoder`), gzip or zstd, all of them multi-stream; else
-/// handed to `raw` as is, and said so.
+/// handed to `raw` as is. Says which compression it found.
 fn image_stream<R>(
     mut reader: R,
     raw: impl FnOnce(R) -> ImageStream,
-) -> io::Result<(ImageStream, bool)>
+) -> io::Result<(ImageStream, Option<Compression>)>
 where
     R: BufRead + Send + 'static,
 {
@@ -109,15 +125,24 @@ where
     let zstd = magic.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
     Ok(if bzip2 {
         let decoder = ParallelBzDecoder::new(reader);
-        (ImageStream::new(Discarder::new(decoder)), false)
+        (
+            ImageStream::new(Discarder::new(decoder)),
+            Some(Compression::Bzip2),
+        )
     } else if gzip {
         let decoder = MultiGzDecoder::new(reader);
-        (ImageStream::new(Discarder::new(decoder)), false)
+        (
+            ImageStream::new(Discarder::new(decoder)),
+            Some(Compression::Gzip),
+        )
     } else if zstd {
         let decoder = zstd::stream::read::Decoder::with_buffer(reader)?;
-        (ImageStream::new(Discarder::new(decoder)), false)
+        (
+            ImageStream::new(Discarder::new(decoder)),
+            Some(Compression::Zstd),
+        )
     } else {
-        (raw(reader), true)
+        (raw(reader), None)
     })
 }
 
@@ -225,6 +250,8 @@ mod tests {
 
         let source = ImageSourceAdapterImpl.open(&path).unwrap();
         assert_eq!(source.bundled_bmap.as_deref(), Some(BMAP));
+        assert!(source.bundle);
+        assert_eq!(source.compression, Some(Compression::Bzip2));
         assert_eq!(read_all(source), image());
     }
 
@@ -256,17 +283,19 @@ mod tests {
     #[test]
     fn a_plain_image_is_read_decompressed_or_as_is() {
         let dir = TempDir::new();
-        for (name, data) in [
-            ("disk.wic.bz2", pbzip2(&image())),
-            ("disk.wic.gz", gzip(&image())),
-            ("disk.wic.zst", zstd(&image())),
-            ("disk.wic", image()),
+        for (name, data, compression) in [
+            ("disk.wic.bz2", pbzip2(&image()), Some(Compression::Bzip2)),
+            ("disk.wic.gz", gzip(&image()), Some(Compression::Gzip)),
+            ("disk.wic.zst", zstd(&image()), Some(Compression::Zstd)),
+            ("disk.wic", image(), None),
         ] {
             let path = dir.path(name);
             fs::write(&path, data).unwrap();
 
             let source = ImageSourceAdapterImpl.open(&path).unwrap();
             assert!(source.bundled_bmap.is_none(), "{name}");
+            assert!(!source.bundle, "{name}");
+            assert_eq!(source.compression, compression, "{name}");
             let size = (name == "disk.wic").then_some(image().len() as u64);
             assert_eq!(source.size, size, "{name}");
             assert_eq!(read_all(source), image(), "{name}");
@@ -280,10 +309,28 @@ mod tests {
         fs::write(&path, pbzip2(&image())).unwrap();
 
         let mut stream = ImageSourceAdapterImpl.open(&path).unwrap().stream;
+        let copied = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        stream.follow(copied.clone(), tokio_util::sync::CancellationToken::new());
         stream.seek_forward(1000).unwrap();
         let mut byte = [0u8];
         stream.read_exact(&mut byte).unwrap();
         assert_eq!(byte[0], image()[1000]);
         assert_eq!(stream.position(), 1001);
+        assert_eq!(copied.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_cancelled_stream_neither_reads_nor_skips() {
+        let dir = TempDir::new();
+        let path = dir.path("disk.wic.zst");
+        fs::write(&path, zstd(&image())).unwrap();
+
+        let mut stream = ImageSourceAdapterImpl.open(&path).unwrap().stream;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        stream.follow(std::sync::Arc::default(), cancel.clone());
+        cancel.cancel();
+        assert!(stream.seek_forward(1000).is_err());
+        assert!(stream.read(&mut [0u8; 16]).is_err());
+        assert_eq!(stream.position(), 0);
     }
 }

@@ -1,10 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use error_stack::{Report, ResultExt};
+use remora_context::model::ContextOverride;
 use remora_disk::application::DiskService;
 use remora_flash::{
     application::FlashService,
-    model::{BmapSource, FlashRequest},
+    model::{
+        BmapOrigin, BmapSource, DiskImage, FlashRequest, ImageOrigin, ImageSummary, ReleaseArtifact,
+    },
 };
 use remora_format::human_size;
 
@@ -14,9 +17,27 @@ use super::error::{Error, Result};
 pub struct Command {
     /// Source disk image: a `.bmaptar` bundle (the image and its .bmap in
     /// one tar, as meta-remora builds them), or a plain image, raw or
-    /// compressed (bzip2, gzip).
+    /// compressed (bzip2, gzip, zstd).
+    #[arg(long, required_unless_present = "release", conflicts_with = "release")]
+    image: Option<PathBuf>,
+
+    /// Flash a disk image of this release instead, downloaded while it's
+    /// written (as the selected context): one of its artifacts tagged
+    /// `type:diskimage`, picked by --board, or asked for when there are
+    /// several.
     #[arg(long)]
-    image: PathBuf,
+    #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
+    release: Option<String>,
+
+    /// With --release: the board to flash the disk image of (its artifact's
+    /// `board:` tag).
+    #[arg(long, requires = "release")]
+    board: Option<String>,
+
+    /// With --release: the artifact to flash, by file name, when the board
+    /// isn't enough to tell.
+    #[arg(long, requires = "release")]
+    artifact: Option<String>,
 
     /// .bmap file describing the image's mapped block ranges. Defaults to
     /// the one a `.bmaptar` bundle carries; for a plain image, to
@@ -42,20 +63,28 @@ pub struct Command {
     #[arg(long)]
     force: bool,
 
-    /// Skip the interactive confirmation prompt (for scripted use; required
-    /// when no one is at the terminal to answer it).
-    #[arg(long)]
+    /// Accepted for scripts written when flash asked for confirmation; it
+    /// no longer does.
+    #[arg(long, hide = true)]
     yes: bool,
 }
 
-pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> Result<()> {
+pub async fn run(
+    command: Command,
+    disk: &DiskService,
+    flash: &FlashService,
+    over: Option<&ContextOverride>,
+) -> Result<()> {
     let Command {
         image,
+        release,
+        board,
+        artifact,
         bmap,
         no_bmap,
         device,
         force,
-        yes,
+        yes: _,
     } = command;
 
     let bmap = match bmap {
@@ -64,38 +93,51 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
         None => BmapSource::Auto,
     };
 
-    // Shown before the guard runs, so a refused target is still visible --
-    // as the disk it resolves to, not the name it was given.
-    let info = disk.info(&device).await.change_context(Error::Disk)?;
-    remora_tui::note("Target", disk_line(&info));
-
-    // The real guard (removable / not-the-system-disk) lives in
-    // FlashServiceInterface::preflight, which `flash` runs again on its own
-    // lookup and cannot be bypassed from here; this confirmation is an
-    // extra CLI-only usability layer on top of it.
-    flash
-        .preflight(&device, force)
-        .await
-        .change_context(Error::Flash)?;
-    if !yes {
-        if !remora_tui::interactive() {
-            return Err(Report::new(Error::Unattended));
+    let image = match (image, release) {
+        (Some(path), _) => ImageOrigin::File(path),
+        (None, Some(release)) => {
+            let images = flash
+                .disk_images(over, &release)
+                .await
+                .change_context(Error::Flash)?;
+            let chosen = choose(&release, images, board.as_deref(), artifact.as_deref())?;
+            ImageOrigin::Artifact(ReleaseArtifact {
+                over: over.cloned(),
+                release,
+                file_name: chosen.file_name,
+                size: chosen.size,
+            })
         }
-        if !confirm(&device)? {
-            remora_tui::info(format!(
-                "Left {} untouched",
-                remora_tui::accent(device.display())
-            ));
-            return Ok(());
-        }
-    }
-
+        (None, None) => unreachable!("clap requires --image or --release"),
+    };
     let request = FlashRequest {
         image,
         bmap,
         device,
         force,
     };
+
+    // Shown before the guard runs, so a refused flash still shows what it
+    // was: the image as it reads, the target as the disk it resolves to,
+    // not the name it was given.
+    let summary = flash.inspect(&request).await.change_context(Error::Flash)?;
+    remora_tui::note("Image", image_lines(&request.image, &summary));
+    let info = disk
+        .info(&request.device)
+        .await
+        .change_context(Error::Disk)?;
+    remora_tui::note("Target", disk_line(&info));
+
+    // The guard (removable / not-the-system-disk / big enough) lives in
+    // FlashServiceInterface::preflight, which `flash` runs again on its own
+    // lookup and cannot be bypassed from here: run here, it refuses before
+    // anything starts. No confirmation on top of it: the target and the
+    // image are on screen above.
+    flash
+        .preflight(&request)
+        .await
+        .change_context(Error::Flash)?;
+
     let (sink, stream) = remora_progress::channel();
     let follow = remora_tui::follow(stream);
     let ctx = remora_progress::OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
@@ -116,6 +158,125 @@ pub async fn run(command: Command, disk: &DiskService, flash: &FlashService) -> 
     Ok(())
 }
 
+/// The disk image of `release` to flash: the `artifact` named, else the
+/// only one for `board` (or the only one at all), else the operator's pick.
+fn choose(
+    release: &str,
+    images: Vec<DiskImage>,
+    board: Option<&str>,
+    artifact: Option<&str>,
+) -> Result<DiskImage> {
+    let boards = |images: &[DiskImage]| {
+        let mut all: Vec<_> = images
+            .iter()
+            .flat_map(|image| image.boards.clone())
+            .collect();
+        all.sort();
+        all.dedup();
+        if all.is_empty() {
+            "none tagged".to_owned()
+        } else {
+            all.join(", ")
+        }
+    };
+    if images.is_empty() {
+        return Err(Report::new(Error::NoDiskImage(release.to_owned()))
+            .attach("its disk images are the artifacts tagged type:diskimage"));
+    }
+    let available = boards(&images);
+    let mut candidates: Vec<_> = images
+        .into_iter()
+        .filter(|image| artifact.is_none_or(|name| image.file_name == name))
+        .filter(|image| board.is_none_or(|board| image.boards.iter().any(|b| b == board)))
+        .collect();
+    match candidates.len() {
+        0 => Err(Report::new(Error::NoDiskImage(release.to_owned()))
+            .attach(format!("boards it has disk images for: {available}"))),
+        1 => Ok(candidates.remove(0)),
+        _ if !remora_tui::interactive() => {
+            Err(Report::new(Error::SeveralDiskImages(release.to_owned()))
+                .attach(format!("pass --board, one of: {}", boards(&candidates))))
+        }
+        _ => {
+            let mut select = remora_tui::select(format!(
+                "Disk image of {} to flash",
+                remora_tui::accent(release)
+            ));
+            for (i, image) in candidates.iter().enumerate() {
+                let label = match image.boards.as_slice() {
+                    [] => image.file_name.clone(),
+                    boards => boards.join(", "),
+                };
+                select = select.item(
+                    i,
+                    label,
+                    format!("{}  {}", image.file_name, human_size(image.size)),
+                );
+            }
+            let picked = select.interact().change_context(Error::Choose)?;
+            Ok(candidates.remove(picked))
+        }
+    }
+}
+
+fn image_lines(origin: &ImageOrigin, summary: &ImageSummary) -> String {
+    let name = match origin {
+        ImageOrigin::File(path) => path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned(),
+        ImageOrigin::Artifact(artifact) => format!(
+            "{}  {}",
+            artifact.file_name,
+            remora_tui::dim(format!(
+                "release {}, {}, downloaded as it's flashed",
+                artifact.release,
+                human_size(artifact.size)
+            ))
+        ),
+    };
+    let format = match (summary.bundle, summary.compression) {
+        (true, Some(compression)) => format!("bmaptar bundle, {compression}-compressed"),
+        (true, None) => "bmaptar bundle, raw".to_owned(),
+        (false, Some(compression)) => format!("{compression}-compressed"),
+        (false, None) => "raw".to_owned(),
+    };
+    let size = match summary.image_size {
+        Some(size) => human_size(size),
+        None => "unknown until decompressed".to_owned(),
+    };
+    let to_write = match (summary.bytes_to_write(), summary.image_size) {
+        (Some(bytes), Some(size)) if summary.bmap.is_some() && size > 0 => format!(
+            "{} ({:.1}%)",
+            human_size(bytes),
+            bytes as f64 * 100.0 / size as f64
+        ),
+        (Some(bytes), _) => human_size(bytes),
+        (None, _) => "all of it".to_owned(),
+    };
+    let bmap = match &summary.bmap {
+        Some(bmap) => format!(
+            "{}, {} ranges, {}-verified",
+            match &bmap.origin {
+                BmapOrigin::Bundled => "bundled".to_owned(),
+                BmapOrigin::File(path) => path.display().to_string(),
+            },
+            bmap.ranges,
+            bmap.checksum
+        ),
+        None => "none: the whole image is copied as is, unverified".to_owned(),
+    };
+    format!(
+        "{}  {}\nsize: {}  to write: {}\nbmap: {}",
+        remora_tui::accent(name),
+        format,
+        size,
+        to_write,
+        bmap
+    )
+}
+
 fn disk_line(info: &remora_disk::model::DiskInfo) -> String {
     let yes_no = |on: bool| if on { "yes" } else { "no" };
     format!(
@@ -126,27 +287,6 @@ fn disk_line(info: &remora_disk::model::DiskInfo) -> String {
         yes_no(info.is_removable),
         yes_no(info.is_system_disk),
     )
-}
-
-/// Require the user to type the device path back, so a `--force`d flash of a
-/// non-removable disk (or any flash at all) isn't one careless Enter away
-/// from wiping the wrong disk. Anything else typed (or Esc) leaves it alone.
-fn confirm(device: &Path) -> Result<bool> {
-    let expected = device.to_string_lossy().into_owned();
-    let typed: String = remora_tui::input(format!(
-        "Type {} to overwrite it",
-        remora_tui::accent(&expected)
-    ))
-    .interact()
-    .or_else(|e| {
-        if e.kind() == std::io::ErrorKind::Interrupted {
-            Ok(String::new())
-        } else {
-            Err(e)
-        }
-    })
-    .change_context(Error::Confirm)?;
-    Ok(typed.trim() == expected)
 }
 
 #[cfg(test)]

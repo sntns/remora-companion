@@ -3,7 +3,9 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("failed to open image {0}")]
-    OpenImage(PathBuf),
+    OpenImage(String),
+    #[error("failed to list the disk images of release {0:?}")]
+    DiskImages(String),
     #[error("failed to read .bmap file {0}")]
     OpenBmap(PathBuf),
     #[error("failed to open device {0}")]
@@ -20,6 +22,18 @@ pub enum Error {
         resolved: PathBuf,
         checked: PathBuf,
     },
+    #[error(
+        "refusing to flash {path}: the image is {}, the disk only {}",
+        remora_format::human_size(*image),
+        remora_format::human_size(*disk)
+    )]
+    ImageTooLarge {
+        path: PathBuf,
+        image: u64,
+        disk: u64,
+    },
+    #[error("failed to flush the image to {0}")]
+    Sync(PathBuf),
     #[error("flash was cancelled")]
     Cancelled,
 }
