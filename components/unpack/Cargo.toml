@@ -1,0 +1,21 @@
+[package]
+name = "remora-unpack"
+description = "Shared image-file unpacking: a .bmaptar bundle read in place, a bzip2/gzip/zstd image decompressed on the fly, used by any vertical that reads a disk image file (flash, convert)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+error-stack.workspace = true
+thiserror.workspace = true
+tar = "0.4"
+# Pure-Rust backend by default (libbz2-rs-sys), nothing to link on any host.
+bzip2 = "0.6"
+flate2 = "1"
+# The same zstd (C libzstd, vendored and built by zstd-sys) backhand
+# already links into remora-etcher for squashfs.
+zstd = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+remora-scratch = { path = "../scratch" }

@@ -1,22 +1,16 @@
 use std::{
     fs::File,
-    io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{Read, Seek},
     path::Path,
 };
 
 use bmap_parser::Discarder;
 use error_stack::{Report, ResultExt};
-use flate2::bufread::MultiGzDecoder;
 use remora_flash::{
     adapter::source::{Error, ImageFile, ImageSourceAdapter, ImageStream, Result, SourceImage},
     model::Compression,
 };
-
-use crate::parallel_bzip2::ParallelBzDecoder;
-
-/// Where a tar header's magic sits: "ustar", in POSIX and GNU tars alike.
-const TAR_MAGIC_OFFSET: usize = 257;
-const TAR_MAGIC: &[u8] = b"ustar";
+use remora_unpack::Image;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImageSourceAdapterImpl;
@@ -34,116 +28,33 @@ impl ImageSourceAdapter for ImageSourceAdapterImpl {
 }
 
 /// A file's image: the one its `.bmaptar` bundle holds, or itself.
-fn open_any<F: Read + Seek + Send + 'static>(mut file: F, len: u64) -> Result<SourceImage> {
-    if is_tar(&mut file).change_context(Error::Read)? {
-        return open_bundle(file);
-    }
-    // A raw image keeps its file's real seeks, to skip unmapped ranges.
-    let (stream, compression) =
-        image_stream(BufReader::new(file), ImageStream::new).change_context(Error::Read)?;
+fn open_any<F: Read + Seek + Send + 'static>(file: F, len: u64) -> Result<SourceImage> {
+    let unpacked = remora_unpack::open(file, len).map_err(source_error)?;
+    let stream = match unpacked.image {
+        // A raw image keeps its file's real seeks, to skip unmapped ranges.
+        Image::File(file) => ImageStream::new(file),
+        Image::Stream(stream) => ImageStream::new(Discarder::new(stream)),
+    };
     Ok(SourceImage {
         stream,
-        bundled_bmap: None,
-        bundle: false,
-        compression,
-        size: compression.is_none().then_some(len),
+        bundle: unpacked.bundled_bmap.is_some(),
+        bundled_bmap: unpacked.bundled_bmap,
+        compression: unpacked.compression.map(|compression| match compression {
+            remora_unpack::Compression::Bzip2 => Compression::Bzip2,
+            remora_unpack::Compression::Gzip => Compression::Gzip,
+            remora_unpack::Compression::Zstd => Compression::Zstd,
+        }),
+        size: unpacked.size,
     })
 }
 
-/// Whether `file` starts with a tar header; leaves it rewound either way.
-fn is_tar<F: Read + Seek>(file: &mut F) -> io::Result<bool> {
-    let mut header = Vec::with_capacity(TAR_MAGIC_OFFSET + TAR_MAGIC.len());
-    file.by_ref()
-        .take(header.capacity() as u64)
-        .read_to_end(&mut header)?;
-    file.seek(SeekFrom::Start(0))?;
-    Ok(header.get(TAR_MAGIC_OFFSET..) == Some(TAR_MAGIC))
-}
-
-/// A `.bmaptar`: exactly one `.bmap` and one image, in either order. The
-/// image is read where it sits in the tar, never extracted.
-fn open_bundle<F: Read + Seek + Send + 'static>(file: F) -> Result<SourceImage> {
-    let mut archive = tar::Archive::new(file);
-    let mut bmap = None;
-    let mut image = None;
-    for entry in archive.entries_with_seek().change_context(Error::Read)? {
-        let mut entry = entry.change_context(Error::Read)?;
-        if !entry.header().entry_type().is_file() {
-            continue;
-        }
-        let is_bmap = entry
-            .path()
-            .change_context(Error::Read)?
-            .extension()
-            .is_some_and(|ext| ext == "bmap");
-        if is_bmap {
-            if bmap.is_some() {
-                return Err(Report::new(Error::Bundle("more than one .bmap")));
-            }
-            let mut xml = String::new();
-            entry.read_to_string(&mut xml).change_context(Error::Read)?;
-            bmap = Some(xml);
-        } else {
-            if image.is_some() {
-                return Err(Report::new(Error::Bundle("more than one image")));
-            }
-            image = Some((entry.raw_file_position(), entry.size()));
-        }
-    }
-    let (offset, size) = image.ok_or_else(|| Report::new(Error::Bundle("no image")))?;
-    let bmap = bmap.ok_or_else(|| Report::new(Error::Bundle("no .bmap")))?;
-
-    let mut file = archive.into_inner();
-    file.seek(SeekFrom::Start(offset))
-        .change_context(Error::Read)?;
-    let (stream, compression) = image_stream(BufReader::new(file.take(size)), |raw| {
-        ImageStream::new(Discarder::new(raw))
-    })
-    .change_context(Error::Read)?;
-    Ok(SourceImage {
-        stream,
-        bundled_bmap: Some(bmap),
-        bundle: true,
-        compression,
-        size: compression.is_none().then_some(size),
-    })
-}
-
-/// `reader` decompressed when its magic says bzip2 (on every core, see
-/// `ParallelBzDecoder`), gzip or zstd, all of them multi-stream; else
-/// handed to `raw` as is. Says which compression it found.
-fn image_stream<R>(
-    mut reader: R,
-    raw: impl FnOnce(R) -> ImageStream,
-) -> io::Result<(ImageStream, Option<Compression>)>
-where
-    R: BufRead + Send + 'static,
-{
-    let magic = reader.fill_buf()?;
-    let bzip2 = magic.starts_with(b"BZh");
-    let gzip = magic.starts_with(&[0x1f, 0x8b]);
-    let zstd = magic.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
-    Ok(if bzip2 {
-        let decoder = ParallelBzDecoder::new(reader);
-        (
-            ImageStream::new(Discarder::new(decoder)),
-            Some(Compression::Bzip2),
-        )
-    } else if gzip {
-        let decoder = MultiGzDecoder::new(reader);
-        (
-            ImageStream::new(Discarder::new(decoder)),
-            Some(Compression::Gzip),
-        )
-    } else if zstd {
-        let decoder = zstd::stream::read::Decoder::with_buffer(reader)?;
-        (
-            ImageStream::new(Discarder::new(decoder)),
-            Some(Compression::Zstd),
-        )
-    } else {
-        (raw(reader), None)
-    })
+/// This port's own error for what unpacking said, the chain kept.
+fn source_error(report: Report<remora_unpack::Error>) -> Report<Error> {
+    let context = match report.current_context() {
+        remora_unpack::Error::Bundle(what) => Error::Bundle(what),
+        remora_unpack::Error::Read | remora_unpack::Error::Write => Error::Read,
+    };
+    report.change_context(context)
 }
 
 #[cfg(test)]
@@ -239,7 +150,28 @@ mod tests {
     fn a_bmaptar_yields_its_image_decompressed_and_its_bmap() {
         let dir = TempDir::new();
         let path = dir.path("disk.wic.bmaptar");
-        // The image first, as meta-remora's bmaptar orders them.
+        // As meta-remora's bmaptar holds them: the .bmap, then the zstd'd
+        // image.
+        bundle(
+            &path,
+            &[
+                ("disk.wic.bmap", BMAP.as_bytes()),
+                ("disk.wic.zst", &zstd(&image())),
+            ],
+        );
+
+        let source = ImageSourceAdapterImpl.open(&path).unwrap();
+        assert_eq!(source.bundled_bmap.as_deref(), Some(BMAP));
+        assert!(source.bundle);
+        assert_eq!(source.compression, Some(Compression::Zstd));
+        assert_eq!(read_all(source), image());
+    }
+
+    #[test]
+    fn a_bmaptar_may_hold_its_image_first() {
+        let dir = TempDir::new();
+        let path = dir.path("disk.wic.bmaptar");
+        // The other order (and pbzip2, as Yocto has it) reads the same.
         bundle(
             &path,
             &[
@@ -250,7 +182,6 @@ mod tests {
 
         let source = ImageSourceAdapterImpl.open(&path).unwrap();
         assert_eq!(source.bundled_bmap.as_deref(), Some(BMAP));
-        assert!(source.bundle);
         assert_eq!(source.compression, Some(Compression::Bzip2));
         assert_eq!(read_all(source), image());
     }

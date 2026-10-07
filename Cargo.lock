@@ -3492,6 +3492,7 @@ dependencies = [
  "error-stack",
  "flate2",
  "remora-flash",
+ "remora-unpack",
  "tar",
  "tokio-util",
  "zstd",
@@ -3996,6 +3997,19 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "remora-unpack"
+version = "0.12.1"
+dependencies = [
+ "bzip2",
+ "error-stack",
+ "flate2",
+ "remora-scratch",
+ "tar",
+ "thiserror 1.0.69",
+ "zstd",
 ]
 
 [[package]]

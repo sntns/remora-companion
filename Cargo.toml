@@ -24,6 +24,7 @@ members = [
     "components/squashfs-adapter-backhand",
     "components/squashfs-application-transport-cli",
     "components/scratch",
+    "components/unpack",
     "components/identity",
     "components/identity-application",
     "components/identity-adapter-keygen",
