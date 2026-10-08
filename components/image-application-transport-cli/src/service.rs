@@ -16,7 +16,7 @@ use super::error::{Error, Result};
 pub enum Command {
     /// Show the partition table kind and a summary of an image or device,
     /// each partition annotated with the Remora role (shared/efi/slotA/
-    /// slotB/data) its layout gives it.
+    /// slotB/data, or an installer's payload) its layout gives it.
     Inspect {
         /// Image file or block device path.
         image: PathBuf,
@@ -97,6 +97,7 @@ fn parse_partition_selector(s: &str) -> Result<PartitionSelector> {
         "slota" => PartitionRole::SlotA,
         "slotb" => PartitionRole::SlotB,
         "data" => PartitionRole::Data,
+        "installer" => PartitionRole::Installer,
         _ => {
             return Err(error_stack::Report::new(Error::ParseSelector(
                 s.to_string(),
@@ -243,6 +244,7 @@ mod tests {
             ("SlotA", PartitionRole::SlotA),
             ("slotb", PartitionRole::SlotB),
             ("data", PartitionRole::Data),
+            ("installer", PartitionRole::Installer),
         ];
         for (input, role) in cases {
             assert_eq!(

@@ -2,7 +2,10 @@ use std::path::Path;
 
 use remora_progress::OperationContext;
 
-use crate::model::{CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionTable};
+use crate::model::{
+    CpDirRequest, FillOutcome, FillRequest, InjectRequest, MkdirRequest, PartitionRole,
+    PartitionTable,
+};
 
 use super::error::Result;
 
@@ -39,6 +42,23 @@ pub trait ImageServiceInterface: Send + Sync {
     /// only image operation that walks a caller-controlled number of files,
     /// so the only one worth it.
     async fn cp_dir(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()>;
+
+    /// Make whichever partition `request.partition` resolves to hold
+    /// exactly `request.source`'s bytes, raw (no filesystem), resized to
+    /// them rounded up to [`crate::model::FILL_ALIGNMENT`]: the image (a raw
+    /// file, not a block device) grows or shrinks with it, so the partition
+    /// must be the image's last one (GPT, or a primary one on MBR). What the
+    /// partition held before
+    /// is dropped, the rest of the image kept as is -- e.g. an installer's
+    /// payload replaced by another disk image.
+    ///
+    /// Reports the bytes copied through `ctx`, and stops between chunks
+    /// when it's cancelled (the image is then left with a partial payload).
+    async fn fill_partition(
+        &self,
+        request: &FillRequest,
+        ctx: &OperationContext,
+    ) -> Result<FillOutcome>;
 
     /// Write `contents` to `dest_path` inside whichever partition has role
     /// `role` — resolved from the image's own layout (see

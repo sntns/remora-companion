@@ -1,6 +1,6 @@
 use std::{
-    fs::{self, File},
-    io::{Seek, SeekFrom},
+    fs::{self, File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
     sync::Arc,
 };
@@ -14,8 +14,8 @@ use remora_image::{
     },
     application::{Error, ImageServiceInterface, Result},
     model::{
-        CpDirRequest, FsKind, InjectRequest, MkdirRequest, PartitionEntry, PartitionRole,
-        PartitionTable,
+        CpDirRequest, FillOutcome, FillRequest, FsKind, InjectRequest, MkdirRequest,
+        PartitionEntry, PartitionRole, PartitionTable, FILL_ALIGNMENT,
     },
 };
 use remora_progress::OperationContext;
@@ -162,7 +162,82 @@ impl ImageControllerImpl {
 
         Ok(())
     }
+
+    fn fill_partition_blocking(
+        &self,
+        request: &FillRequest,
+        ctx: &OperationContext,
+    ) -> Result<FillOutcome> {
+        let read_source = || Error::ReadSource(request.source.clone());
+        let is_file = fs::metadata(&request.image)
+            .change_context_lazy(|| Error::ReadSource(request.image.clone()))?
+            .is_file();
+        if !is_file {
+            return Err(Report::new(Error::NotAFile(request.image.clone())));
+        }
+        let table = self
+            .partition_table
+            .read(&request.image)
+            .change_context(Error::ReadPartitionTable)?;
+        let entry = table
+            .select(request.partition)
+            .cloned()
+            .change_context(Error::SelectPartition)?;
+        let source = File::open(&request.source).change_context_lazy(read_source)?;
+        let content_bytes = source.metadata().change_context_lazy(read_source)?.len();
+        let partition_bytes = content_bytes.max(1).div_ceil(FILL_ALIGNMENT) * FILL_ALIGNMENT;
+
+        // Resized first: a partition that can't be (not the last one, not
+        // GPT) is refused before anything of the image is overwritten.
+        self.partition_table
+            .resize_last_partition(&request.image, entry.index, partition_bytes)
+            .change_context(Error::Resize(entry.index))?;
+
+        let mut image = OpenOptions::new()
+            .write(true)
+            .open(&request.image)
+            .change_context(Error::Write)?;
+        image
+            .seek(SeekFrom::Start(entry.start_bytes))
+            .change_context(Error::Write)?;
+        let mut source = source.take(content_bytes);
+        let mut chunk = vec![0u8; FILL_CHUNK];
+        let mut copied = 0u64;
+        ctx.sink.progress_bytes(0, content_bytes);
+        loop {
+            if ctx.cancel.is_cancelled() {
+                return Err(Report::new(Error::Cancelled));
+            }
+            let read = source.read(&mut chunk).change_context_lazy(read_source)?;
+            if read == 0 {
+                break;
+            }
+            image
+                .write_all(&chunk[..read])
+                .change_context(Error::Write)?;
+            copied += read as u64;
+            ctx.sink.progress_bytes(copied, content_bytes);
+        }
+        if copied != content_bytes {
+            return Err(Report::new(Error::SourceChanged(request.source.clone())));
+        }
+        // The rest of the partition, up to its 1 MiB boundary, held the old
+        // content: zeros instead, never a stale tail behind the new one.
+        let tail = vec![0u8; (partition_bytes - content_bytes) as usize];
+        image.write_all(&tail).change_context(Error::Write)?;
+        image.sync_all().change_context(Error::Write)?;
+
+        Ok(FillOutcome {
+            index: entry.index,
+            content_bytes,
+            partition_bytes,
+        })
+    }
 }
+
+/// How much of a fill's source is read and written at a time: one progress
+/// step, and how soon a cancel is seen.
+const FILL_CHUNK: usize = 4 * 1024 * 1024;
 
 #[async_trait::async_trait]
 impl ImageServiceInterface for ImageControllerImpl {
@@ -230,6 +305,17 @@ impl ImageServiceInterface for ImageControllerImpl {
         let request = request.clone();
         let ctx = ctx.clone();
         self.blocking(move |this| this.cp_dir_blocking(&request, &ctx))
+            .await
+    }
+
+    async fn fill_partition(
+        &self,
+        request: &FillRequest,
+        ctx: &OperationContext,
+    ) -> Result<FillOutcome> {
+        let request = request.clone();
+        let ctx = ctx.clone();
+        self.blocking(move |this| this.fill_partition_blocking(&request, &ctx))
             .await
     }
 

@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom},
     path::Path,
 };
@@ -37,6 +37,56 @@ impl PartitionTableAdapter for PartitionTableAdapterImpl {
 
     fn detect_fs_kind(&self, image: &Path, partition_offset: u64) -> Result<FsKind> {
         detect_fs_kind(image, partition_offset)
+    }
+
+    fn resize_last_partition(&self, image: &Path, index: u32, size_bytes: u64) -> Result<()> {
+        let path = || image.to_path_buf();
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(image)
+            .change_context_lazy(|| Error::Open(path()))?;
+        // GPT first, as `read` tries it: a GPT disk's protective MBR reads
+        // as an MBR too.
+        let resized = match gpt::resize_last(&mut file, index, size_bytes) {
+            Err(gpt::ResizeError::NotPartitioned(gpt_err)) => {
+                file.seek(SeekFrom::Start(0)).change_context(Error::Seek)?;
+                match mbr::resize_last(&mut file, index, size_bytes) {
+                    Err(gpt::ResizeError::NotPartitioned(mbr_err)) => {
+                        return Err(Report::new(Error::NoValidTable {
+                            gpt: gpt_err,
+                            mbr: mbr_err,
+                        }))
+                    }
+                    other => other,
+                }
+            }
+            other => other,
+        };
+        resized.map_err(|e| match e {
+            gpt::ResizeError::NotPartitioned(cause) => {
+                Report::new(Error::Write(path())).attach(cause.to_string())
+            }
+            gpt::ResizeError::NoSuchPartition => Report::new(Error::NoSuchPartition {
+                path: path(),
+                index,
+            }),
+            gpt::ResizeError::NotLast => Report::new(Error::NotLastPartition {
+                path: path(),
+                index,
+            }),
+            gpt::ResizeError::Unaligned { sector_size } => Report::new(Error::UnalignedSize {
+                size: size_bytes,
+                sector_size,
+            }),
+            gpt::ResizeError::TooBig => Report::new(Error::TooBig {
+                path: path(),
+                size: size_bytes,
+            }),
+            gpt::ResizeError::Io(cause) => {
+                Report::new(Error::Write(path())).attach(cause.to_string())
+            }
+        })
     }
 }
 

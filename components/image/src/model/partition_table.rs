@@ -36,15 +36,20 @@ pub enum PartitionRole {
     SlotA,
     SlotB,
     Data,
+    /// An installer's payload: the disk image it flashes, as raw bytes (a
+    /// `.bmaptar`), no filesystem, in the installer's last partition: named
+    /// `installer` on GPT, of type 0xDA ("non-FS data") on MBR.
+    Installer,
 }
 
 impl PartitionRole {
-    pub const ALL: [PartitionRole; 5] = [
+    pub const ALL: [PartitionRole; 6] = [
         PartitionRole::Shared,
         PartitionRole::Efi,
         PartitionRole::SlotA,
         PartitionRole::SlotB,
         PartitionRole::Data,
+        PartitionRole::Installer,
     ];
 
     /// The GPT partition name wic gives this role's partition (its
@@ -56,12 +61,14 @@ impl PartitionRole {
             PartitionRole::SlotA => "slotA",
             PartitionRole::SlotB => "slotB",
             PartitionRole::Data => "data",
+            PartitionRole::Installer => "installer",
         }
     }
 
     /// Index of this role in the one MBR layout every msdos-table Remora
     /// image (bios/uboot/rpi) shares, or `None` for the EFI partition,
-    /// which only GPT images have.
+    /// which only GPT images have, and an installer's payload, found by its
+    /// type instead (see `PartitionTable::select_mbr_role`).
     fn mbr_index(self) -> Option<u32> {
         match self {
             PartitionRole::Shared => Some(1),
@@ -69,6 +76,7 @@ impl PartitionRole {
             PartitionRole::SlotA => Some(2),
             PartitionRole::SlotB => Some(3),
             PartitionRole::Data => Some(4),
+            PartitionRole::Installer => None,
         }
     }
 }
@@ -76,6 +84,10 @@ impl PartitionRole {
 /// The EFI System Partition type GUID, as `PartitionEntry::partition_type`
 /// spells it.
 const ESP_TYPE_GUID: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
+
+/// An MBR installer's payload partition type: "non-FS data", as wic's
+/// `--system-id 0xda` sets it.
+const INSTALLER_MBR_TYPE: &str = "DA";
 
 /// Primary partitions in an MBR Remora image: shared, slotA, slotB, data.
 const MBR_PARTITION_COUNT: usize = 4;
@@ -145,7 +157,8 @@ impl PartitionTable {
     /// the same roles at different indices (F3APL leads with a BIOS boot
     /// partition, rock-s0 with eight raw u-boot ones). MBR has no names,
     /// and Remora has one MBR layout: exactly four primary partitions,
-    /// shared/slotA/slotB/data in that order.
+    /// shared/slotA/slotB/data in that order -- except an installer's
+    /// payload, the one partition of type 0xDA, whatever the layout.
     pub fn select_role(&self, role: PartitionRole) -> Result<&PartitionEntry, SelectionError> {
         match self.kind {
             TableKind::Gpt => self.select_gpt_role(role),
@@ -214,6 +227,21 @@ impl PartitionTable {
     }
 
     fn select_mbr_role(&self, role: PartitionRole) -> Result<&PartitionEntry, SelectionError> {
+        if role == PartitionRole::Installer {
+            let matches: Vec<&PartitionEntry> = self
+                .partitions
+                .iter()
+                .filter(|p| p.partition_type.eq_ignore_ascii_case(INSTALLER_MBR_TYPE))
+                .collect();
+            return match matches.as_slice() {
+                [entry] => Ok(entry),
+                [] => Err(SelectionError::RoleNotFound {
+                    role,
+                    seen: self.describe(),
+                }),
+                _ => Err(self.ambiguous(role, &matches)),
+            };
+        }
         let index = role
             .mbr_index()
             .ok_or(SelectionError::RoleNotPresentInTable(role, self.kind))?;
@@ -356,6 +384,24 @@ mod tests {
     }
 
     #[test]
+    fn resolves_an_installer_layout_by_its_payload_partition() {
+        let table = gpt(&[(Some("EFI"), ESP_TYPE_GUID), (Some("installer"), LINUX)]);
+        assert_eq!(
+            roles(&table),
+            [(PartitionRole::Efi, 1), (PartitionRole::Installer, 2)]
+        );
+        // A product image has no payload: nothing guessed in its place.
+        let product = gpt(&[(Some("boot"), LINUX), (Some("data"), LINUX)]);
+        assert!(matches!(
+            product.select_role(PartitionRole::Installer).unwrap_err(),
+            SelectionError::RoleNotFound {
+                role: PartitionRole::Installer,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn resolves_the_rock_s0_layout_led_by_raw_u_boot_partitions() {
         let raw = [
             "loader1",
@@ -470,6 +516,22 @@ mod tests {
             SelectionError::RoleNotPresentInTable(PartitionRole::Efi, TableKind::Mbr)
         ));
         assert_eq!(table.role_of(4), Some(PartitionRole::Data));
+    }
+
+    #[test]
+    fn resolves_an_mbr_installer_payload_by_its_type() {
+        let mut table = mbr(3);
+        table.partitions[2].partition_type = "da".to_string();
+        assert_eq!(
+            table.select_role(PartitionRole::Installer).unwrap().index,
+            3
+        );
+        assert_eq!(table.role_of(3), Some(PartitionRole::Installer));
+        // The product's own layout: no payload, nothing guessed.
+        assert!(matches!(
+            mbr(4).select_role(PartitionRole::Installer).unwrap_err(),
+            SelectionError::RoleNotFound { .. }
+        ));
     }
 
     #[test]
