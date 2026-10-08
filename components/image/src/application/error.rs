@@ -12,6 +12,12 @@ pub enum Error {
     Write,
     #[error("failed to read from partition")]
     Read,
+    #[error("failed to resize partition #{0}")]
+    Resize(u32),
+    #[error("{0} is not a regular file: only an image file's partition can be filled")]
+    NotAFile(PathBuf),
+    #[error("{0} changed while it was being copied")]
+    SourceChanged(PathBuf),
     #[error("failed to format {0}")]
     Format(PathBuf),
     #[error("failed to walk {0}")]

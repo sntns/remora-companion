@@ -10,6 +10,14 @@ use super::error::Result;
 pub trait PartitionTableAdapter: Send + Sync {
     fn read(&self, path: &Path) -> Result<PartitionTable>;
     fn detect_fs_kind(&self, image: &Path, partition_offset: u64) -> Result<FsKind>;
+
+    /// Make partition `index`, the image's last one, `size_bytes` long (a
+    /// whole number of sectors), and the image file exactly long enough for
+    /// it: grown or truncated, its table rewritten -- on GPT both headers
+    /// and the protective MBR, the backup GPT moved behind the partition;
+    /// on MBR its one table (a primary partition only, no logical ones). What the partition held
+    /// beyond its new end is gone; what lies before it is untouched.
+    fn resize_last_partition(&self, image: &Path, index: u32, size_bytes: u64) -> Result<()>;
 }
 
 /// Injectable handle to whatever `PartitionTableAdapter` was wired at

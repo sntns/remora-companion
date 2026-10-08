@@ -286,3 +286,201 @@ fn resolves_roles_in_the_rock_s0_layout() {
     );
     let _ = fs::remove_file(&image);
 }
+
+/// What the real `sgdisk -v` says of `image`'s GPT: both headers, their
+/// CRCs, and where the backup sits relative to the disk's end.
+fn sgdisk_verify(image: &std::path::Path) -> String {
+    let output = Command::new("sgdisk")
+        .arg("-v")
+        .arg(image)
+        .output()
+        .expect("sgdisk not available");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// An installer's layout: an ESP, then its payload partition, last.
+fn installer_gpt() -> PathBuf {
+    sfdisk_gpt(&[
+        (2048, 2048, Some(ESP), Some("EFI")),
+        (4096, 4096, None, Some("installer")),
+    ])
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/sgdisk, Linux-only dev tools"
+)]
+fn resizes_the_last_partition_with_the_backup_gpt_behind_it() {
+    let image = installer_gpt();
+    let before = fs::read(&image).unwrap()[..4096 * SECTOR as usize].to_vec();
+
+    for size in [16 * 1024 * 1024, 1024 * 1024] {
+        PartitionTableAdapterImpl
+            .resize_last_partition(&image, 2, size)
+            .unwrap();
+
+        // The partition, then the backup's 32-sector array and its header.
+        let len = fs::metadata(&image).unwrap().len();
+        assert_eq!(len, 4096 * SECTOR + size + 33 * SECTOR, "{size}");
+        let table = PartitionTableAdapterImpl.read(&image).unwrap();
+        let installer = table.select_role(PartitionRole::Installer).unwrap();
+        assert_eq!(
+            (installer.index, installer.start_bytes, installer.size_bytes),
+            (2, 4096 * SECTOR, size)
+        );
+        let verify = sgdisk_verify(&image);
+        assert!(verify.contains("No problems found"), "{size}: {verify}");
+    }
+
+    // Before the payload, only the protective MBR's size and the primary
+    // header/array (the partition's end, the backup's place) changed: the
+    // ESP is the bytes it was.
+    let after = fs::read(&image).unwrap();
+    assert_eq!(
+        after[2048 * SECTOR as usize..4096 * SECTOR as usize],
+        before[2048 * SECTOR as usize..]
+    );
+    let _ = fs::remove_file(&image);
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk, a Linux-only dev tool"
+)]
+fn keeps_a_bootable_protective_mbr_bootable() {
+    let image = installer_gpt();
+    let mut bytes = fs::read(&image).unwrap();
+    bytes[446] = 0x80;
+    fs::write(&image, bytes).unwrap();
+
+    PartitionTableAdapterImpl
+        .resize_last_partition(&image, 2, 2 * 1024 * 1024)
+        .unwrap();
+    assert_eq!(fs::read(&image).unwrap()[446], 0x80);
+    let _ = fs::remove_file(&image);
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk, a Linux-only dev tool"
+)]
+fn refuses_to_resize_anything_but_the_last_partition() {
+    use remora_image::adapter::partition_table::Error;
+
+    let image = installer_gpt();
+    let len = fs::metadata(&image).unwrap().len();
+    let cases = [
+        (1, 1024 * 1024, "not last"),
+        (3, 1024 * 1024, "no such partition"),
+        (2, 1000, "unaligned"),
+    ];
+    for (index, size, what) in cases {
+        let err = PartitionTableAdapterImpl
+            .resize_last_partition(&image, index, size)
+            .unwrap_err();
+        let matched = match err.current_context() {
+            Error::NotLastPartition { index: 1, .. } => "not last",
+            Error::NoSuchPartition { index: 3, .. } => "no such partition",
+            Error::UnalignedSize { .. } => "unaligned",
+            other => panic!("{what}: {other:?}"),
+        };
+        assert_eq!(matched, what);
+        // Refused before anything was written.
+        assert_eq!(fs::metadata(&image).unwrap().len(), len, "{what}");
+    }
+    let _ = fs::remove_file(&image);
+}
+
+/// A sparse MBR image partitioned by the real `sfdisk`, as an MBR
+/// installer is laid out: a boot partition, then the payload (type 0xDA).
+fn mbr_installer() -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let image = std::env::temp_dir().join(format!(
+        "remora-partition-table-mbr-test-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::File::create(&image)
+        .unwrap()
+        .set_len(16 * 1024 * 1024)
+        .unwrap();
+    let script = "label: dos\nunit: sectors\n\n\
+                  start=2048, size=4096, type=c, bootable\n\
+                  start=6144, size=4096, type=da\n";
+    let mut child = Command::new("sfdisk")
+        .arg(&image)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("sfdisk not available");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(script.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success(), "sfdisk failed");
+    image
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk, a Linux-only dev tool"
+)]
+fn resizes_the_last_mbr_partition_and_the_image_with_it() {
+    let image = mbr_installer();
+    let mut bytes = fs::read(&image).unwrap();
+    // Boot code, as grub's boot.img puts it before the table.
+    bytes[..440].fill(0x90);
+    fs::write(&image, bytes).unwrap();
+
+    for size in [12 * 1024 * 1024, 1024 * 1024] {
+        PartitionTableAdapterImpl
+            .resize_last_partition(&image, 2, size)
+            .unwrap();
+        assert_eq!(fs::metadata(&image).unwrap().len(), 6144 * SECTOR + size);
+        let table = PartitionTableAdapterImpl.read(&image).unwrap();
+        assert_eq!(table.kind, TableKind::Mbr);
+        let payload = table.select_role(PartitionRole::Installer).unwrap();
+        assert_eq!(
+            (payload.index, payload.start_bytes, payload.size_bytes),
+            (2, 6144 * SECTOR, size)
+        );
+
+        // What sfdisk itself reads back, the first partition untouched.
+        let dump = Command::new("sfdisk")
+            .arg("--dump")
+            .arg(&image)
+            .output()
+            .unwrap();
+        let dump = String::from_utf8_lossy(&dump.stdout);
+        assert!(
+            dump.contains("start=        2048, size=        4096, type=c, bootable"),
+            "{dump}"
+        );
+        assert!(
+            dump.contains(&format!(
+                "start=        6144, size={:>12}, type=da",
+                size / SECTOR
+            )),
+            "{dump}"
+        );
+    }
+    assert!(fs::read(&image).unwrap()[..440].iter().all(|&b| b == 0x90));
+
+    let err = PartitionTableAdapterImpl
+        .resize_last_partition(&image, 1, 1024 * 1024)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err.current_context(),
+            remora_image::adapter::partition_table::Error::NotLastPartition { index: 1, .. }
+        ),
+        "{err:?}"
+    );
+    let _ = fs::remove_file(&image);
+}
