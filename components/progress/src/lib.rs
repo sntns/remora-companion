@@ -39,18 +39,46 @@ pub enum Unit {
 /// alongside the main operation, or reported from while waiting on a
 /// blocking one (see [`track_output_file_size`]).
 #[derive(Clone)]
-pub struct ProgressSink(Option<mpsc::UnboundedSender<OperationEvent>>);
+pub struct ProgressSink {
+    tx: Option<mpsc::UnboundedSender<OperationEvent>>,
+    /// Put before every phase this sink reports (see [`Self::scoped`]).
+    scope: Option<std::sync::Arc<str>>,
+}
 
 impl ProgressSink {
     /// A sink with nobody listening — for callers that don't care about
     /// progress (tests, a one-shot run with no live output). Every report
     /// is a no-op rather than allocating a channel nobody drains.
     pub fn noop() -> Self {
-        Self(None)
+        Self {
+            tx: None,
+            scope: None,
+        }
+    }
+
+    /// The same sink, its phases named `<scope>: <phase>`: for an
+    /// operation made of others', whose own generic phases ("decoding",
+    /// "encoding") would otherwise not say which of its inputs they're
+    /// about. Scopes nest (`outer: inner: phase`). The closing "done"
+    /// phase is left as is: it ends the operation, not a step.
+    pub fn scoped(&self, scope: &str) -> Self {
+        let scope = match &self.scope {
+            Some(outer) => format!("{outer}: {scope}"),
+            None => scope.to_string(),
+        };
+        Self {
+            tx: self.tx.clone(),
+            scope: Some(scope.into()),
+        }
     }
 
     pub fn phase(&self, phase: impl Into<String>) {
-        self.send(OperationEvent::Phase(phase.into()));
+        let phase = phase.into();
+        let phase = match &self.scope {
+            Some(scope) if phase != "done" => format!("{scope}: {phase}"),
+            _ => phase,
+        };
+        self.send(OperationEvent::Phase(phase));
     }
 
     pub fn progress(&self, done: u64, total: u64) {
@@ -79,7 +107,7 @@ impl ProgressSink {
     }
 
     fn send(&self, event: OperationEvent) {
-        if let Some(tx) = &self.0 {
+        if let Some(tx) = &self.tx {
             // A closed receiver (the listener stopped caring) is not this
             // operation's problem to report or fail on.
             let _ = tx.send(event);
@@ -92,7 +120,13 @@ impl ProgressSink {
 /// forward to a GUI) while it runs.
 pub fn channel() -> (ProgressSink, UnboundedReceiverStream<OperationEvent>) {
     let (tx, rx) = mpsc::unbounded_channel();
-    (ProgressSink(Some(tx)), UnboundedReceiverStream::new(rx))
+    (
+        ProgressSink {
+            tx: Some(tx),
+            scope: None,
+        },
+        UnboundedReceiverStream::new(rx),
+    )
 }
 
 /// What a long-running operation needs to report advancement and notice
@@ -229,6 +263,25 @@ mod tests {
             Some(OperationEvent::Log("hello".to_string()))
         );
         assert_eq!(stream.next().await, None);
+    }
+
+    #[tokio::test]
+    async fn a_scoped_sink_names_its_phases_after_its_scope() {
+        let (sink, mut stream) = channel();
+        let inner = sink.scoped("installer").scoped("image");
+        inner.phase("encoding");
+        inner.progress(1, 2);
+        inner.phase("done");
+        sink.phase("embedding");
+        drop((sink, inner));
+
+        let mut phases = Vec::new();
+        while let Some(event) = stream.next().await {
+            if let OperationEvent::Phase(name) = event {
+                phases.push(name);
+            }
+        }
+        assert_eq!(phases, ["installer: image: encoding", "done", "embedding"]);
     }
 
     #[test]
