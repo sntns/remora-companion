@@ -36,6 +36,9 @@ remora-image-adapter-partition-table = { path = "../../components/image-adapter-
 remora-image-adapter-ext4 = { path = "../../components/image-adapter-ext4" }
 remora-image-adapter-vfat = { path = "../../components/image-adapter-vfat" }
 remora-image-application-transport-cli = { path = "../../components/image-application-transport-cli" }
+remora-installer = { path = "../../components/installer" }
+remora-installer-application = { path = "../../components/installer-application" }
+remora-installer-application-transport-cli = { path = "../../components/installer-application-transport-cli" }
 remora-fs-walk = { path = "../../components/fs-walk" }
 remora-squashfs = { path = "../../components/squashfs" }
 remora-squashfs-application = { path = "../../components/squashfs-application" }

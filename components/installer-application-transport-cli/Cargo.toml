@@ -1,0 +1,16 @@
+[package]
+name = "remora-installer-application-transport-cli"
+description = "clap subcommands exposing the installer application service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-installer = { path = "../installer" }
+remora-progress = { path = "../progress" }
+remora-tui = { path = "../tui" }
+remora-format = { path = "../format" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true

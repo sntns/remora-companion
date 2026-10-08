@@ -13,6 +13,7 @@ remora-convert = { path = "../convert" }
 remora-identity = { path = "../identity" }
 remora-config = { path = "../config" }
 remora-image = { path = "../image" }
+remora-installer = { path = "../installer" }
 remora-squashfs = { path = "../squashfs" }
 remora-factory = { path = "../factory" }
 remora-progress = { path = "../progress" }
@@ -20,6 +21,7 @@ error-stack.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
+remora-installer-application = { path = "../installer-application" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 tempfile.workspace = true

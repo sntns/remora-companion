@@ -1,0 +1,31 @@
+[package]
+name = "remora-installer-application"
+description = "Use-case implementation for the installer vertical: an installer's payload replaced, through the convert and image verticals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-installer = { path = "../installer" }
+remora-convert = { path = "../convert" }
+remora-image = { path = "../image" }
+remora-progress = { path = "../progress" }
+remora-scratch = { path = "../scratch" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+remora-convert-application = { path = "../convert-application" }
+remora-convert-adapter-bmaptar = { path = "../convert-adapter-bmaptar" }
+remora-convert-adapter-bzip2 = { path = "../convert-adapter-bzip2" }
+remora-convert-adapter-gzip = { path = "../convert-adapter-gzip" }
+remora-convert-adapter-qcow2 = { path = "../convert-adapter-qcow2" }
+remora-convert-adapter-zstd = { path = "../convert-adapter-zstd" }
+remora-image-application = { path = "../image-application" }
+remora-image-adapter-ext4 = { path = "../image-adapter-ext4" }
+remora-image-adapter-partition-table = { path = "../image-adapter-partition-table" }
+remora-image-adapter-vfat = { path = "../image-adapter-vfat" }
+remora-fs-walk = { path = "../fs-walk" }
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -2852,6 +2852,7 @@ dependencies = [
  "error-stack",
  "remora-context",
  "remora-image",
+ "remora-installer",
  "remora-progress",
  "remora-squashfs",
  "serde",
@@ -2889,6 +2890,8 @@ dependencies = [
  "remora-image-adapter-partition-table",
  "remora-image-adapter-vfat",
  "remora-image-application",
+ "remora-installer",
+ "remora-installer-application",
  "remora-progress",
  "remora-squashfs",
  "remora-squashfs-adapter-backhand",
@@ -3403,6 +3406,9 @@ dependencies = [
  "remora-image-adapter-vfat",
  "remora-image-application",
  "remora-image-application-transport-cli",
+ "remora-installer",
+ "remora-installer-application",
+ "remora-installer-application-transport-cli",
  "remora-ota",
  "remora-ota-adapter-file",
  "remora-ota-adapter-grpc",
@@ -3788,6 +3794,56 @@ dependencies = [
  "remora-install",
  "remora-ota",
  "remora-ota-application-transport-cli",
+ "remora-progress",
+ "remora-tui",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-installer"
+version = "0.14.0"
+dependencies = [
+ "async-trait",
+ "busybody",
+ "error-stack",
+ "remora-progress",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-installer-application"
+version = "0.14.0"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-convert",
+ "remora-convert-adapter-bmaptar",
+ "remora-convert-adapter-bzip2",
+ "remora-convert-adapter-gzip",
+ "remora-convert-adapter-qcow2",
+ "remora-convert-adapter-zstd",
+ "remora-convert-application",
+ "remora-fs-walk",
+ "remora-image",
+ "remora-image-adapter-ext4",
+ "remora-image-adapter-partition-table",
+ "remora-image-adapter-vfat",
+ "remora-image-application",
+ "remora-installer",
+ "remora-progress",
+ "remora-scratch",
+ "tokio",
+]
+
+[[package]]
+name = "remora-installer-application-transport-cli"
+version = "0.14.0"
+dependencies = [
+ "clap",
+ "error-stack",
+ "remora-format",
+ "remora-installer",
  "remora-progress",
  "remora-tui",
  "thiserror 1.0.69",
