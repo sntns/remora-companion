@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 remora-image = { path = "../image" }
+remora-installer = { path = "../installer" }
 remora-squashfs = { path = "../squashfs" }
 remora-progress = { path = "../progress" }
 remora-context = { path = "../context" }

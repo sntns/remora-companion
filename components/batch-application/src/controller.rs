@@ -9,6 +9,7 @@ use remora_convert::application::ConvertService;
 use remora_factory::{application::FactoryService, model::DeviceSerial};
 use remora_identity::application::IdentityService;
 use remora_image::application::ImageService;
+use remora_installer::application::InstallerService;
 use remora_progress::OperationContext;
 use remora_squashfs::application::SquashfsService;
 
@@ -23,6 +24,7 @@ pub struct BatchControllerImpl {
     identity: IdentityService,
     config: ConfigService,
     image: ImageService,
+    installer: InstallerService,
     squashfs: SquashfsService,
     factory: FactoryService,
 }
@@ -33,6 +35,7 @@ impl BatchControllerImpl {
         identity: IdentityService,
         config: ConfigService,
         image: ImageService,
+        installer: InstallerService,
         squashfs: SquashfsService,
         factory: FactoryService,
     ) -> Self {
@@ -41,6 +44,7 @@ impl BatchControllerImpl {
             identity,
             config,
             image,
+            installer,
             squashfs,
             factory,
         }
@@ -112,6 +116,12 @@ impl BatchServiceInterface for BatchControllerImpl {
                     .cp_dir(&request, ctx)
                     .await
                     .change_context(Error::Step { index, kind })?,
+                BatchStep::InstallerPack(request) => {
+                    self.installer
+                        .pack(&request, ctx)
+                        .await
+                        .change_context(Error::Step { index, kind })?;
+                }
                 BatchStep::SquashfsBuild {
                     inputs,
                     output,

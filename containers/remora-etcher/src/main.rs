@@ -78,6 +78,11 @@ enum Commands {
     #[command(subcommand)]
     Convert(remora_convert_application_transport_cli::Command),
 
+    /// Make a USB installer flash another disk image (e.g. one just
+    /// provisioned), from an installer as meta-remora builds it.
+    #[command(subcommand)]
+    Installer(remora_installer_application_transport_cli::Command),
+
     /// Run a batch recipe: several of the above operations as one call,
     /// with one unified progress stream and no cleanup/rollback if a step
     /// fails partway through.
@@ -183,6 +188,10 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
         ),
         Commands::Convert(cmd) => exit_on_error(
             remora_convert_application_transport_cli::run(cmd, &services.convert).await,
+            verbose,
+        ),
+        Commands::Installer(cmd) => exit_on_error(
+            remora_installer_application_transport_cli::run(cmd, &services.installer).await,
             verbose,
         ),
         Commands::Batch(cmd) => exit_on_error(

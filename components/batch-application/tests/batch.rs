@@ -62,6 +62,7 @@ use remora_image_adapter_ext4::Ext4AdapterImpl;
 use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
 use remora_image_adapter_vfat::VfatAdapterImpl;
 use remora_image_application::ImageControllerImpl;
+use remora_installer::application::InstallerService;
 use remora_progress::OperationContext;
 use remora_squashfs::application::SquashfsService;
 use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
@@ -229,6 +230,12 @@ fn convert() -> ConvertService {
     }))
 }
 
+fn installer(convert: ConvertService, image: ImageService) -> InstallerService {
+    InstallerService::new(remora_installer_application::InstallerControllerImpl::new(
+        convert, image,
+    ))
+}
+
 fn controller() -> BatchControllerImpl {
     let convert = convert();
 
@@ -266,7 +273,15 @@ fn controller() -> BatchControllerImpl {
         CredentialWriterAdapterService::new(CredentialWriterAdapterImpl),
     ));
 
-    BatchControllerImpl::new(convert, identity, config, image, squashfs, factory)
+    BatchControllerImpl::new(
+        convert.clone(),
+        identity,
+        config,
+        image.clone(),
+        installer(convert, image),
+        squashfs,
+        factory,
+    )
 }
 
 #[tokio::test]
@@ -507,7 +522,15 @@ async fn runs_a_factory_provision_step() {
         FactoryProvisioningAdapterService::new(FakeProvisioning),
         CredentialWriterAdapterService::new(CredentialWriterAdapterImpl),
     ));
-    let controller = BatchControllerImpl::new(convert, identity, config, image, squashfs, factory);
+    let controller = BatchControllerImpl::new(
+        convert.clone(),
+        identity,
+        config,
+        image.clone(),
+        installer(convert, image),
+        squashfs,
+        factory,
+    );
 
     let output = temp_path("remora-factory.yaml");
     controller

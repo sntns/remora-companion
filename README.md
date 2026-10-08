@@ -561,6 +561,40 @@ The output is written next to its destination and renamed into place
 once complete: a failed or interrupted conversion leaves no partial file
 behind under the destination's name.
 
+### Build a USB installer for an image
+
+```
+remora-etcher installer pack remora-installer-f3apl.wic.bmaptar \
+  --image my-device.wic --output my-installer-f3apl.wic.bmaptar
+remora-etcher flash --image my-installer-f3apl.wic.bmaptar --device /dev/sdb
+```
+
+An installer is a disk image of its own, as meta-remora builds it
+(`remora-installer-<machine>.wic.bmaptar`): what boots the installer for
+the machine's boot mode (an EFI partition, or U-Boot's, the Raspberry Pi
+firmware's or GRUB's boot partition), then, last, a raw partition holding
+the disk image it installs, as a `.bmaptar` -- named `installer` on GPT, of
+type 0xDA on MBR. Booted from a USB stick, it flashes
+that image onto the device's own disk (checksum-verified, as `flash` does)
+and, once the stick is removed, reboots into it.
+
+`installer pack` makes an installer install another image: the one
+`--image` names, e.g. a product image provisioned as above (`convert
+to-raw`, then `image`, `identity`, `config`), in any format `convert`
+reads -- a `.bmaptar` is embedded as is, anything else is bundled as one
+first. The payload partition is resized to it and the rest of the
+installer kept as it was; `--output`'s extension names its format, as for
+`convert from-raw`. It works in a scratch directory next to `--output`,
+removed afterwards. As a batch step:
+
+```json
+{ "step": "installer-pack", "installer": "remora-installer-f3apl.wic.bmaptar",
+  "image": "my-device.wic", "output": "my-installer-f3apl.wic.bmaptar" }
+```
+
+`image partition list` shows an installer's payload partition with the
+`Installer` role.
+
 ---
 
 Not yet implemented: field validation against an actual meta-remora-produced
@@ -571,7 +605,7 @@ wic image, and Windows/macOS disk support.
 DDD-style, matching the [remora-edge](https://github.com/sntns/remora-edge)
 convention: one Cargo workspace, one `components/<vertical>` crate per
 bounded context — `disk`, `flash`, `image`, `squashfs`, `identity`,
-`config`, `convert`, `batch`, `factory`, `station` and `claim` (a hub's side
+`config`, `convert`, `installer`, `batch`, `factory`, `station` and `claim` (a hub's side
 of the station, for `station simulate`) for remora-etcher, `context`,
 `channel`, `ota` and `device` for rmra, `update` (and `context`) for both. Components are generic, not owned by a binary: the
 directory is `components/<vertical>`, the package `remora-<vertical>`. Each

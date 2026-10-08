@@ -62,6 +62,8 @@ use remora_image_adapter_ext4::Ext4AdapterImpl;
 use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
 use remora_image_adapter_vfat::VfatAdapterImpl;
 use remora_image_application::ImageControllerImpl;
+use remora_installer::application::InstallerService;
+use remora_installer_application::InstallerControllerImpl;
 use remora_ota::{
     adapter::{
         gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService,
@@ -107,6 +109,7 @@ pub struct Services {
     pub identity: IdentityService,
     pub config: ConfigService,
     pub convert: ConvertService,
+    pub installer: InstallerService,
     pub batch: BatchService,
     pub factory: FactoryService,
     pub station: StationService,
@@ -286,6 +289,17 @@ pub async fn wire() -> Services {
         .get_type::<ConvertService>()
         .await
         .expect("ConvertService was just registered");
+
+    container
+        .set_type(InstallerService::new(InstallerControllerImpl::new(
+            convert.clone(),
+            image.clone(),
+        )))
+        .await;
+    let installer = container
+        .get_type::<InstallerService>()
+        .await
+        .expect("InstallerService was just registered");
 
     // The same contexts as rmra's, in the same place: one login serves
     // both binaries.
@@ -530,6 +544,7 @@ pub async fn wire() -> Services {
             identity.clone(),
             config.clone(),
             image.clone(),
+            installer.clone(),
             squashfs.clone(),
             factory.clone(),
         )))
@@ -555,7 +570,7 @@ pub async fn wire() -> Services {
             RELEASES_REPO,
         )))
         .await;
-    let installer = container
+    let dist_installer = container
         .get_type::<InstallerAdapterService>()
         .await
         .expect("InstallerAdapterService was just registered");
@@ -563,7 +578,7 @@ pub async fn wire() -> Services {
     container
         .set_type(UpdateService::new(UpdateControllerImpl::new(
             release_feed,
-            installer,
+            dist_installer,
         )))
         .await;
     let update = container
@@ -581,6 +596,7 @@ pub async fn wire() -> Services {
         identity,
         config,
         convert,
+        installer,
         batch,
         factory,
         station,
