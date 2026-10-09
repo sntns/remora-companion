@@ -1,4 +1,7 @@
+mod local;
 mod ssh;
+
+pub use local::{LocalCertificateRequest, LocalSshCertificate, LocalSshDevice, OfflineLoginCode};
 
 pub use ssh::{
     shell_quote, ExecInput, ExecOutcome, ExecRequest, PreparedSsh, ProxyCommandBuilder,

@@ -184,6 +184,62 @@ impl pb::channel_service_server::ChannelService for Channels {
     ) -> Result<Response<pb::ChannelServiceSignDeviceSshCertificateResponse>, Status> {
         Err(Status::unimplemented("not in this test"))
     }
+
+    async fn sign_device_local_ssh_certificate(
+        &self,
+        _: Request<pb::ChannelServiceSignDeviceLocalSshCertificateRequest>,
+    ) -> Result<Response<pb::ChannelServiceSignDeviceLocalSshCertificateResponse>, Status> {
+        Err(Status::unimplemented("not in this test"))
+    }
+
+    /// The code is the device, account and challenge -- normalised as the
+    /// platform does -- for the test to recognise. "nobody" is an account
+    /// no device maps.
+    async fn sign_device_login_challenge(
+        &self,
+        request: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
+    ) -> Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status> {
+        authorized(&request)?;
+        let request = request.into_inner();
+        if request.account == "nobody" {
+            return Err(Status::failed_precondition(
+                "no role of the device maps account \"nobody\"",
+            ));
+        }
+        let challenge: String = request
+            .challenge
+            .chars()
+            .filter(|c| !matches!(c, '-' | ' '))
+            .map(|c| c.to_ascii_uppercase())
+            .collect();
+        Ok(Response::new(
+            pb::ChannelServiceSignDeviceLoginChallengeResponse {
+                login_code: format!(
+                    "{}/{}/{challenge}",
+                    request.channel_device_name, request.account
+                ),
+            },
+        ))
+    }
+
+    /// `count` codes from index 7: some were issued before.
+    async fn issue_device_offline_login_codes(
+        &self,
+        request: Request<pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest>,
+    ) -> Result<Response<pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse>, Status> {
+        authorized(&request)?;
+        let request = request.into_inner();
+        Ok(Response::new(
+            pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse {
+                login_codes: (7..7 + request.count)
+                    .map(|index| pb::ChannelServiceDeviceOfflineLoginCode {
+                        index,
+                        login_code: format!("{}-{index:05}", request.account.to_uppercase()),
+                    })
+                    .collect(),
+            },
+        ))
+    }
 }
 
 async fn serve() -> String {
@@ -654,4 +710,99 @@ async fn a_context_defined_by_the_environment() {
     let (code, _, stderr) = rmra.run_with(&["-c", "local", "whoami"], &env, b"").await;
     assert_eq!(code, 1);
     assert!(stderr.contains("not logged in"), "{stderr}");
+}
+
+#[tokio::test]
+async fn console_login_codes() {
+    let address = serve().await;
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+    let env = [
+        ("RMRA_ADDRESS", address.as_str()),
+        ("RMRA_TOKEN", TOKEN),
+        ("RMRA_PLAINTEXT", "1"),
+    ];
+
+    // The code alone on stdout, the challenge sent as typed.
+    let (code, stdout, stderr) = rmra
+        .run_with(
+            &[
+                "channel",
+                "login-code",
+                "525400C0FFEE",
+                "--account",
+                "root",
+                "k7qm-3xrb",
+            ],
+            &env,
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "525400C0FFEE/root/K7QM3XRB\n");
+
+    // The platform's refusal, in its words.
+    let (code, _, stderr) = rmra
+        .run_with(
+            &[
+                "channel",
+                "login-code",
+                "525400C0FFEE",
+                "--account",
+                "nobody",
+                "K7QM-3XRB",
+            ],
+            &env,
+            b"",
+        )
+        .await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("maps account \"nobody\""), "{stderr}");
+
+    let (code, stdout, stderr) = rmra
+        .run_with(
+            &[
+                "channel",
+                "offline-login-codes",
+                "525400C0FFEE",
+                "--account",
+                "root",
+                "--count",
+                "3",
+                "--format",
+                "json",
+            ],
+            &env,
+            b"",
+        )
+        .await;
+    assert_eq!(code, 0, "{stderr}");
+    let codes: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        codes,
+        serde_json::json!([
+            {"index": 7, "code": "ROOT-00007"},
+            {"index": 8, "code": "ROOT-00008"},
+            {"index": 9, "code": "ROOT-00009"},
+        ])
+    );
+
+    // More than the platform issues at once is refused before asking.
+    let (code, _, stderr) = rmra
+        .run_with(
+            &[
+                "channel",
+                "offline-login-codes",
+                "525400C0FFEE",
+                "--account",
+                "root",
+                "--count",
+                "101",
+            ],
+            &env,
+            b"",
+        )
+        .await;
+    assert_eq!(code, 2, "{stderr}");
 }

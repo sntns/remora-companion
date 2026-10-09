@@ -1,9 +1,14 @@
+use std::time::{Duration, SystemTime};
+
 use error_stack::{Report, ResultExt};
 use remora_channel::{
     adapter::gateway::{
         Channel, ChannelGatewayAdapter, ChannelReceiver, ChannelSender, Error, Result,
     },
-    model::{ChannelKind, OpenedChannel, SshCertificate, SshRole},
+    model::{
+        ChannelKind, LocalSshCertificate, LocalSshDevice, OfflineLoginCode, OpenedChannel,
+        SshCertificate, SshRole,
+    },
 };
 use remora_context::model::ResolvedContext;
 use remora_platform_grpc::{
@@ -134,6 +139,99 @@ impl ChannelGatewayAdapter for GatewayAdapterImpl {
             known_hosts: signed.ssh_known_hosts,
         })
     }
+
+    async fn sign_local_ssh_certificate(
+        &self,
+        context: &ResolvedContext,
+        devices: &[String],
+        public_key: &str,
+        role: SshRole,
+        validity_hours: u32,
+    ) -> Result<LocalSshCertificate> {
+        let signed = Self::client(context)
+            .await?
+            .sign_device_local_ssh_certificate(
+                pb::ChannelServiceSignDeviceLocalSshCertificateRequest {
+                    channel_device_names: devices.to_vec(),
+                    ssh_public_key: public_key.to_owned(),
+                    ssh_role: role.as_str().to_owned(),
+                    validity_hours: i32::try_from(validity_hours).unwrap_or(i32::MAX),
+                },
+            )
+            .await
+            .map_err(classify)?
+            .into_inner();
+        Ok(LocalSshCertificate {
+            certificate: signed.ssh_certificate,
+            known_hosts: signed.ssh_known_hosts,
+            devices: signed
+                .ssh_devices
+                .into_iter()
+                .map(|device| LocalSshDevice {
+                    device: device.channel_device_name,
+                    user: device.ssh_user,
+                    host_key_alias: device.ssh_host_key_alias,
+                })
+                .collect(),
+            valid_before: time_of(signed.valid_before),
+        })
+    }
+
+    async fn sign_login_challenge(
+        &self,
+        context: &ResolvedContext,
+        device: &str,
+        account: &str,
+        challenge: &str,
+    ) -> Result<String> {
+        let signed = Self::client(context)
+            .await?
+            .sign_device_login_challenge(pb::ChannelServiceSignDeviceLoginChallengeRequest {
+                channel_device_name: device.to_owned(),
+                account: account.to_owned(),
+                challenge: challenge.to_owned(),
+            })
+            .await
+            .map_err(classify)?
+            .into_inner();
+        Ok(signed.login_code)
+    }
+
+    async fn issue_offline_login_codes(
+        &self,
+        context: &ResolvedContext,
+        device: &str,
+        account: &str,
+        count: u32,
+    ) -> Result<Vec<OfflineLoginCode>> {
+        let issued = Self::client(context)
+            .await?
+            .issue_device_offline_login_codes(
+                pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest {
+                    channel_device_name: device.to_owned(),
+                    account: account.to_owned(),
+                    count,
+                },
+            )
+            .await
+            .map_err(classify)?
+            .into_inner();
+        Ok(issued
+            .login_codes
+            .into_iter()
+            .map(|code| OfflineLoginCode {
+                index: code.index,
+                code: code.login_code,
+            })
+            .collect())
+    }
+}
+
+fn time_of(timestamp: Option<prost_types::Timestamp>) -> Option<SystemTime> {
+    let timestamp = timestamp?;
+    let seconds = u64::try_from(timestamp.seconds).ok()?;
+    let nanos = u32::try_from(timestamp.nanos).ok()?;
+    Some(SystemTime::UNIX_EPOCH + Duration::new(seconds, nanos))
 }
 
 /// `None` once write-closed: dropping the request sender is what ends the
@@ -211,6 +309,8 @@ fn classify(status: tonic::Status) -> Report<Error> {
         Code::NotFound => Error::NotFound,
         Code::Unavailable => Error::Unreachable,
         Code::FailedPrecondition if status.message().contains("no session") => Error::NotConnected,
+        Code::FailedPrecondition => Error::FailedPrecondition,
+        Code::InvalidArgument => Error::InvalidArgument,
         _ => Error::Channel,
     };
     Report::new(error).attach(status_summary(&status))
@@ -291,6 +391,85 @@ mod tests {
                     ssh_user: request.ssh_role,
                     ssh_host_key_alias: request.channel_device_name.to_lowercase(),
                     ssh_known_hosts: "@cert-authority * ssh-ed25519 AAAA".into(),
+                },
+            ))
+        }
+
+        /// One entry per device, valid until 2026-10-09 12:00:00Z.
+        async fn sign_device_local_ssh_certificate(
+            &self,
+            request: Request<pb::ChannelServiceSignDeviceLocalSshCertificateRequest>,
+        ) -> std::result::Result<
+            Response<pb::ChannelServiceSignDeviceLocalSshCertificateResponse>,
+            Status,
+        > {
+            let request = request.into_inner();
+            if request.validity_hours > 72 {
+                return Err(Status::invalid_argument(
+                    "validity above the account's maximum",
+                ));
+            }
+            Ok(Response::new(
+                pb::ChannelServiceSignDeviceLocalSshCertificateResponse {
+                    ssh_certificate: format!(
+                        "local-{} {}",
+                        request.ssh_role, request.ssh_public_key
+                    ),
+                    ssh_known_hosts: "@cert-authority *.devices.sentiens ssh-ed25519 AAAA".into(),
+                    ssh_devices: request
+                        .channel_device_names
+                        .iter()
+                        .map(
+                            |name| pb::ChannelServiceSignDeviceLocalSshCertificateDevice {
+                                channel_device_name: name.clone(),
+                                ssh_user: "root".into(),
+                                ssh_host_key_alias: format!(
+                                    "{}.devices.sentiens",
+                                    name.to_lowercase()
+                                ),
+                            },
+                        )
+                        .collect(),
+                    valid_before: Some(prost_types::Timestamp {
+                        seconds: 1_791_547_200,
+                        nanos: 0,
+                    }),
+                },
+            ))
+        }
+
+        async fn sign_device_login_challenge(
+            &self,
+            request: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
+        ) -> std::result::Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status>
+        {
+            let request = request.into_inner();
+            if request.account == "nobody" {
+                return Err(Status::failed_precondition("unmapped account"));
+            }
+            Ok(Response::new(
+                pb::ChannelServiceSignDeviceLoginChallengeResponse {
+                    login_code: format!("{}:{}", request.account, request.challenge),
+                },
+            ))
+        }
+
+        async fn issue_device_offline_login_codes(
+            &self,
+            request: Request<pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest>,
+        ) -> std::result::Result<
+            Response<pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse>,
+            Status,
+        > {
+            let request = request.into_inner();
+            Ok(Response::new(
+                pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse {
+                    login_codes: (40..40 + request.count)
+                        .map(|index| pb::ChannelServiceDeviceOfflineLoginCode {
+                            index,
+                            login_code: format!("C{index}"),
+                        })
+                        .collect(),
                 },
             ))
         }
@@ -417,5 +596,68 @@ mod tests {
         assert_eq!(signed.certificate, "cert-for ssh-ed25519 KEY");
         assert_eq!(signed.user, "admin");
         assert_eq!(signed.host_key_alias, "abc");
+    }
+
+    #[tokio::test]
+    async fn certifies_a_key_for_local_ssh_to_several_devices() {
+        let context = serve().await;
+        let devices = vec!["DEV1".to_owned(), "DEV2".to_owned()];
+        let issued = GatewayAdapterImpl
+            .sign_local_ssh_certificate(&context, &devices, "ssh-ed25519 KEY", SshRole::Admin, 8)
+            .await
+            .unwrap();
+        assert_eq!(issued.certificate, "local-admin ssh-ed25519 KEY");
+        assert_eq!(issued.devices.len(), 2);
+        assert_eq!(issued.devices[1].device, "DEV2");
+        assert_eq!(issued.devices[1].host_key_alias, "dev2.devices.sentiens");
+        assert_eq!(
+            issued.valid_before,
+            Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_547_200))
+        );
+
+        let report = GatewayAdapterImpl
+            .sign_local_ssh_certificate(&context, &devices, "ssh-ed25519 KEY", SshRole::User, 100)
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::InvalidArgument));
+    }
+
+    #[tokio::test]
+    async fn signs_challenges_and_issues_offline_codes() {
+        let context = serve().await;
+        assert_eq!(
+            GatewayAdapterImpl
+                .sign_login_challenge(&context, "DEV1", "root", "K7QM-3XRB")
+                .await
+                .unwrap(),
+            "root:K7QM-3XRB"
+        );
+        let report = GatewayAdapterImpl
+            .sign_login_challenge(&context, "DEV1", "nobody", "K7QM-3XRB")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            report.current_context(),
+            Error::FailedPrecondition
+        ));
+        assert!(format!("{report:?}").contains("unmapped account"));
+
+        let codes = GatewayAdapterImpl
+            .issue_offline_login_codes(&context, "DEV1", "root", 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            codes,
+            [
+                OfflineLoginCode {
+                    index: 40,
+                    code: "C40".into()
+                },
+                OfflineLoginCode {
+                    index: 41,
+                    code: "C41".into()
+                },
+            ]
+        );
     }
 }

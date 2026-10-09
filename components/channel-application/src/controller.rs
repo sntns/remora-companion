@@ -12,8 +12,9 @@ use remora_channel::{
     },
     application::{ChannelServiceInterface, Error, Result},
     model::{
-        ChannelKind, ExecOutcome, ExecRequest, PreparedSsh, ProxyCommandBuilder, ProxyTarget,
-        ScpRequest, SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
+        ChannelKind, ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate,
+        OfflineLoginCode, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest,
+        SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
     },
 };
 use remora_context::{
@@ -45,6 +46,16 @@ type CertifiedFor = (String, String, SshRole);
 /// certificate's 15 minutes, which only has to hold when a connection
 /// authenticates.
 const REUSE_CERTIFIED: Duration = Duration::from_secs(10 * 60);
+
+/// How long a throwaway key's local certificate is asked for: the shortest
+/// the platform issues, since the key is gone once the session ends.
+const LOCAL_THROWAWAY_HOURS: u32 = 1;
+
+/// How many devices one local certificate may name, as the platform has it.
+const MAX_LOCAL_DEVICES: usize = 64;
+
+/// How many offline codes one request may issue, as the platform has it.
+const MAX_OFFLINE_CODES: u32 = 100;
 
 impl ChannelControllerImpl {
     pub fn new(
@@ -84,6 +95,7 @@ impl ChannelControllerImpl {
                 &request.device,
                 request.role,
                 &request.proxy_command,
+                None,
                 vec!["BatchMode=yes".to_owned()],
             )
             .await?,
@@ -98,12 +110,17 @@ impl ChannelControllerImpl {
     /// the caller's own `-o` options, which come after so ssh (first value
     /// wins) never lets them loosen the pinning. The key material's own
     /// options are the ssh client port's, which writes it.
+    ///
+    /// With `local`, the key gets a local certificate instead and ssh is
+    /// pinned to that address, with no proxy at all: the device's sshd is
+    /// reached directly on its local network.
     async fn certify(
         &self,
         over: Option<&ContextOverride>,
         device: &str,
         role: SshRole,
         proxy_command: &ProxyCommandBuilder,
+        local: Option<&str>,
         options: Vec<String>,
     ) -> Result<Session> {
         let context = self.resolve(over).await?;
@@ -118,19 +135,61 @@ impl ChannelControllerImpl {
             .to_openssh(LineEnding::LF)
             .change_context(Error::Keygen)?;
 
-        let certified = self
-            .gateway
-            .sign_ssh_certificate(&context, device, &public_key, role)
-            .await
-            .change_context_lazy(|| Error::Certify(device.to_owned()))?;
-
-        let proxy_command = proxy_command(&ProxyTarget {
-            context: &context.context.name,
-            device,
-        });
-        let mut pinning = vec![
-            "-o".to_owned(),
-            format!("ProxyCommand={proxy_command}"),
+        let (certified, mut pinning) = match local {
+            None => {
+                let certified = self
+                    .gateway
+                    .sign_ssh_certificate(&context, device, &public_key, role)
+                    .await
+                    .change_context_lazy(|| Error::Certify(device.to_owned()))?;
+                let proxy_command = proxy_command(&ProxyTarget {
+                    context: &context.context.name,
+                    device,
+                });
+                (
+                    certified,
+                    vec!["-o".to_owned(), format!("ProxyCommand={proxy_command}")],
+                )
+            }
+            Some(address) => {
+                let issued = self
+                    .gateway
+                    .sign_local_ssh_certificate(
+                        &context,
+                        &[device.to_owned()],
+                        &public_key,
+                        role,
+                        LOCAL_THROWAWAY_HOURS,
+                    )
+                    .await
+                    .change_context_lazy(|| Error::Certify(device.to_owned()))?;
+                let entry = issued
+                    .device(device)
+                    .cloned()
+                    .ok_or_else(|| Report::new(Error::LocalDevice(device.to_owned())))?;
+                let certified = SshCertificate {
+                    certificate: issued.certificate,
+                    user: entry.user,
+                    host_key_alias: entry.host_key_alias,
+                    known_hosts: issued.known_hosts,
+                };
+                // The destination stays the alias the host certificate
+                // names; HostName is where it is. No proxy, whatever the
+                // operator's ssh_config says for that name.
+                (
+                    certified,
+                    vec![
+                        "-o".to_owned(),
+                        format!("HostName={address}"),
+                        "-o".to_owned(),
+                        "ProxyCommand=none".to_owned(),
+                        "-o".to_owned(),
+                        "ProxyJump=none".to_owned(),
+                    ],
+                )
+            }
+        };
+        pinning.extend([
             "-o".to_owned(),
             "IdentitiesOnly=yes".to_owned(),
             "-o".to_owned(),
@@ -139,7 +198,7 @@ impl ChannelControllerImpl {
             "StrictHostKeyChecking=yes".to_owned(),
             "-o".to_owned(),
             format!("HostKeyAlias={}", certified.host_key_alias),
-        ];
+        ]);
         for option in options {
             pinning.extend(["-o".to_owned(), option]);
         }
@@ -199,6 +258,7 @@ impl ChannelServiceInterface for ChannelControllerImpl {
                 &request.device,
                 request.role,
                 &request.proxy_command,
+                request.local.as_deref(),
                 request.options,
             )
             .await?;
@@ -271,6 +331,7 @@ impl ChannelServiceInterface for ChannelControllerImpl {
                 &device,
                 request.role,
                 &request.proxy_command,
+                request.local.as_deref(),
                 request.options,
             )
             .await?;
@@ -342,6 +403,73 @@ impl ChannelServiceInterface for ChannelControllerImpl {
                     report.change_context(Error::Ssh)
                 }
             })
+    }
+
+    async fn certify_local(&self, request: LocalCertificateRequest) -> Result<LocalSshCertificate> {
+        let refused = |reason: String| Report::new(Error::RefusedArgument(reason));
+        if request.devices.is_empty() {
+            return Err(refused("name at least one device".into()));
+        }
+        if request.devices.len() > MAX_LOCAL_DEVICES {
+            return Err(refused(format!(
+                "{} devices: one local certificate names at most {MAX_LOCAL_DEVICES}",
+                request.devices.len()
+            )));
+        }
+        let context = self.resolve(request.over.as_ref()).await?;
+        let names = request.devices.join(", ");
+        let issued = self
+            .gateway
+            .sign_local_ssh_certificate(
+                &context,
+                &request.devices,
+                &request.public_key,
+                request.role,
+                request.validity_hours.unwrap_or(0),
+            )
+            .await
+            .change_context_lazy(|| Error::Certify(names))?;
+        // All or nothing on the platform's side too: a device left out of
+        // the answer would be one the caller can't log into.
+        for device in &request.devices {
+            if issued.device(device).is_none() {
+                return Err(Report::new(Error::LocalDevice(device.clone())));
+            }
+        }
+        Ok(issued)
+    }
+
+    async fn login_code(
+        &self,
+        over: Option<&ContextOverride>,
+        device: &str,
+        account: &str,
+        challenge: &str,
+    ) -> Result<String> {
+        let context = self.resolve(over).await?;
+        self.gateway
+            .sign_login_challenge(&context, device, account, challenge)
+            .await
+            .change_context_lazy(|| Error::LoginCode(device.to_owned()))
+    }
+
+    async fn offline_login_codes(
+        &self,
+        over: Option<&ContextOverride>,
+        device: &str,
+        account: &str,
+        count: u32,
+    ) -> Result<Vec<OfflineLoginCode>> {
+        if !(1..=MAX_OFFLINE_CODES).contains(&count) {
+            return Err(Report::new(Error::RefusedArgument(format!(
+                "{count} codes: issue 1 to {MAX_OFFLINE_CODES} at a time"
+            ))));
+        }
+        let context = self.resolve(over).await?;
+        self.gateway
+            .issue_offline_login_codes(&context, device, account, count)
+            .await
+            .change_context_lazy(|| Error::LoginCode(device.to_owned()))
     }
 }
 
@@ -459,6 +587,58 @@ mod tests {
                 known_hosts: "@cert-authority *.devices ssh-ed25519 HOSTCA".into(),
             })
         }
+
+        /// Certifies every device but "MISSING", which it leaves out of
+        /// its answer.
+        async fn sign_local_ssh_certificate(
+            &self,
+            _: &ResolvedContext,
+            devices: &[String],
+            public_key: &str,
+            role: SshRole,
+            _: u32,
+        ) -> gateway::Result<LocalSshCertificate> {
+            self.0.lock().unwrap().push((public_key.to_owned(), role));
+            Ok(LocalSshCertificate {
+                certificate: "ssh-ed25519-cert-v01@openssh.com LOCAL".into(),
+                known_hosts: "@cert-authority *.devices ssh-ed25519 HOSTCA".into(),
+                devices: devices
+                    .iter()
+                    .filter(|device| *device != "MISSING")
+                    .map(|device| remora_channel::model::LocalSshDevice {
+                        device: device.clone(),
+                        user: "root".into(),
+                        host_key_alias: format!("{}.devices", device.to_lowercase()),
+                    })
+                    .collect(),
+                valid_before: None,
+            })
+        }
+
+        async fn sign_login_challenge(
+            &self,
+            _: &ResolvedContext,
+            device: &str,
+            account: &str,
+            challenge: &str,
+        ) -> gateway::Result<String> {
+            Ok(format!("{device}/{account}/{challenge}"))
+        }
+
+        async fn issue_offline_login_codes(
+            &self,
+            _: &ResolvedContext,
+            _: &str,
+            _: &str,
+            count: u32,
+        ) -> gateway::Result<Vec<OfflineLoginCode>> {
+            Ok((0..count)
+                .map(|index| OfflineLoginCode {
+                    index,
+                    code: format!("CODE-{index}"),
+                })
+                .collect())
+        }
     }
 
     struct Nothing;
@@ -528,6 +708,7 @@ mod tests {
             device: "525400C0FFEE".into(),
             role: SshRole::Admin,
             login: None,
+            local: None,
             options: vec!["ServerAliveInterval=5".into()],
             arguments: arguments.iter().map(|s| s.to_string()).collect(),
             binary: binary.into(),
@@ -626,6 +807,7 @@ mod tests {
             over: None,
             role: SshRole::User,
             login: None,
+            local: None,
             options: vec![],
             arguments: arguments.iter().map(|s| s.to_string()).collect(),
             binary: "scp".into(),
@@ -737,5 +919,109 @@ mod tests {
         ssh.proxy_command = Arc::new(|target| format!("context={}", target.context));
         let prepared = channel.prepare_ssh(ssh).await.unwrap();
         assert_eq!(prepared.command.arguments[1], "ProxyCommand=context=eu2");
+    }
+
+    #[tokio::test]
+    async fn a_local_session_goes_straight_to_the_address() {
+        let root = tempfile::tempdir().unwrap();
+        let gateway = Gateway::default();
+        let channel = controller(root.path(), gateway.clone()).await;
+
+        let mut local = request(&["uptime"], "ssh");
+        local.local = Some("192.168.1.20".into());
+        let prepared = channel.prepare_ssh(local).await.unwrap();
+        let args = &prepared.command.arguments;
+        assert!(args.contains(&"HostName=192.168.1.20".to_owned()));
+        assert!(args.contains(&"ProxyCommand=none".to_owned()));
+        assert!(!args.iter().any(|a| a.contains("channel open")));
+        assert!(args.contains(&"HostKeyAlias=525400c0ffee.devices".to_owned()));
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["root@525400c0ffee.devices", "uptime"]
+        );
+        assert_eq!(
+            prepared.keys.certificate,
+            "ssh-ed25519-cert-v01@openssh.com LOCAL"
+        );
+
+        // A device the platform left out of its answer is no session.
+        let mut missing = request(&[], "ssh");
+        missing.device = "MISSING".into();
+        missing.local = Some("192.168.1.21".into());
+        let report = match channel.prepare_ssh(missing).await {
+            Ok(_) => panic!("a device without an entry must be refused"),
+            Err(report) => report,
+        };
+        assert!(matches!(report.current_context(), Error::LocalDevice(_)));
+    }
+
+    #[tokio::test]
+    async fn a_local_certificate_names_1_to_64_devices_all_answered() {
+        let root = tempfile::tempdir().unwrap();
+        let gateway = Gateway::default();
+        let channel = controller(root.path(), gateway.clone()).await;
+        let certify = |devices: Vec<String>| LocalCertificateRequest {
+            over: None,
+            devices,
+            public_key: "ssh-ed25519 AAAA operator".into(),
+            role: SshRole::User,
+            validity_hours: None,
+        };
+
+        for refused in [vec![], (0..65).map(|i| format!("D{i}")).collect()] {
+            let report = channel.certify_local(certify(refused)).await.unwrap_err();
+            assert!(matches!(
+                report.current_context(),
+                Error::RefusedArgument(_)
+            ));
+        }
+        assert!(gateway.0.lock().unwrap().is_empty());
+
+        let issued = channel
+            .certify_local(certify(vec!["DEV1".into(), "DEV2".into()]))
+            .await
+            .unwrap();
+        assert_eq!(issued.devices.len(), 2);
+        assert_eq!(
+            issued.device("dev2").unwrap().host_key_alias,
+            "dev2.devices"
+        );
+
+        let report = channel
+            .certify_local(certify(vec!["DEV1".into(), "MISSING".into()]))
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::LocalDevice(_)));
+    }
+
+    #[tokio::test]
+    async fn login_codes_go_through_the_selected_context() {
+        let root = tempfile::tempdir().unwrap();
+        let channel = controller(root.path(), Gateway::default()).await;
+        assert_eq!(
+            channel
+                .login_code(None, "DEV1", "root", "K7QM-3XRB")
+                .await
+                .unwrap(),
+            "DEV1/root/K7QM-3XRB"
+        );
+        assert_eq!(
+            channel
+                .offline_login_codes(None, "DEV1", "root", 3)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        for count in [0, 101] {
+            let report = channel
+                .offline_login_codes(None, "DEV1", "root", count)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                report.current_context(),
+                Error::RefusedArgument(_)
+            ));
+        }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "remora-channel-adapter-grpc"
-description = "ChannelGatewayAdapter over sntns-platform's remora-channel gateway: the OpenDeviceChannel bidi stream and SignDeviceSshCertificate"
+description = "ChannelGatewayAdapter over sntns-platform's remora-channel gateway: the OpenDeviceChannel bidi stream, ssh certificates (through the channel and local) and console login codes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,7 @@ remora-context = { path = "../context" }
 remora-platform-grpc = { path = "../platform-grpc" }
 async-trait.workspace = true
 error-stack.workspace = true
+prost-types.workspace = true
 tonic.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

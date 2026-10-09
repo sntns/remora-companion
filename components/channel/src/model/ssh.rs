@@ -55,6 +55,9 @@ pub struct SshRequest {
     /// The device account to log into, instead of the role's default. The
     /// certificate still names only the role.
     pub login: Option<String>,
+    /// Reach the device's sshd directly at this address (its local network
+    /// one) instead of through its channel, with a local certificate.
+    pub local: Option<String>,
     /// `-o` options, placed after the pinning ones so they can't loosen them.
     pub options: Vec<String>,
     /// ssh's own arguments: leading options, then the remote command.
@@ -73,6 +76,9 @@ pub struct ScpRequest {
     /// The device account, when neither a `user@` operand nor the role's
     /// default should decide it.
     pub login: Option<String>,
+    /// Reach the device's sshd directly at this address (its local network
+    /// one) instead of through its channel, with a local certificate.
+    pub local: Option<String>,
     /// `-o` options, placed after the pinning ones so they can't loosen them.
     pub options: Vec<String>,
     /// scp's own arguments: options, then the operands.
