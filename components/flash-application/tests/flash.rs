@@ -117,6 +117,7 @@ impl ReleaseArtifactAdapter for StubRelease {
         &self,
         _: Option<&remora_context::model::ContextOverride>,
         _: &str,
+        _: &str,
     ) -> release::Result<Vec<DiskImage>> {
         Ok(vec![DiskImage {
             file_name: "src.img.bmaptar".into(),
@@ -691,7 +692,10 @@ async fn a_release_artifact_is_flashed_as_it_downloads() {
     };
     let offsets = release.offsets.clone();
     let controller = controller_with(removable_non_system_disk(&device_path), release);
-    let images = controller.disk_images(None, "r1").await.unwrap();
+    let images = controller
+        .disk_images(None, "r1", "diskimage")
+        .await
+        .unwrap();
     assert_eq!(images[0].boards, ["rp5"]);
 
     let request = FlashRequest {

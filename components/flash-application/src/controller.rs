@@ -116,10 +116,11 @@ impl FlashServiceInterface for FlashControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         release: &str,
+        image_type: &str,
     ) -> Result<Vec<DiskImage>> {
         self.readers
             .releases
-            .disk_images(over, release)
+            .disk_images(over, release, image_type)
             .await
             .change_context_lazy(|| Error::DiskImages(release.to_owned()))
     }

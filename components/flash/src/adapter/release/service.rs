@@ -12,14 +12,16 @@ pub trait ArtifactChunks: Send {
 }
 
 /// The releases disk images are published in, as far as flashing needs
-/// them: which disk images a release has, and their bytes from any offset
-/// -- what reading one like a file takes.
+/// them: which images of a type a release has, and their bytes from any
+/// offset -- what reading one like a file takes.
 #[async_trait::async_trait]
 pub trait ReleaseArtifactAdapter: Send + Sync {
+    /// The artifacts of `release` tagged `type:<image_type>`.
     async fn disk_images(
         &self,
         over: Option<&ContextOverride>,
         release: &str,
+        image_type: &str,
     ) -> Result<Vec<DiskImage>>;
     async fn download(
         &self,
