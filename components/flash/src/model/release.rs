@@ -46,8 +46,12 @@ impl fmt::Display for ReleaseArtifact {
     }
 }
 
-/// A release's disk image: an artifact tagged `type:diskimage`, for the
-/// boards its tag condition names.
+/// The image type `flash --release` looks for unless told otherwise: a
+/// device's own disk image, as meta-remora's CI tags it.
+pub const DEFAULT_IMAGE_TYPE: &str = "diskimage";
+
+/// A release's image of some type: an artifact tagged `type:<type>`
+/// (`diskimage`, `installer`...), for the boards its tag condition names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiskImage {
     pub file_name: String,

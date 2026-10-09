@@ -228,6 +228,7 @@ mod tests {
             &self,
             _: Option<&ContextOverride>,
             _: &str,
+            _: &str,
         ) -> Result<Vec<DiskImage>> {
             Ok(vec![])
         }

@@ -24,11 +24,15 @@ use super::error::Result;
 /// at its next read of the image, or within a few MiB of a skip.
 #[async_trait::async_trait]
 pub trait FlashServiceInterface: Send + Sync {
-    /// The disk images of `release`: its artifacts tagged `type:diskimage`.
+    /// The images of `release` of type `image_type`: its artifacts tagged
+    /// `type:<image_type>` (`diskimage` for the device's own disk,
+    /// `installer` for a USB installer flashing it, see
+    /// `crate::model::DEFAULT_IMAGE_TYPE`).
     async fn disk_images(
         &self,
         over: Option<&ContextOverride>,
         release: &str,
+        image_type: &str,
     ) -> Result<Vec<DiskImage>>;
     /// What `request` would write: its image and `.bmap`, read without
     /// copying anything.

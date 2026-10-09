@@ -9,7 +9,8 @@ use remora_disk::application::DiskService;
 use remora_flash::{
     application::FlashService,
     model::{
-        BmapOrigin, BmapSource, DiskImage, FlashRequest, ImageOrigin, ImageSummary, ReleaseArtifact,
+        BmapOrigin, BmapSource, DiskImage, FlashRequest, ImageOrigin, ImageSummary,
+        ReleaseArtifact, DEFAULT_IMAGE_TYPE,
     },
 };
 use remora_format::human_size;
@@ -24,15 +25,23 @@ pub struct Command {
     #[arg(long, required_unless_present = "release", conflicts_with = "release")]
     image: Option<PathBuf>,
 
-    /// Flash a disk image of this release instead, downloaded while it's
+    /// Flash an image of this release instead, downloaded while it's
     /// written (as the selected context): one of its artifacts tagged
-    /// `type:diskimage`, picked by --board, or asked for when there are
+    /// `type:<--type>`, picked by --board, or asked for when there are
     /// several.
     #[arg(long)]
     #[arg(add = remora_completion::values(remora_completion::Kind::Release))]
     release: Option<String>,
 
-    /// With --release: the board to flash the disk image of (its artifact's
+    /// With --release: which of its images, by their `type:` tag:
+    /// `diskimage` (the default), the device's own disk, or `installer`, a
+    /// USB installer that flashes it onto the device it boots.
+    // Defaulted at lookup, not by clap: the help says what it is, and a
+    // local --image has no type to show.
+    #[arg(long = "type", value_name = "TYPE", requires = "release")]
+    image_type: Option<String>,
+
+    /// With --release: the board to flash the image of (its artifact's
     /// `board:` tag).
     #[arg(long, requires = "release")]
     board: Option<String>,
@@ -82,6 +91,7 @@ pub async fn run(
     let Command {
         image,
         release,
+        image_type,
         board,
         artifact,
         bmap,
@@ -100,11 +110,18 @@ pub async fn run(
     let image = match (image, release) {
         (Some(path), _) => ImageOrigin::File(path),
         (None, Some(release)) => {
+            let image_type = image_type.as_deref().unwrap_or(DEFAULT_IMAGE_TYPE);
             let images = flash
-                .disk_images(over, &release)
+                .disk_images(over, &release, image_type)
                 .await
                 .change_context(Error::Flash)?;
-            let chosen = choose(&release, images, board.as_deref(), artifact.as_deref())?;
+            let chosen = choose(
+                &release,
+                image_type,
+                images,
+                board.as_deref(),
+                artifact.as_deref(),
+            )?;
             ImageOrigin::Artifact(ReleaseArtifact {
                 over: over.cloned(),
                 release,
@@ -176,10 +193,12 @@ pub async fn run(
     Ok(())
 }
 
-/// The disk image of `release` to flash: the `artifact` named, else the
-/// only one for `board` (or the only one at all), else the operator's pick.
+/// The image of `release` to flash, of type `image_type`: the `artifact`
+/// named, else the only one for `board` (or the only one at all), else the
+/// operator's pick.
 fn choose(
     release: &str,
+    image_type: &str,
     images: Vec<DiskImage>,
     board: Option<&str>,
     artifact: Option<&str>,
@@ -198,8 +217,13 @@ fn choose(
         }
     };
     if images.is_empty() {
-        return Err(Report::new(Error::NoDiskImage(release.to_owned()))
-            .attach("its disk images are the artifacts tagged type:diskimage"));
+        return Err(Report::new(Error::NoDiskImage(
+            release.to_owned(),
+            image_type.to_owned(),
+        ))
+        .attach(format!(
+            "its {image_type} images are the artifacts tagged type:{image_type}"
+        )));
     }
     let available = boards(&images);
     let mut candidates: Vec<_> = images
@@ -208,16 +232,22 @@ fn choose(
         .filter(|image| board.is_none_or(|board| image.boards.iter().any(|b| b == board)))
         .collect();
     match candidates.len() {
-        0 => Err(Report::new(Error::NoDiskImage(release.to_owned()))
-            .attach(format!("boards it has disk images for: {available}"))),
+        0 => Err(Report::new(Error::NoDiskImage(
+            release.to_owned(),
+            image_type.to_owned(),
+        ))
+        .attach(format!(
+            "boards it has {image_type} images for: {available}"
+        ))),
         1 => Ok(candidates.remove(0)),
-        _ if !remora_tui::interactive() => {
-            Err(Report::new(Error::SeveralDiskImages(release.to_owned()))
-                .attach(format!("pass --board, one of: {}", boards(&candidates))))
-        }
+        _ if !remora_tui::interactive() => Err(Report::new(Error::SeveralDiskImages(
+            release.to_owned(),
+            image_type.to_owned(),
+        ))
+        .attach(format!("pass --board, one of: {}", boards(&candidates)))),
         _ => {
             let mut select = remora_tui::select(format!(
-                "Disk image of {} to flash",
+                "{image_type} image of {} to flash",
                 remora_tui::accent(release)
             ));
             for (i, image) in candidates.iter().enumerate() {
@@ -360,5 +390,31 @@ mod tests {
         ])
         .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[derive(Debug, clap::Parser)]
+    struct TypeCli {
+        #[command(flatten)]
+        command: Command,
+    }
+
+    #[test]
+    fn a_release_image_is_a_disk_image_unless_another_type_is_asked_for() {
+        use clap::Parser;
+
+        let parse = |extra: &[&str]| {
+            let mut args = vec!["remora-etcher", "--release", "v1", "--device", "/dev/sdx"];
+            args.extend(extra);
+            TypeCli::try_parse_from(args).unwrap().command.image_type
+        };
+        assert_eq!(
+            parse(&[]),
+            None,
+            "defaults to {DEFAULT_IMAGE_TYPE} at lookup"
+        );
+        assert_eq!(
+            parse(&["--type", "installer"]).as_deref(),
+            Some("installer")
+        );
     }
 }

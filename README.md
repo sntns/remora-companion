@@ -351,7 +351,12 @@ remora-etcher flash --release v2026.10.0 --board f3apl --device /dev/sdb
 `--release` flashes a release's disk image straight from the platform,
 as the selected context: one of its artifacts tagged `type:diskimage`
 (`--board` picks it by its `board:` tag, `--artifact` by file name; with
-several and neither, it asks). It's downloaded while it's written, read
+several and neither, it asks). `--type` picks another type of image the
+release carries instead, e.g. its USB installer:
+
+```
+remora-etcher flash --release v2026.10.0 --board f3apl --type installer --device /dev/sdb
+``` It's downloaded while it's written, read
 like a local file -- the bundle's `.bmap` first, then the image streamed
 to the disk, a dropped connection picked up where it stopped -- with a
 third progress line for the download.

@@ -6,10 +6,10 @@ pub enum Error {
     Flash,
     #[error("no usable context to download the image as")]
     Context,
-    #[error("release {0:?} has no disk image to flash")]
-    NoDiskImage(String),
-    #[error("release {0:?} has disk images for several boards")]
-    SeveralDiskImages(String),
+    #[error("release {0:?} has no {1} image to flash")]
+    NoDiskImage(String, String),
+    #[error("release {0:?} has {1} images for several boards")]
+    SeveralDiskImages(String, String),
     #[error("failed to read the disk image to flash")]
     Choose,
 }
