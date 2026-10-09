@@ -1,7 +1,7 @@
 use remora_context::model::ResolvedContext;
 
 use super::error::Result;
-use crate::model::{OpenedChannel, SshCertificate, SshRole};
+use crate::model::{LocalSshCertificate, OfflineLoginCode, OpenedChannel, SshCertificate, SshRole};
 
 /// The sending half of an open channel.
 #[async_trait::async_trait]
@@ -46,6 +46,38 @@ pub trait ChannelGatewayAdapter: Send + Sync {
         public_key: &str,
         role: SshRole,
     ) -> Result<SshCertificate>;
+
+    /// Has the platform certify `public_key` to log into each of `devices`
+    /// as `role`, directly on their local network. `validity_hours` 0 is
+    /// the account's default.
+    async fn sign_local_ssh_certificate(
+        &self,
+        context: &ResolvedContext,
+        devices: &[String],
+        public_key: &str,
+        role: SshRole,
+        validity_hours: u32,
+    ) -> Result<LocalSshCertificate>;
+
+    /// The code `device`'s console login accepts for `account`, in answer
+    /// to the `challenge` it shows.
+    async fn sign_login_challenge(
+        &self,
+        context: &ResolvedContext,
+        device: &str,
+        account: &str,
+        challenge: &str,
+    ) -> Result<String>;
+
+    /// `count` new codes `device`'s console login accepts for `account`
+    /// without a challenge, each once.
+    async fn issue_offline_login_codes(
+        &self,
+        context: &ResolvedContext,
+        device: &str,
+        account: &str,
+        count: u32,
+    ) -> Result<Vec<OfflineLoginCode>>;
 }
 
 #[derive(Clone)]

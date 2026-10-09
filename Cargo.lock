@@ -2936,6 +2936,7 @@ version = "0.15.1"
 dependencies = [
  "async-trait",
  "error-stack",
+ "prost-types",
  "remora-channel",
  "remora-context",
  "remora-platform-grpc",
@@ -2985,6 +2986,7 @@ dependencies = [
  "remora-completion",
  "remora-context",
  "remora-tui",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
 ]

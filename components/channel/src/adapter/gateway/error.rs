@@ -10,6 +10,10 @@ pub enum Error {
     NotFound,
     #[error("the device is not connected to the platform")]
     NotConnected,
+    #[error("the platform refused the request")]
+    InvalidArgument,
+    #[error("the device or account is not set up for this")]
+    FailedPrecondition,
     #[error("the gateway answered something this client does not understand")]
     Protocol,
     #[error("the channel failed")]

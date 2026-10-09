@@ -227,6 +227,51 @@ since rmra's `--context` goes before the command.
 `rmra channel open <device>` is the raw channel on stdin/stdout, for use as
 a ProxyCommand of your own.
 
+### ssh on the device's local network
+
+```
+rmra ssh 525400C0FFEE --local 192.168.1.20
+rmra scp --local 192.168.1.20 ./bundle.raucb 525400C0FFEE:/data/
+```
+
+`--local` reaches the device's sshd straight at that address instead of
+through its channel: the throwaway key gets a *local* certificate (principal
+`local-<role>@<serial>`, an hour) and ssh is pinned to the host certificate's
+name with HostKeyAlias. Only the certification needs the platform; the
+session itself is LAN only. The device must listen on its local network for
+it, which is the device's own configuration.
+
+On site without rmra at hand, or for several devices at once, certify your
+own key ahead of time and use plain ssh:
+
+```
+rmra channel local-certificate --key ~/.ssh/id_ed25519 525400C0FFEE 525400C0FFEF
+ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=~/.ssh/id_ed25519-known_hosts \
+  -o HostKeyAlias=525400c0ffee.devices.sentiens root@192.168.1.20
+```
+
+It writes `KEY-cert.pub` (where ssh finds it) and `KEY-known_hosts`, for 1
+to 64 devices, valid for the account's default (8 h unless changed;
+`--validity-hours` up to its maximum), and prints each device's login and
+host key alias. All or nothing: one device you may not reach and nothing is
+certified.
+
+### Console login codes
+
+```
+rmra channel login-code 525400C0FFEE --account root K7QM-3XRB
+rmra channel offline-login-codes 525400C0FFEE --account root --count 5
+```
+
+A device's console login shows a challenge; `login-code` prints the code
+that answers it, for that account (the challenge as shown: case, dashes and
+spaces don't matter). `offline-login-codes` issues codes the device accepts
+once each without a challenge, for a site where nothing reaches the
+platform: each has an index the device asks for. The indices are one series
+per device shared by every account and operator, and a device accepts only
+up to 1024 past the highest it has used, so issue a few, not a stock. Both
+need the same IAM actions as `rmra ssh` for a role that maps the account.
+
 ### Publish an update
 
 ```

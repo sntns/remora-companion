@@ -4,7 +4,10 @@ use remora_progress::OperationContext;
 use super::error::Result;
 use crate::{
     adapter::gateway::Channel,
-    model::{ExecOutcome, ExecRequest, PreparedSsh, ScpRequest, SshRequest},
+    model::{
+        ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate, OfflineLoginCode,
+        PreparedSsh, ScpRequest, SshRequest,
+    },
 };
 
 /// The channel vertical's application-facing port.
@@ -41,6 +44,32 @@ pub trait ChannelServiceInterface: Send + Sync {
     /// same role and context, while its certificate is still fresh: an
     /// operation running several steps certifies once.
     async fn exec(&self, request: ExecRequest, ctx: &OperationContext) -> Result<ExecOutcome>;
+
+    /// Has the operator's own key certified for direct ssh to devices on
+    /// their local network, for plain ssh to use: no throwaway key, no
+    /// session -- writing it where ssh finds it is the caller's.
+    async fn certify_local(&self, request: LocalCertificateRequest) -> Result<LocalSshCertificate>;
+
+    /// The code `device`'s console login accepts for `account`, in answer
+    /// to the `challenge` it shows.
+    async fn login_code(
+        &self,
+        over: Option<&ContextOverride>,
+        device: &str,
+        account: &str,
+        challenge: &str,
+    ) -> Result<String>;
+
+    /// `count` (1 to 100) new codes `device`'s console login accepts for
+    /// `account` without a challenge, each once: for when neither the
+    /// device nor the operator can reach the platform.
+    async fn offline_login_codes(
+        &self,
+        over: Option<&ContextOverride>,
+        device: &str,
+        account: &str,
+        count: u32,
+    ) -> Result<Vec<OfflineLoginCode>>;
 }
 
 #[derive(Clone)]

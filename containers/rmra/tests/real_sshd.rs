@@ -156,6 +156,61 @@ impl pb::channel_service_server::ChannelService for Gateway {
             },
         ))
     }
+
+    /// Certifies the key with the user CA for `local-<role>@<serial>` on
+    /// each device -- here, the one.
+    async fn sign_device_local_ssh_certificate(
+        &self,
+        request: Request<pb::ChannelServiceSignDeviceLocalSshCertificateRequest>,
+    ) -> Result<Response<pb::ChannelServiceSignDeviceLocalSshCertificateResponse>, Status> {
+        let request = request.into_inner();
+        if request.channel_device_names != [SERIAL] {
+            return Err(Status::not_found("unknown device"));
+        }
+        let key = self.dir.join("operator.pub");
+        std::fs::write(&key, &request.ssh_public_key).unwrap();
+        let principal = format!("local-{}@{ALIAS}", request.ssh_role);
+        let validity = format!("+{}h", request.validity_hours.max(1));
+        keygen(&[
+            "-s",
+            self.dir.join("user_ca").to_str().unwrap(),
+            "-I",
+            "operator/role:local",
+            "-n",
+            &principal,
+            "-V",
+            &validity,
+            key.to_str().unwrap(),
+        ]);
+        let certificate = std::fs::read_to_string(self.dir.join("operator-cert.pub")).unwrap();
+        let host_ca = std::fs::read_to_string(self.dir.join("host_ca.pub")).unwrap();
+        Ok(Response::new(
+            pb::ChannelServiceSignDeviceLocalSshCertificateResponse {
+                ssh_certificate: certificate,
+                ssh_known_hosts: format!("@cert-authority {ALIAS} {}", host_ca.trim()),
+                ssh_devices: vec![pb::ChannelServiceSignDeviceLocalSshCertificateDevice {
+                    channel_device_name: SERIAL.into(),
+                    ssh_user: self.login.clone(),
+                    ssh_host_key_alias: ALIAS.into(),
+                }],
+                valid_before: None,
+            },
+        ))
+    }
+
+    async fn sign_device_login_challenge(
+        &self,
+        _: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
+    ) -> Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status> {
+        Err(Status::unimplemented("not exercised here"))
+    }
+
+    async fn issue_device_offline_login_codes(
+        &self,
+        _: Request<pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest>,
+    ) -> Result<Response<pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse>, Status> {
+        Err(Status::unimplemented("not exercised here"))
+    }
 }
 
 /// A user-mode sshd that trusts the user CA for one principal, presenting
@@ -200,7 +255,7 @@ fn sshd(dir: &Path, port: u16) -> std::process::Child {
     ]);
     std::fs::write(
         dir.join("principals"),
-        format!("user@{ALIAS}\nadmin@{ALIAS}\n"),
+        format!("user@{ALIAS}\nadmin@{ALIAS}\nlocal-user@{ALIAS}\nlocal-admin@{ALIAS}\n"),
     )
     .unwrap();
     // The device's own tools, faked (see `device_tools`), ahead of the
@@ -390,6 +445,132 @@ async fn rmra_ssh_runs_a_command_on_a_real_sshd() {
     assert!(stderr.contains("debug: context   local"), "{stderr}");
     assert!(stderr.contains(&format!("@{ALIAS}")), "{stderr}");
     assert!(stderr.contains("ProxyCommand="), "{stderr}");
+}
+
+/// `rmra ssh --local`, and plain ssh with `rmra channel local-certificate`'s
+/// files: straight to the sshd's address, no channel -- the gateway only
+/// certifies -- pinned by HostKeyAlias to the name the host certificate
+/// carries, logged in as `local-<role>`.
+#[tokio::test]
+async fn local_ssh_reaches_a_real_sshd_without_the_channel() {
+    let available = |tool: &str| {
+        std::process::Command::new(tool)
+            .arg("-V")
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+    };
+    if !Path::new("/usr/sbin/sshd").exists() || !available("ssh") {
+        eprintln!("skipped: no OpenSSH server/client here");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let mut server = sshd(dir.path(), port);
+    for _ in 0..50 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let login = std::env::var("USER").unwrap_or_else(|_| "root".into());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    // No sshd port: a channel opened here could only fail, so a session
+    // that works went around it.
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(pb::channel_service_server::ChannelServiceServer::new(
+                Gateway {
+                    dir: dir.path().to_path_buf(),
+                    sshd_port: 1,
+                    login: login.clone(),
+                },
+            ))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+    );
+    let config = dir.path().join("rmra");
+    std::fs::create_dir_all(config.join("contexts/local")).unwrap();
+    std::fs::write(
+        config.join("contexts/local/meta.json"),
+        format!(
+            r#"{{"name":"local","endpoint":{{"address":"{address}","tls":{{"disabled":true}}}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        config.join("contexts/local/credentials.json"),
+        r#"{"kind":"access-key","token":"t"}"#,
+    )
+    .unwrap();
+
+    let ssh = tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
+        .args(["--verbose", "ssh", SERIAL, "--local", "127.0.0.1"])
+        .args(["--ssh-option", "BatchMode=yes", "--"])
+        .args(["-p", &port.to_string(), "echo", "hello-over-the-lan"])
+        .env("RMRA_CONFIG", &config)
+        .env_remove("RMRA_CONTEXT")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
+
+    // The operator's own key, certified for plain ssh.
+    let key = dir.path().join("id_ed25519");
+    keygen(&["-q", "-t", "ed25519", "-N", "", "-f", key.to_str().unwrap()]);
+    let certify = tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
+        .args(["channel", "local-certificate", "--key"])
+        .arg(&key)
+        .args([SERIAL, "--role", "admin", "--format", "json"])
+        .env("RMRA_CONFIG", &config)
+        .env_remove("RMRA_CONTEXT")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
+    let known_hosts = dir.path().join("id_ed25519-known_hosts");
+    let plain = tokio::process::Command::new("ssh")
+        .arg("-i")
+        .arg(&key)
+        .args(["-F", "/dev/null", "-p", &port.to_string()])
+        .args(["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes"])
+        .args(["-o", "GlobalKnownHostsFile=/dev/null"])
+        .arg("-o")
+        .arg(format!("UserKnownHostsFile={}", known_hosts.display()))
+        .args(["-o", "StrictHostKeyChecking=yes"])
+        .args(["-o", &format!("HostKeyAlias={ALIAS}")])
+        .arg(format!("{login}@127.0.0.1"))
+        .args(["echo", "hello-with-plain-ssh"])
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
+    let _ = server.kill();
+    let _ = server.wait();
+
+    let stderr = String::from_utf8_lossy(&ssh.stderr);
+    assert_eq!(ssh.status.code(), Some(0), "{stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&ssh.stdout).trim(),
+        "hello-over-the-lan"
+    );
+    assert!(stderr.contains("HostName=127.0.0.1"), "{stderr}");
+    assert!(stderr.contains("ProxyCommand=none"), "{stderr}");
+
+    let stderr = String::from_utf8_lossy(&certify.stderr);
+    assert_eq!(certify.status.code(), Some(0), "{stderr}");
+    let answer: serde_json::Value = serde_json::from_slice(&certify.stdout).unwrap();
+    assert_eq!(answer["devices"][0]["host-key-alias"], ALIAS);
+    assert_eq!(answer["devices"][0]["user"], login.as_str());
+    assert!(dir.path().join("id_ed25519-cert.pub").exists());
+
+    let stderr = String::from_utf8_lossy(&plain.stderr);
+    assert_eq!(plain.status.code(), Some(0), "{stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout).trim(),
+        "hello-with-plain-ssh"
+    );
 }
 
 /// What the device runs an install with, faked in `dir/device-bin`, their

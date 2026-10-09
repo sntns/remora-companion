@@ -129,11 +129,13 @@ async fn run() {
             context::run(command, &services.context, over, PROGRAM).await,
             verbose,
         ),
-        // ssh's own convention: 255 when the connection itself failed.
+        // ssh's own convention for what ssh runs: 255 when the connection
+        // itself failed.
         Commands::Channel(command) => {
+            let failure = command.failure_code();
             channel::run(command, &services.channel, over, PROGRAM, verbose)
                 .await
-                .unwrap_or_else(|report| fail(report, verbose, 255))
+                .unwrap_or_else(|report| fail(report, verbose, failure))
         }
         Commands::Ssh(args) => channel::run_ssh(args, &services.channel, over, verbose)
             .await

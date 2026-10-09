@@ -14,6 +14,10 @@ pub enum Error {
     Keygen,
     #[error("failed to have the ssh key certified for {0}")]
     Certify(String),
+    #[error("{0} has no entry in the local certificate the platform issued")]
+    LocalDevice(String),
+    #[error("failed to have a login code issued for {0}")]
+    LoginCode(String),
     #[error("failed to run the ssh client")]
     Ssh,
     #[error("cancelled")]
