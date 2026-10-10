@@ -1,0 +1,18 @@
+[package]
+name = "remora-console-adapter-serialport"
+description = "SerialPortAdapter over tokio-serial: a real serial port (USB adapters, COM ports), 8N1, exclusive where the platform allows it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-console = { path = "../console" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-serial.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "0.31", features = ["term"] }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time"] }

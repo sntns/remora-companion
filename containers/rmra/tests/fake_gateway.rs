@@ -794,3 +794,118 @@ async fn console_login_codes() {
         .await;
     assert_eq!(code, 2, "{stderr}");
 }
+
+/// `rmra local console` on a terminal of its own (a pseudo-terminal), the
+/// device's console on another: the challenge the device shows is answered
+/// with the platform's code, typed once the password prompt is up, and
+/// C-a x hands the terminal back.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn the_console_answers_the_login_challenge() {
+    use std::os::fd::{AsFd, OwnedFd};
+
+    use nix::{
+        poll::{poll, PollFd, PollFlags, PollTimeout},
+        pty::{openpty, Winsize},
+        sys::termios,
+    };
+
+    /// What `fd` says until `needle` shows, or panics after 10 s.
+    fn read_until(fd: &OwnedFd, needle: &[u8]) -> Vec<u8> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut seen = Vec::new();
+        while !seen.windows(needle.len()).any(|w| w == needle) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{:?} never came: {:?}",
+                String::from_utf8_lossy(needle),
+                String::from_utf8_lossy(&seen)
+            );
+            let mut fds = [PollFd::new(fd.as_fd(), PollFlags::POLLIN)];
+            if poll(&mut fds, PollTimeout::from(100u16)).unwrap() > 0 {
+                let mut buffer = [0u8; 4096];
+                match nix::unistd::read(fd, &mut buffer) {
+                    Ok(n) => seen.extend_from_slice(&buffer[..n]),
+                    Err(_) => break,
+                }
+            }
+        }
+        seen
+    }
+
+    let address = serve().await;
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+
+    let device = openpty(None, None).unwrap();
+    let mut raw = termios::tcgetattr(&device.slave).unwrap();
+    termios::cfmakeraw(&mut raw);
+    termios::tcsetattr(&device.slave, termios::SetArg::TCSANOW, &raw).unwrap();
+    let port = nix::unistd::ttyname(&device.slave).unwrap();
+
+    let size = Winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let terminal = openpty(Some(&size), None).unwrap();
+    let mut command = rmra.command(&["local", "console", port.to_str().unwrap(), "--role", "user"]);
+    command
+        .envs([
+            ("RMRA_ADDRESS", address.as_str()),
+            ("RMRA_TOKEN", TOKEN),
+            ("RMRA_PLAINTEXT", "1"),
+            ("TERM", "xterm"),
+        ])
+        .stdin(Stdio::from(terminal.slave.try_clone().unwrap()))
+        .stdout(Stdio::from(terminal.slave.try_clone().unwrap()))
+        .stderr(Stdio::from(terminal.slave.try_clone().unwrap()));
+    let mut child = command.spawn().unwrap();
+    drop(terminal.slave);
+    let terminal = terminal.master;
+    let terminal = tokio::task::spawn_blocking(move || {
+        read_until(&terminal, b"login: user");
+        terminal
+    })
+    .await
+    .unwrap();
+
+    let master = device.master;
+    nix::unistd::write(
+        &master,
+        b"E2ETEST0002 login: root\r\n\
+          Remora local login: root@525400C0FFEE\r\n\
+          Challenge: k7qm-3xrb\r\n\
+          Type the code for this challenge (or an offline code) at the password prompt.\r\n",
+    )
+    .unwrap();
+    let master = tokio::task::spawn_blocking(move || {
+        // Nothing is typed before the password prompt...
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let mut fds = [PollFd::new(master.as_fd(), PollFlags::POLLIN)];
+        assert_eq!(poll(&mut fds, PollTimeout::ZERO).unwrap(), 0);
+        // ...and the code is, once it is up.
+        nix::unistd::write(&master, b"Password: ").unwrap();
+        let typed = read_until(&master, b"\r");
+        assert_eq!(typed, b"525400C0FFEE/user/K7QM3XRB\r");
+        master
+    })
+    .await
+    .unwrap();
+    let terminal = tokio::task::spawn_blocking(move || {
+        read_until(&terminal, b"code typed: root@525400C0FFEE as user");
+        nix::unistd::write(&terminal, b"\x01x").unwrap();
+        terminal
+    })
+    .await
+    .unwrap();
+
+    let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+        .await
+        .expect("C-a x did not end the console")
+        .unwrap();
+    assert!(status.success());
+    drop((master, terminal));
+}

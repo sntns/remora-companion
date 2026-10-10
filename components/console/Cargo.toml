@@ -1,0 +1,19 @@
+[package]
+name = "remora-console"
+description = "Domain crate for the console vertical: a device's serial console -- its settings, the login prompt read off its screen, the serial port and console application ports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-channel = { path = "../channel" }
+remora-context = { path = "../context" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+# The console's screen, as the session port hands it out: an inert value
+# here (a grid of cells to draw and read); parsing the bytes into it is the
+# use case's.
+vt100.workspace = true

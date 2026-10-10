@@ -1,0 +1,20 @@
+[package]
+name = "remora-console-application"
+description = "The console use case: a device's serial console as a vt100 screen, its login challenges answered with codes the channel vertical has the platform sign"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-console = { path = "../console" }
+remora-channel = { path = "../channel" }
+remora-context = { path = "../context" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+vt100.workspace = true
+
+[dev-dependencies]
+remora-progress = { path = "../progress" }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

@@ -277,6 +277,24 @@ has used, so issue a few, not a stock. Both need
 `remora-channel::issue-device-login-code-<role>`; no ssh action grants it,
 and a role the device maps to no account is refused.
 
+### A device's serial console
+
+```
+rmra local console /dev/ttyUSB0
+rmra local console /dev/ttyUSB0 --role admin
+rmra local console COM3 --baud 9600 --no-login
+```
+
+A serial terminal, minicom/picocom style (8N1, no flow control, 115200 by
+default), drawn from a VT100 screen model of the console with a status line
+under it. When the console shows a login challenge, rmra reads it off the
+screen, asks the platform for its code as `--role` (`user` by default) and
+types it at the password prompt: type the account at `login:` and you're
+in. Where the platform can't be reached the status line says so, and you
+type an offline code yourself; `--no-login` leaves every challenge to you.
+
+Keys: `C-a x` quits, `C-a b` sends a break, `C-a C-a` sends `C-a`.
+
 ### Publish an update
 
 ```

@@ -5,6 +5,9 @@ use remora_channel::{
 use remora_channel_adapter_grpc::GatewayAdapterImpl;
 use remora_channel_adapter_openssh::OpenSshClientImpl;
 use remora_channel_application::ChannelControllerImpl;
+use remora_console::{adapter::serial::SerialPortAdapterService, application::ConsoleService};
+use remora_console_adapter_serialport::SerialPortAdapterImpl;
+use remora_console_application::ConsoleControllerImpl;
 use remora_context::{
     adapter::{
         credentials::CredentialStoreAdapterService, platform::PlatformSessionAdapterService,
@@ -40,6 +43,7 @@ use remora_update_application::UpdateControllerImpl;
 pub struct Services {
     pub context: ContextService,
     pub channel: ChannelService,
+    pub console: ConsoleService,
     pub ota: OtaService,
     pub install: InstallService,
     pub device: DeviceService,
@@ -121,6 +125,26 @@ pub async fn wire() -> Services {
         .get_type::<ChannelService>()
         .await
         .expect("ChannelService was just registered");
+
+    // Console after channel: a login challenge's code is the channel
+    // vertical's to have signed.
+    container
+        .set_type(SerialPortAdapterService::new(SerialPortAdapterImpl))
+        .await;
+    let serial = container
+        .get_type::<SerialPortAdapterService>()
+        .await
+        .expect("SerialPortAdapterService was just registered");
+    container
+        .set_type(ConsoleService::new(ConsoleControllerImpl::new(
+            serial,
+            channel.clone(),
+        )))
+        .await;
+    let console = container
+        .get_type::<ConsoleService>()
+        .await
+        .expect("ConsoleService was just registered");
 
     container
         .set_type(DeviceGatewayAdapterService::new(DeviceGatewayAdapterImpl))
@@ -226,6 +250,7 @@ pub async fn wire() -> Services {
     Services {
         context,
         channel,
+        console,
         ota,
         install,
         device,

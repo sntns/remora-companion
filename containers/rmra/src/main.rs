@@ -28,6 +28,17 @@ struct Options {
     verbose: bool,
 }
 
+/// `rmra local`: one group for the operator on site, from two verticals.
+#[derive(clap::Subcommand)]
+enum LocalCommands {
+    #[command(flatten)]
+    Codes(remora_channel_application_transport_cli::LocalCommand),
+
+    /// A device's serial console, minicom-style, its login challenge
+    /// answered with a code the platform signs.
+    Console(remora_console_application_transport_cli::ConsoleArgs),
+}
+
 #[derive(clap::Subcommand)]
 enum Commands {
     /// Log in to the selected context's platform.
@@ -58,10 +69,10 @@ enum Commands {
     /// Copy files to or from a device over scp, through its remora channel.
     Scp(remora_channel_application_transport_cli::ScpArgs),
 
-    /// On site, at a device's local network: ssh certificates and console
-    /// login codes.
+    /// On site, at a device's local network or serial console: ssh
+    /// certificates, console login codes, the console itself.
     #[command(subcommand)]
-    Local(remora_channel_application_transport_cli::LocalCommand),
+    Local(LocalCommands),
 
     /// Manage over-the-air releases: versions and their artifacts.
     #[command(subcommand)]
@@ -147,8 +158,12 @@ async fn run() {
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(report, verbose, 1)),
-        Commands::Local(command) => exit_on_error(
+        Commands::Local(LocalCommands::Codes(command)) => exit_on_error(
             channel::run_local(command, &services.channel, over).await,
+            verbose,
+        ),
+        Commands::Local(LocalCommands::Console(args)) => exit_on_error(
+            remora_console_application_transport_cli::run(args, &services.console, over).await,
             verbose,
         ),
         Commands::Completion(args) => remora_completion::instructions(
