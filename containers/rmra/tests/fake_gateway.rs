@@ -728,7 +728,7 @@ async fn console_login_codes() {
     let (code, stdout, stderr) = rmra
         .run_with(
             &[
-                "channel",
+                "local",
                 "login-code",
                 "525400C0FFEE",
                 "--account",
@@ -746,7 +746,7 @@ async fn console_login_codes() {
     let (code, _, stderr) = rmra
         .run_with(
             &[
-                "channel",
+                "local",
                 "login-code",
                 "525400C0FFEE",
                 "--account",
@@ -763,8 +763,8 @@ async fn console_login_codes() {
     let (code, stdout, stderr) = rmra
         .run_with(
             &[
-                "channel",
-                "offline-login-codes",
+                "local",
+                "offline-codes",
                 "525400C0FFEE",
                 "--account",
                 "root",
@@ -792,8 +792,8 @@ async fn console_login_codes() {
     let (code, _, stderr) = rmra
         .run_with(
             &[
-                "channel",
-                "offline-login-codes",
+                "local",
+                "offline-codes",
                 "525400C0FFEE",
                 "--account",
                 "root",

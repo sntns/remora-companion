@@ -12,7 +12,7 @@ use remora_tui as tui;
 
 use crate::{
     error::{channel_error, Error, Result},
-    local, login, relay,
+    relay,
 };
 
 #[derive(clap::Subcommand)]
@@ -39,33 +39,6 @@ pub enum Command {
     /// Copy files to or from a device through its ssh channel (same as
     /// `rmra scp`).
     Scp(ScpArgs),
-
-    /// Certify your own ssh key to log into devices directly on their
-    /// local network, with plain ssh: writes KEY-cert.pub and a
-    /// known_hosts file next to the key.
-    LocalCertificate(local::LocalCertificateArgs),
-
-    /// The code that answers the challenge a device's console login shows.
-    LoginCode(login::LoginCodeArgs),
-
-    /// Console login codes a device accepts without a challenge, each
-    /// once: for when neither it nor you can reach the platform then.
-    OfflineLoginCodes(login::OfflineLoginCodesArgs),
-}
-
-impl Command {
-    /// The exit code a failure of this command ends the process with:
-    /// ssh's 255 (the connection itself failed) for what ssh runs or is,
-    /// scp's 1, and 1 for the rest, which are plain platform requests.
-    pub fn failure_code(&self) -> i32 {
-        match self {
-            Self::Open { .. } | Self::Ssh(_) => 255,
-            Self::Scp(_)
-            | Self::LocalCertificate(_)
-            | Self::LoginCode(_)
-            | Self::OfflineLoginCodes(_) => 1,
-        }
-    }
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -200,11 +173,6 @@ pub async fn run(
         }
         Command::Ssh(args) => run_ssh(args, service, over, verbose).await,
         Command::Scp(args) => run_scp(args, service, over, verbose).await,
-        Command::LocalCertificate(args) => local::run(args, service, over).await.map(|()| 0),
-        Command::LoginCode(args) => login::run_login_code(args, service, over).await.map(|()| 0),
-        Command::OfflineLoginCodes(args) => login::run_offline_login_codes(args, service, over)
-            .await
-            .map(|()| 0),
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(clap::Args)]
-#[command(after_help = "Example:\n  rmra channel login-code 525400C0FFEE --account root K7QM-3XRB")]
+#[command(after_help = "Example:\n  rmra local login-code 525400C0FFEE --account root K7QM-3XRB")]
 pub struct LoginCodeArgs {
     /// The device's name (its serial).
     #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
@@ -28,7 +28,7 @@ pub struct LoginCodeArgs {
 by all its accounts and operators, and a device only accepts indices up to 1024 past the \
 highest it has used: issue what you will need, not more."
 )]
-pub struct OfflineLoginCodesArgs {
+pub struct OfflineCodesArgs {
     /// The device's name (its serial).
     #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
     device: String,
@@ -43,7 +43,7 @@ pub struct OfflineLoginCodesArgs {
     format: Format,
 }
 
-/// `rmra channel login-code`: the code that answers a device's console
+/// `rmra local login-code`: the code that answers a device's console
 /// challenge. The code alone goes to stdout.
 pub async fn run_login_code(
     args: LoginCodeArgs,
@@ -58,10 +58,10 @@ pub async fn run_login_code(
     Ok(())
 }
 
-/// `rmra channel offline-login-codes`: codes a device accepts without a
+/// `rmra local offline-codes`: codes a device accepts without a
 /// challenge, for when it can't be answered on the spot.
-pub async fn run_offline_login_codes(
-    args: OfflineLoginCodesArgs,
+pub async fn run_offline_codes(
+    args: OfflineCodesArgs,
     service: &ChannelService,
     over: Option<&ContextOverride>,
 ) -> Result<()> {

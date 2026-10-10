@@ -245,7 +245,7 @@ On site without rmra at hand, or for several devices at once, certify your
 own key ahead of time and use plain ssh:
 
 ```
-rmra channel local-certificate --key ~/.ssh/id_ed25519 525400C0FFEE 525400C0FFEF
+rmra local certificate --key ~/.ssh/id_ed25519 525400C0FFEE 525400C0FFEF
 ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=~/.ssh/id_ed25519-known_hosts \
   -o HostKeyAlias=525400c0ffee.devices.sentiens root@192.168.1.20
 ```
@@ -259,13 +259,13 @@ certified.
 ### Console login codes
 
 ```
-rmra channel login-code 525400C0FFEE --account root K7QM-3XRB
-rmra channel offline-login-codes 525400C0FFEE --account root --count 5
+rmra local login-code 525400C0FFEE --account root K7QM-3XRB
+rmra local offline-codes 525400C0FFEE --account root --count 5
 ```
 
 A device's console login shows a challenge; `login-code` prints the code
 that answers it, for that account (the challenge as shown: case, dashes and
-spaces don't matter). `offline-login-codes` issues codes the device accepts
+spaces don't matter). `offline-codes` issues codes the device accepts
 once each without a challenge, for a site where nothing reaches the
 platform: each has an index the device asks for. The indices are one series
 per device shared by every account and operator, and a device accepts only
