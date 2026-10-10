@@ -447,7 +447,7 @@ async fn rmra_ssh_runs_a_command_on_a_real_sshd() {
     assert!(stderr.contains("ProxyCommand="), "{stderr}");
 }
 
-/// `rmra ssh --local`, and plain ssh with `rmra channel local-certificate`'s
+/// `rmra ssh --local`, and plain ssh with `rmra local certificate`'s
 /// files: straight to the sshd's address, no channel -- the gateway only
 /// certifies -- pinned by HostKeyAlias to the name the host certificate
 /// carries, logged in as `local-<role>`.
@@ -520,7 +520,7 @@ async fn local_ssh_reaches_a_real_sshd_without_the_channel() {
     let key = dir.path().join("id_ed25519");
     keygen(&["-q", "-t", "ed25519", "-N", "", "-f", key.to_str().unwrap()]);
     let certify = tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
-        .args(["channel", "local-certificate", "--key"])
+        .args(["local", "certificate", "--key"])
         .arg(&key)
         .args([SERIAL, "--role", "admin", "--format", "json"])
         .env("RMRA_CONFIG", &config)
