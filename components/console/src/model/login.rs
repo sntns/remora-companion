@@ -2,7 +2,7 @@
 /// `remora-login challenge` prints it:
 ///
 /// ```text
-/// Remora local login: root@E2ETEST0002
+/// Remora local login: root@525400C0FFEE
 /// Challenge: K7QM-3XRB
 /// Type the code for this challenge (or an offline code) at the password prompt.
 /// ```
@@ -68,8 +68,8 @@ pub fn awaits_password(cursor_line: &str) -> bool {
 mod tests {
     use super::*;
 
-    const SHOWN: &str = "E2ETEST0002 login: root\n\
-        Remora local login: root@E2ETEST0002\n\
+    const SHOWN: &str = "525400C0FFEE login: root\n\
+        Remora local login: root@525400C0FFEE\n\
         Challenge: K7QM-3XRB\n\
         Type the code for this challenge (or an offline code) at the password prompt.\n\
         Password: ";
@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(
             LoginPrompt::find(SHOWN),
             Some(LoginPrompt {
-                device: "E2ETEST0002".into(),
+                device: "525400C0FFEE".into(),
                 account: "root".into(),
                 challenge: "K7QM-3XRB".into(),
             })
@@ -89,8 +89,8 @@ mod tests {
     #[test]
     fn the_newest_challenge_counts() {
         let again = format!(
-            "{SHOWN}\n\nLogin incorrect\nE2ETEST0002 login: admin\n\
-             Remora local login: admin@E2ETEST0002\nChallenge: AB12-CD34\nPassword: "
+            "{SHOWN}\n\nLogin incorrect\n525400C0FFEE login: admin\n\
+             Remora local login: admin@525400C0FFEE\nChallenge: AB12-CD34\nPassword: "
         );
         let prompt = LoginPrompt::find(&again).unwrap();
         assert_eq!(prompt.account, "admin");
@@ -101,7 +101,7 @@ mod tests {
     fn nothing_that_only_looks_like_one() {
         for screen in [
             "Challenge: K7QM-3XRB",
-            "Remora local login: root@E2ETEST0002\nChallenge: K7QM3XRB",
+            "Remora local login: root@525400C0FFEE\nChallenge: K7QM3XRB",
             "Remora local login: unavailable, this device has no login secret yet.\nChallenge: K7QM-3XRB",
             "echo Challenge: K7QM-3XRB",
         ] {
@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn a_password_prompt_waits_at_the_cursor() {
         assert!(awaits_password("Password: "));
-        assert!(awaits_password("root@E2ETEST0002's password:"));
+        assert!(awaits_password("root@525400C0FFEE's password:"));
         assert!(!awaits_password("Password: ********"));
-        assert!(!awaits_password("E2ETEST0002 login: "));
+        assert!(!awaits_password("525400C0FFEE login: "));
     }
 }

@@ -204,8 +204,8 @@ mod tests {
         }
     }
 
-    const CHALLENGE: &[u8] = b"E2ETEST0002 login: root\r\n\
-        Remora local login: root@E2ETEST0002\r\n\
+    const CHALLENGE: &[u8] = b"525400C0FFEE login: root\r\n\
+        Remora local login: root@525400C0FFEE\r\n\
         Challenge: K7QM-3XRB\r\n\
         Type the code for this challenge (or an offline code) at the password prompt.\r\n";
 
@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(
             events,
             [ConsoleEvent::LoginRequested {
-                device: "E2ETEST0002".into(),
+                device: "525400C0FFEE".into(),
                 account: "root".into(),
                 role: SshRole::Admin,
             }]
@@ -271,7 +271,7 @@ mod tests {
         bench
             .device
             .send(
-                b"Remora local login: root@E2ETEST0002\r\nChallenge: AB12-CD34\r\nPassword: "
+                b"Remora local login: root@525400C0FFEE\r\nChallenge: AB12-CD34\r\nPassword: "
                     .to_vec(),
             )
             .unwrap();
