@@ -23,6 +23,10 @@ remora-channel-application = { path = "../../components/channel-application" }
 remora-channel-adapter-grpc = { path = "../../components/channel-adapter-grpc" }
 remora-channel-adapter-openssh = { path = "../../components/channel-adapter-openssh" }
 remora-channel-application-transport-cli = { path = "../../components/channel-application-transport-cli" }
+remora-console = { path = "../../components/console" }
+remora-console-application = { path = "../../components/console-application" }
+remora-console-adapter-serialport = { path = "../../components/console-adapter-serialport" }
+remora-console-application-transport-cli = { path = "../../components/console-application-transport-cli" }
 remora-ota = { path = "../../components/ota" }
 remora-ota-application = { path = "../../components/ota-application" }
 remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc" }
@@ -79,3 +83,8 @@ tokio-stream = { workspace = true, features = ["net"] }
 tempfile.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+
+# rmra local console's end-to-end test: a pseudo-terminal for rmra's own
+# terminal, another for the device's console.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "0.31", features = ["term", "poll"] }

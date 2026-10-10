@@ -4,7 +4,7 @@ DDD-style workspace, matching [remora-edge](https://github.com/sntns/remora-edge
 convention. One `components/<vertical>` crate group per bounded context
 (currently `disk`, `flash`, `image`, `squashfs`, `identity`, `config`,
 `convert`, `installer`, `batch`, `factory`, `station`, `claim` for remora-etcher;
-`channel`, `ota`, `device` for rmra; `context` and `update` for both), plus shared utility crates with
+`channel`, `console`, `ota`, `device` for rmra; `context` and `update` for both), plus shared utility crates with
 no vertical prefix, plus the binaries in `containers/` (`remora-etcher`,
 `rmra`). Components are
 generic, not owned by one binary: the directory is `components/<vertical>`

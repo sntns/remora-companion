@@ -50,6 +50,13 @@ allow = [
 # copyleft dependencies (GPL, AGPL, LGPL, ...) are not on the allow list
 # above and will fail this check if pulled in.
 confidence-threshold = 0.8
+# rmra local console's serial port I/O (tokio-serial's serialport), used
+# unmodified as a library: MPL-2.0 is file-level copyleft, binding only
+# changes to serialport's own files, never this project's code. Allowed for
+# that crate alone, not as a license.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "serialport" },
+]
 # Workspace crates are marked `publish = false` (see Cargo.toml) and never
 # published to crates.io; skip license checking for those rather than for
 # every third-party dependency (they're all covered by the root LICENSE).
