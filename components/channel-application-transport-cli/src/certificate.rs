@@ -34,12 +34,14 @@ pub struct CertificateArgs {
     #[arg(long, value_name = "PATH")]
     #[arg(value_hint = clap::ValueHint::FilePath)]
     known_hosts: Option<PathBuf>,
-    /// The role to be on the devices; each is its own IAM action.
+    /// The role to be on the devices; each is its own IAM action
+    /// (`remora-channel::sign-device-local-ssh-certificate-<role>`).
     #[arg(long, value_enum, default_value = "user")]
     role: Role,
-    /// How long the certificate is valid for. Default: the account's
-    /// (8 h unless changed); more than the account allows is refused.
-    #[arg(long, value_name = "HOURS", value_parser = clap::value_parser!(u32).range(1..))]
+    /// How long the certificate is valid for, 1 to 168 hours. Default: the
+    /// account's (8 h unless changed); more than the account allows is
+    /// refused.
+    #[arg(long, value_name = "HOURS", value_parser = clap::value_parser!(u32).range(1..=168))]
     validity_hours: Option<u32>,
     /// `table` for humans, `json` for scripts.
     #[arg(long, default_value = "table")]

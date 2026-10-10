@@ -237,7 +237,9 @@ rmra scp --local 192.168.1.20 ./bundle.raucb 525400C0FFEE:/data/
 `--local` reaches the device's sshd straight at that address instead of
 through its channel: the throwaway key gets a *local* certificate (principal
 `local-<role>@<serial>`, an hour) and ssh is pinned to the host certificate's
-name with HostKeyAlias. Only the certification needs the platform; the
+name with HostKeyAlias. It takes its own IAM action,
+`remora-channel::sign-device-local-ssh-certificate-<role>`: the remote ssh
+ones don't grant it. Only the certification needs the platform; the
 session itself is LAN only. The device must listen on its local network for
 it, which is the device's own configuration.
 
@@ -252,7 +254,7 @@ ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=~/.ssh/id_ed25519-known_hosts \
 
 It writes `KEY-cert.pub` (where ssh finds it) and `KEY-known_hosts`, for 1
 to 64 devices, valid for the account's default (8 h unless changed;
-`--validity-hours` up to its maximum), and prints each device's login and
+`--validity-hours` up to its maximum, 168 at most), and prints each device's login and
 host key alias. All or nothing: one device you may not reach and nothing is
 certified.
 
@@ -270,7 +272,8 @@ once each without a challenge, for a site where nothing reaches the
 platform: each has an index the device asks for. The indices are one series
 per device shared by every account and operator, and a device accepts only
 up to 1024 past the highest it has used, so issue a few, not a stock. Both
-need the same IAM actions as `rmra ssh` for a role that maps the account.
+need `remora-channel::issue-device-login-code-<role>` for a role the device
+maps to the account; no ssh action grants it.
 
 ### Publish an update
 

@@ -2,8 +2,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use remora_context::model::ContextOverride;
 
-/// What to be on the device. Each role is its own IAM action
-/// (`remora-channel::sign-device-ssh-certificate-<role>`); which local
+/// What to be on the device. Each role is its own IAM action, per use:
+/// `remora-channel::sign-device-ssh-certificate-<role>` through the channel,
+/// `sign-device-local-ssh-certificate-<role>` for a local certificate and
+/// `issue-device-login-code-<role>` for console login codes. Which local
 /// accounts a role may log in as is the device's decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SshRole {
