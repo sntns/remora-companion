@@ -261,19 +261,21 @@ certified.
 ### Console login codes
 
 ```
-rmra local login-code 525400C0FFEE --account root K7QM-3XRB
-rmra local offline-codes 525400C0FFEE --account root --count 5
+rmra local login-code 525400C0FFEE K7QM-3XRB --role admin
+rmra local offline-codes 525400C0FFEE --role admin --count 5
 ```
 
 A device's console login shows a challenge; `login-code` prints the code
-that answers it, for that account (the challenge as shown: case, dashes and
-spaces don't matter). `offline-codes` issues codes the device accepts
-once each without a challenge, for a site where nothing reaches the
-platform: each has an index the device asks for. The indices are one series
-per device shared by every account and operator, and a device accepts only
-up to 1024 past the highest it has used, so issue a few, not a stock. Both
-need `remora-channel::issue-device-login-code-<role>` for a role the device
-maps to the account; no ssh action grants it.
+that answers it (the challenge as shown: case, dashes and spaces don't
+matter). A code logs in as a role, `user` (the default) or `admin`, into
+the accounts the device maps that role to, as with `rmra ssh`.
+`offline-codes` issues codes the device accepts once each without a
+challenge, for a site where nothing reaches the platform: each has an index
+the device asks for. The indices are one series per device shared by every
+role and operator, and a device accepts only up to 1024 past the highest it
+has used, so issue a few, not a stock. Both need
+`remora-channel::issue-device-login-code-<role>`; no ssh action grants it,
+and a role the device maps to no account is refused.
 
 ### Publish an update
 

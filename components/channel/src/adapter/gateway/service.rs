@@ -59,23 +59,23 @@ pub trait ChannelGatewayAdapter: Send + Sync {
         validity_hours: u32,
     ) -> Result<LocalSshCertificate>;
 
-    /// The code `device`'s console login accepts for `account`, in answer
-    /// to the `challenge` it shows.
+    /// The code `device`'s console login accepts to log in as `role`, in
+    /// answer to the `challenge` it shows.
     async fn sign_login_challenge(
         &self,
         context: &ResolvedContext,
         device: &str,
-        account: &str,
+        role: SshRole,
         challenge: &str,
     ) -> Result<String>;
 
-    /// `count` new codes `device`'s console login accepts for `account`
+    /// `count` new codes `device`'s console login accepts for `role`
     /// without a challenge, each once.
     async fn issue_offline_login_codes(
         &self,
         context: &ResolvedContext,
         device: &str,
-        account: &str,
+        role: SshRole,
         count: u32,
     ) -> Result<Vec<OfflineLoginCode>>;
 }

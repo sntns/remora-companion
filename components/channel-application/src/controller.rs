@@ -443,12 +443,12 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         device: &str,
-        account: &str,
+        role: SshRole,
         challenge: &str,
     ) -> Result<String> {
         let context = self.resolve(over).await?;
         self.gateway
-            .sign_login_challenge(&context, device, account, challenge)
+            .sign_login_challenge(&context, device, role, challenge)
             .await
             .change_context_lazy(|| Error::LoginCode(device.to_owned()))
     }
@@ -457,7 +457,7 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         device: &str,
-        account: &str,
+        role: SshRole,
         count: u32,
     ) -> Result<Vec<OfflineLoginCode>> {
         if !(1..=MAX_OFFLINE_CODES).contains(&count) {
@@ -467,7 +467,7 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         }
         let context = self.resolve(over).await?;
         self.gateway
-            .issue_offline_login_codes(&context, device, account, count)
+            .issue_offline_login_codes(&context, device, role, count)
             .await
             .change_context_lazy(|| Error::LoginCode(device.to_owned()))
     }
@@ -619,17 +619,17 @@ mod tests {
             &self,
             _: &ResolvedContext,
             device: &str,
-            account: &str,
+            role: SshRole,
             challenge: &str,
         ) -> gateway::Result<String> {
-            Ok(format!("{device}/{account}/{challenge}"))
+            Ok(format!("{device}/{}/{challenge}", role.as_str()))
         }
 
         async fn issue_offline_login_codes(
             &self,
             _: &ResolvedContext,
             _: &str,
-            _: &str,
+            _: SshRole,
             count: u32,
         ) -> gateway::Result<Vec<OfflineLoginCode>> {
             Ok((0..count)
@@ -1000,14 +1000,14 @@ mod tests {
         let channel = controller(root.path(), Gateway::default()).await;
         assert_eq!(
             channel
-                .login_code(None, "DEV1", "root", "K7QM-3XRB")
+                .login_code(None, "DEV1", SshRole::Admin, "K7QM-3XRB")
                 .await
                 .unwrap(),
-            "DEV1/root/K7QM-3XRB"
+            "DEV1/admin/K7QM-3XRB"
         );
         assert_eq!(
             channel
-                .offline_login_codes(None, "DEV1", "root", 3)
+                .offline_login_codes(None, "DEV1", SshRole::User, 3)
                 .await
                 .unwrap()
                 .len(),
@@ -1015,7 +1015,7 @@ mod tests {
         );
         for count in [0, 101] {
             let report = channel
-                .offline_login_codes(None, "DEV1", "root", count)
+                .offline_login_codes(None, "DEV1", SshRole::User, count)
                 .await
                 .unwrap_err();
             assert!(matches!(

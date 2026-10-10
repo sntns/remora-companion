@@ -16,17 +16,27 @@ service ChannelService {
     // device's sshd, for 15 minutes, for one role on that device only.
     rpc SignDeviceSshCertificate(ChannelServiceSignDeviceSshCertificateRequest) returns (ChannelServiceSignDeviceSshCertificateResponse);
 
-    // SignDeviceLocalSshCertificate certifies an operator's SSH key to log
-    // into the sshd of one or more devices directly, on their local network,
-    // for one role, without the channel.
+    // SignDeviceLocalSshCertificate certifies an operator's SSH key to log into
+    // devices' own sshd, reached on their own network rather than through a
+    // channel, for hours.
+    //
+    // Neither the operator nor the device need be online when the certificate is
+    // used, so nothing can revoke it: its validity is its only revocation, and is
+    // bounded by the account's SSH authority. Authorised by its own action on
+    // every device named, remora-channel::sign-device-local-ssh-certificate-<role>,
+    // not the channel's. Its principals are local-<role>@ ones, which the
+    // channel's sshd refuses, so a certificate valid for hours is no remote
+    // access.
     rpc SignDeviceLocalSshCertificate(ChannelServiceSignDeviceLocalSshCertificateRequest) returns (ChannelServiceSignDeviceLocalSshCertificateResponse);
 
-    // SignDeviceLoginChallenge answers the challenge a device's console login
-    // shows with the code it accepts.
+    // SignDeviceLoginChallenge answers the challenge a device's console shows,
+    // to log in in a role with neither side online. Good once,
+    // within minutes of the challenge.
     rpc SignDeviceLoginChallenge(ChannelServiceSignDeviceLoginChallengeRequest) returns (ChannelServiceSignDeviceLoginChallengeResponse);
 
-    // IssueDeviceOfflineLoginCodes issues console login codes a device
-    // accepts without a challenge, each once, from its own index series.
+    // IssueDeviceOfflineLoginCodes issues the next one-time codes of a device's
+    // series for one role, to log in with neither side online
+    // and no challenge to answer. Each is good once.
     rpc IssueDeviceOfflineLoginCodes(ChannelServiceIssueDeviceOfflineLoginCodesRequest) returns (ChannelServiceIssueDeviceOfflineLoginCodesResponse);
 }
 
@@ -51,38 +61,66 @@ message ChannelServiceSignDeviceSshCertificateResponse {
 }
 
 message ChannelServiceSignDeviceLocalSshCertificateRequest {
+    // The devices are named, and their resource names built from the caller's
+    // own tenant. Several, for a site visit; one certificate covers them all.
     repeated string channel_device_names = 1;
+    // The operator's public key, in OpenSSH authorized-keys format. The private
+    // half never leaves the operator.
     string ssh_public_key = 2;
+    // The role to be on the devices, "user" or "admin"; empty means "user". The
+    // device maps local-<role> to the same accounts as <role>.
     string ssh_role = 3;
+    // How long the certificate is valid for, in hours. Zero means the account's
+    // default; above the account's maximum is refused.
     int32 validity_hours = 4;
 }
 
 message ChannelServiceSignDeviceLocalSshCertificateDevice {
     string channel_device_name = 1;
+    // The account on the device the certificate logs into.
     string ssh_user = 2;
+    // The name the device's host certificate carries, for HostKeyAlias: the
+    // device is reached by its address on site, which its certificate does not
+    // name.
     string ssh_host_key_alias = 3;
 }
 
 message ChannelServiceSignDeviceLocalSshCertificateResponse {
+    // The user certificate, in OpenSSH format, for ssh's CertificateFile.
     string ssh_certificate = 1;
+    // The line to put in known_hosts to trust the account's devices:
+    // "@cert-authority *<suffix> <host authority>".
     string ssh_known_hosts = 2;
+    // One entry per device, in the order asked.
     repeated ChannelServiceSignDeviceLocalSshCertificateDevice ssh_devices = 3;
+    // When the certificate stops being valid.
     google.protobuf.Timestamp valid_before = 4;
 }
 
 message ChannelServiceSignDeviceLoginChallengeRequest {
+    // Field 2 was the local account, before a code named a role.
+    reserved 2;
+    reserved "account";
     string channel_device_name = 1;
-    string account = 2;
+    // The role to log in as, "user" or "admin"; empty means "user". The device
+    // logs the code into the accounts it maps the role to.
+    string ssh_role = 4;
+    // As the console shows it; case, dashes and spaces do not matter.
     string challenge = 3;
 }
 
 message ChannelServiceSignDeviceLoginChallengeResponse {
+    // XXXXX-XXXXX.
     string login_code = 1;
 }
 
 message ChannelServiceIssueDeviceOfflineLoginCodesRequest {
+    // Field 2 was the local account, before a code named a role.
+    reserved 2;
+    reserved "account";
     string channel_device_name = 1;
-    string account = 2;
+    // The role to log in as, "user" or "admin"; empty means "user".
+    string ssh_role = 4;
     uint32 count = 3;
 }
 

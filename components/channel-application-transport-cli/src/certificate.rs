@@ -34,7 +34,8 @@ pub struct CertificateArgs {
     #[arg(long, value_name = "PATH")]
     #[arg(value_hint = clap::ValueHint::FilePath)]
     known_hosts: Option<PathBuf>,
-    /// The role to be on the devices; each is its own IAM action
+    /// The role to log in as: the certificate opens any account each device
+    /// maps to this role. Each is its own IAM action
     /// (`remora-channel::sign-device-local-ssh-certificate-<role>`).
     #[arg(long, value_enum, default_value = "user")]
     role: Role,

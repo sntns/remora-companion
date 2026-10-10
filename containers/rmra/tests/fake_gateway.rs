@@ -192,18 +192,18 @@ impl pb::channel_service_server::ChannelService for Channels {
         Err(Status::unimplemented("not in this test"))
     }
 
-    /// The code is the device, account and challenge -- normalised as the
-    /// platform does -- for the test to recognise. "nobody" is an account
-    /// no device maps.
+    /// The code is the device, role and challenge -- normalised as the
+    /// platform does -- for the test to recognise. The device maps no
+    /// account to "admin".
     async fn sign_device_login_challenge(
         &self,
         request: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
     ) -> Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status> {
         authorized(&request)?;
         let request = request.into_inner();
-        if request.account == "nobody" {
+        if request.ssh_role == "admin" {
             return Err(Status::failed_precondition(
-                "no role of the device maps account \"nobody\"",
+                "the device maps no account to the role admin",
             ));
         }
         let challenge: String = request
@@ -216,7 +216,7 @@ impl pb::channel_service_server::ChannelService for Channels {
             pb::ChannelServiceSignDeviceLoginChallengeResponse {
                 login_code: format!(
                     "{}/{}/{challenge}",
-                    request.channel_device_name, request.account
+                    request.channel_device_name, request.ssh_role
                 ),
             },
         ))
@@ -234,7 +234,7 @@ impl pb::channel_service_server::ChannelService for Channels {
                 login_codes: (7..7 + request.count)
                     .map(|index| pb::ChannelServiceDeviceOfflineLoginCode {
                         index,
-                        login_code: format!("{}-{index:05}", request.account.to_uppercase()),
+                        login_code: format!("{}-{index:05}", request.ssh_role.to_uppercase()),
                     })
                     .collect(),
             },
@@ -727,20 +727,13 @@ async fn console_login_codes() {
     // The code alone on stdout, the challenge sent as typed.
     let (code, stdout, stderr) = rmra
         .run_with(
-            &[
-                "local",
-                "login-code",
-                "525400C0FFEE",
-                "--account",
-                "root",
-                "k7qm-3xrb",
-            ],
+            &["local", "login-code", "525400C0FFEE", "k7qm-3xrb"],
             &env,
             b"",
         )
         .await;
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "525400C0FFEE/root/K7QM3XRB\n");
+    assert_eq!(stdout, "525400C0FFEE/user/K7QM3XRB\n");
 
     // The platform's refusal, in its words.
     let (code, _, stderr) = rmra
@@ -749,8 +742,8 @@ async fn console_login_codes() {
                 "local",
                 "login-code",
                 "525400C0FFEE",
-                "--account",
-                "nobody",
+                "--role",
+                "admin",
                 "K7QM-3XRB",
             ],
             &env,
@@ -758,7 +751,10 @@ async fn console_login_codes() {
         )
         .await;
     assert_eq!(code, 1);
-    assert!(stderr.contains("maps account \"nobody\""), "{stderr}");
+    assert!(
+        stderr.contains("maps no account to the role admin"),
+        "{stderr}"
+    );
 
     let (code, stdout, stderr) = rmra
         .run_with(
@@ -766,8 +762,8 @@ async fn console_login_codes() {
                 "local",
                 "offline-codes",
                 "525400C0FFEE",
-                "--account",
-                "root",
+                "--role",
+                "user",
                 "--count",
                 "3",
                 "--format",
@@ -782,24 +778,16 @@ async fn console_login_codes() {
     assert_eq!(
         codes,
         serde_json::json!([
-            {"index": 7, "code": "ROOT-00007"},
-            {"index": 8, "code": "ROOT-00008"},
-            {"index": 9, "code": "ROOT-00009"},
+            {"index": 7, "code": "USER-00007"},
+            {"index": 8, "code": "USER-00008"},
+            {"index": 9, "code": "USER-00009"},
         ])
     );
 
     // More than the platform issues at once is refused before asking.
     let (code, _, stderr) = rmra
         .run_with(
-            &[
-                "local",
-                "offline-codes",
-                "525400C0FFEE",
-                "--account",
-                "root",
-                "--count",
-                "101",
-            ],
+            &["local", "offline-codes", "525400C0FFEE", "--count", "101"],
             &env,
             b"",
         )

@@ -181,14 +181,14 @@ impl ChannelGatewayAdapter for GatewayAdapterImpl {
         &self,
         context: &ResolvedContext,
         device: &str,
-        account: &str,
+        role: SshRole,
         challenge: &str,
     ) -> Result<String> {
         let signed = Self::client(context)
             .await?
             .sign_device_login_challenge(pb::ChannelServiceSignDeviceLoginChallengeRequest {
                 channel_device_name: device.to_owned(),
-                account: account.to_owned(),
+                ssh_role: role.as_str().to_owned(),
                 challenge: challenge.to_owned(),
             })
             .await
@@ -201,7 +201,7 @@ impl ChannelGatewayAdapter for GatewayAdapterImpl {
         &self,
         context: &ResolvedContext,
         device: &str,
-        account: &str,
+        role: SshRole,
         count: u32,
     ) -> Result<Vec<OfflineLoginCode>> {
         let issued = Self::client(context)
@@ -209,7 +209,7 @@ impl ChannelGatewayAdapter for GatewayAdapterImpl {
             .issue_device_offline_login_codes(
                 pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest {
                     channel_device_name: device.to_owned(),
-                    account: account.to_owned(),
+                    ssh_role: role.as_str().to_owned(),
                     count,
                 },
             )
@@ -444,12 +444,12 @@ mod tests {
         ) -> std::result::Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status>
         {
             let request = request.into_inner();
-            if request.account == "nobody" {
-                return Err(Status::failed_precondition("unmapped account"));
+            if request.ssh_role == "admin" {
+                return Err(Status::failed_precondition("unmapped role"));
             }
             Ok(Response::new(
                 pb::ChannelServiceSignDeviceLoginChallengeResponse {
-                    login_code: format!("{}:{}", request.account, request.challenge),
+                    login_code: format!("{}:{}", request.ssh_role, request.challenge),
                 },
             ))
         }
@@ -627,23 +627,23 @@ mod tests {
         let context = serve().await;
         assert_eq!(
             GatewayAdapterImpl
-                .sign_login_challenge(&context, "DEV1", "root", "K7QM-3XRB")
+                .sign_login_challenge(&context, "DEV1", SshRole::User, "K7QM-3XRB")
                 .await
                 .unwrap(),
-            "root:K7QM-3XRB"
+            "user:K7QM-3XRB"
         );
         let report = GatewayAdapterImpl
-            .sign_login_challenge(&context, "DEV1", "nobody", "K7QM-3XRB")
+            .sign_login_challenge(&context, "DEV1", SshRole::Admin, "K7QM-3XRB")
             .await
             .unwrap_err();
         assert!(matches!(
             report.current_context(),
             Error::FailedPrecondition
         ));
-        assert!(format!("{report:?}").contains("unmapped account"));
+        assert!(format!("{report:?}").contains("unmapped role"));
 
         let codes = GatewayAdapterImpl
-            .issue_offline_login_codes(&context, "DEV1", "root", 2)
+            .issue_offline_login_codes(&context, "DEV1", SshRole::Admin, 2)
             .await
             .unwrap();
         assert_eq!(

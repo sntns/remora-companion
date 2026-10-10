@@ -12,7 +12,7 @@ pub enum Error {
     NotConnected,
     #[error("the platform refused the request")]
     InvalidArgument,
-    #[error("the device or account is not set up for this")]
+    #[error("the device or account is not set up for this (no SSH authority, or a role the device maps to no account)")]
     FailedPrecondition,
     #[error("the gateway answered something this client does not understand")]
     Protocol,

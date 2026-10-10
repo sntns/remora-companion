@@ -5,18 +5,20 @@ use serde_json::json;
 
 use crate::{
     error::{channel_error, Result},
-    service::Format,
+    service::{Format, Role},
 };
 
 #[derive(clap::Args)]
-#[command(after_help = "Example:\n  rmra local login-code 525400C0FFEE --account root K7QM-3XRB")]
+#[command(after_help = "Example:\n  rmra local login-code 525400C0FFEE K7QM-3XRB --role admin")]
 pub struct LoginCodeArgs {
     /// The device's name (its serial).
     #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
     device: String,
-    /// The account being logged into on the device's console.
-    #[arg(long)]
-    account: String,
+    /// The role to log in as: the code opens any account the device maps to
+    /// this role. Each is its own IAM action
+    /// (`remora-channel::issue-device-login-code-<role>`).
+    #[arg(long, value_enum, default_value = "user")]
+    role: Role,
     /// The challenge the device's console login shows, as shown: case,
     /// dashes and spaces don't matter.
     challenge: String,
@@ -24,17 +26,20 @@ pub struct LoginCodeArgs {
 
 #[derive(clap::Args)]
 #[command(
-    after_help = "Each code is accepted once. Indices come from one series per device, shared \
-by all its accounts and operators, and a device only accepts indices up to 1024 past the \
-highest it has used: issue what you will need, not more."
+    after_help = "Example:\n  rmra local offline-codes 525400C0FFEE --role admin --count 5\n\n\
+Each code is accepted once. Indices come from one series per device, shared by all its \
+roles and operators, and a device only accepts indices up to 1024 past the highest it has \
+used: issue what you will need, not more."
 )]
 pub struct OfflineCodesArgs {
     /// The device's name (its serial).
     #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
     device: String,
-    /// The account the codes log into on the device's console.
-    #[arg(long)]
-    account: String,
+    /// The role to log in as: the codes open any account the device maps to
+    /// this role. Each is its own IAM action
+    /// (`remora-channel::issue-device-login-code-<role>`).
+    #[arg(long, value_enum, default_value = "user")]
+    role: Role,
     /// How many codes to issue, 1 to 100.
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=100))]
     count: u32,
@@ -51,7 +56,7 @@ pub async fn run_login_code(
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     let code = service
-        .login_code(over, &args.device, &args.account, &args.challenge)
+        .login_code(over, &args.device, args.role.into(), &args.challenge)
         .await
         .map_err(channel_error)?;
     println!("{code}");
@@ -66,7 +71,7 @@ pub async fn run_offline_codes(
     over: Option<&ContextOverride>,
 ) -> Result<()> {
     let codes = service
-        .offline_login_codes(over, &args.device, &args.account, args.count)
+        .offline_login_codes(over, &args.device, args.role.into(), args.count)
         .await
         .map_err(channel_error)?;
     match args.format {

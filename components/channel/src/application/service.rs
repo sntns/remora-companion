@@ -6,7 +6,7 @@ use crate::{
     adapter::gateway::Channel,
     model::{
         ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate, OfflineLoginCode,
-        PreparedSsh, ScpRequest, SshRequest,
+        PreparedSsh, ScpRequest, SshRequest, SshRole,
     },
 };
 
@@ -50,24 +50,25 @@ pub trait ChannelServiceInterface: Send + Sync {
     /// session -- writing it where ssh finds it is the caller's.
     async fn certify_local(&self, request: LocalCertificateRequest) -> Result<LocalSshCertificate>;
 
-    /// The code `device`'s console login accepts for `account`, in answer
-    /// to the `challenge` it shows.
+    /// The code `device`'s console login accepts to log in as `role` -- into
+    /// the accounts the device maps it to -- in answer to the `challenge` it
+    /// shows.
     async fn login_code(
         &self,
         over: Option<&ContextOverride>,
         device: &str,
-        account: &str,
+        role: SshRole,
         challenge: &str,
     ) -> Result<String>;
 
     /// `count` (1 to 100) new codes `device`'s console login accepts for
-    /// `account` without a challenge, each once: for when neither the
+    /// `role` without a challenge, each once: for when neither the
     /// device nor the operator can reach the platform.
     async fn offline_login_codes(
         &self,
         over: Option<&ContextOverride>,
         device: &str,
-        account: &str,
+        role: SshRole,
         count: u32,
     ) -> Result<Vec<OfflineLoginCode>>;
 }
