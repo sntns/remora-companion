@@ -875,7 +875,7 @@ async fn the_console_answers_the_login_challenge() {
     let master = device.master;
     nix::unistd::write(
         &master,
-        b"E2ETEST0002 login: root\r\n\
+        b"525400C0FFEE login: root\r\n\
           Remora local login: root@525400C0FFEE\r\n\
           Challenge: k7qm-3xrb\r\n\
           Type the code for this challenge (or an offline code) at the password prompt.\r\n",
