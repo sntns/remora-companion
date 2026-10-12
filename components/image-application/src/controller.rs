@@ -14,7 +14,7 @@ use remora_image::{
     },
     application::{Error, ImageServiceInterface, Result},
     model::{
-        CpDirRequest, FillOutcome, FillRequest, FsKind, InjectRequest, MkdirRequest,
+        CpDirRequest, DumpRequest, FillOutcome, FillRequest, FsKind, InjectRequest, MkdirRequest,
         PartitionEntry, PartitionRole, PartitionTable, FILL_ALIGNMENT,
     },
 };
@@ -262,12 +262,92 @@ impl ImageControllerImpl {
     }
 }
 
+impl ImageControllerImpl {
+    fn dump_partition_blocking(
+        &self,
+        request: &DumpRequest,
+        ctx: &OperationContext,
+    ) -> Result<u64> {
+        let table = self
+            .partition_table
+            .read(&request.image)
+            .change_context(Error::ReadPartitionTable)?;
+        let entry = table
+            .select(request.partition)
+            .cloned()
+            .change_context(Error::SelectPartition)?;
+
+        let mut image = File::open(&request.image).change_context(Error::Read)?;
+        image
+            .seek(SeekFrom::Start(entry.start_bytes))
+            .change_context(Error::Read)?;
+        let mut image = image.take(entry.size_bytes);
+
+        let written = || Error::WriteOutput(request.output.clone());
+        let mut output = File::create(&request.output).change_context_lazy(written)?;
+        // Never a partial dump left behind as if it were the partition.
+        let copied = copy_chunks(&mut image, &mut output, entry.size_bytes, ctx, written).and_then(
+            |copied| {
+                output
+                    .sync_all()
+                    .change_context_lazy(written)
+                    .map(|()| copied)
+            },
+        );
+        if copied.is_err() {
+            let _ = fs::remove_file(&request.output);
+        }
+        let copied = copied?;
+        if copied != entry.size_bytes {
+            // The image is shorter than its own table says.
+            let _ = fs::remove_file(&request.output);
+            return Err(Report::new(Error::Read));
+        }
+        Ok(copied)
+    }
+}
+
+/// Copy `len` bytes from `from` to `to` by `FILL_CHUNK`s, reporting each
+/// through `ctx` and stopping between them on a cancel. How many bytes
+/// were copied: fewer than `len` when `from` ends first.
+fn copy_chunks(
+    from: &mut impl Read,
+    to: &mut impl Write,
+    len: u64,
+    ctx: &OperationContext,
+    write_error: impl Fn() -> Error,
+) -> Result<u64> {
+    let mut chunk = vec![0u8; FILL_CHUNK];
+    let mut copied = 0u64;
+    ctx.sink.progress_bytes(0, len);
+    loop {
+        if ctx.cancel.is_cancelled() {
+            return Err(Report::new(Error::Cancelled));
+        }
+        let read = from.read(&mut chunk).change_context(Error::Read)?;
+        if read == 0 {
+            return Ok(copied);
+        }
+        to.write_all(&chunk[..read])
+            .change_context_lazy(&write_error)?;
+        copied += read as u64;
+        ctx.sink.progress_bytes(copied, len);
+    }
+}
+
 /// How much of a fill's source is read and written at a time: one progress
 /// step, and how soon a cancel is seen.
 const FILL_CHUNK: usize = 4 * 1024 * 1024;
 
 #[async_trait::async_trait]
 impl ImageServiceInterface for ImageControllerImpl {
+    async fn dump_partition(&self, request: &DumpRequest, ctx: &OperationContext) -> Result<u64> {
+        let request = request.clone();
+        let ctx = ctx.clone();
+        self.blocking(move |this| this.dump_partition_blocking(&request, &ctx))
+            .await
+    }
+
     async fn inspect(&self, path: &Path) -> Result<PartitionTable> {
         let path = path.to_path_buf();
         self.blocking(move |this| {

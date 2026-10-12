@@ -1,7 +1,7 @@
 use remora_progress::OperationContext;
 
 use super::error::Result;
-use crate::model::{PackOutcome, PackRequest};
+use crate::model::{PackOutcome, PackRequest, UnpackOutcome, UnpackRequest};
 
 /// The installer vertical's application-facing port.
 ///
@@ -25,6 +25,21 @@ pub trait InstallerServiceInterface: Send + Sync {
     /// image's), removed afterwards. Reports one phase per step through
     /// `ctx`, which also cancels it.
     async fn pack(&self, request: &PackRequest, ctx: &OperationContext) -> Result<PackOutcome>;
+
+    /// Write `request.output`: the disk image `request.installer` flashes,
+    /// as the `.bmaptar` its payload partition holds -- `pack`'s inverse,
+    /// so that an installer alone is enough to provision its image and
+    /// pack it back. The partition's zero tail, up to its 1 MiB boundary,
+    /// is left out.
+    ///
+    /// Like `pack`, it decodes the installer in a scratch directory next to
+    /// `request.output`, removed afterwards, and reports one phase per step
+    /// through `ctx`, which also cancels it.
+    async fn unpack(
+        &self,
+        request: &UnpackRequest,
+        ctx: &OperationContext,
+    ) -> Result<UnpackOutcome>;
 }
 
 /// Injectable handle to whatever `InstallerServiceInterface`

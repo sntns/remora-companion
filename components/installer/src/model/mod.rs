@@ -25,3 +25,24 @@ pub struct PackOutcome {
     /// Whether the image had to be bundled as a `.bmaptar` first.
     pub bundled: bool,
 }
+
+/// Taking an installer's payload back out: see
+/// `InstallerServiceInterface::unpack`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnpackRequest {
+    /// The installer (e.g. `laplaylist-installer-f3apl.wic.bmaptar`), in
+    /// any format `convert` reads.
+    pub installer: PathBuf,
+    /// The disk image it flashes, written as the `.bmaptar` it holds it
+    /// as, e.g. `laplaylist-image-f3apl.wic.bmaptar`.
+    pub output: PathBuf,
+}
+
+/// What an unpack took out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnpackOutcome {
+    /// The `.bmaptar` written.
+    pub payload_bytes: u64,
+    /// The payload partition it was in.
+    pub partition_index: u32,
+}

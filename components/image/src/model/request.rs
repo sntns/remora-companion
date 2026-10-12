@@ -82,6 +82,16 @@ pub struct FillRequest {
     pub partition: PartitionSelector,
 }
 
+/// Copying a partition's raw bytes out of an image: see
+/// `ImageServiceInterface::dump_partition`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DumpRequest {
+    pub image: PathBuf,
+    pub partition: PartitionSelector,
+    /// The file written: the partition's bytes, all of them, raw.
+    pub output: PathBuf,
+}
+
 /// What filling a partition made of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FillOutcome {

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use remora_image::model::{CpDirRequest, InjectRequest, MkdirRequest};
-use remora_installer::model::PackRequest;
+use remora_installer::model::{PackRequest, UnpackRequest};
 use remora_squashfs::model::BuildOptions;
 
 /// One step of a batch recipe. Mirrors each vertical's own service method
@@ -44,6 +44,9 @@ pub enum BatchStep {
     /// See `remora_installer::application::InstallerServiceInterface::pack`:
     /// after the steps provisioning an image, the installer that flashes it.
     InstallerPack(PackRequest),
+    /// See `InstallerServiceInterface::unpack`: before the steps
+    /// provisioning an image, the image an installer flashes.
+    InstallerUnpack(UnpackRequest),
     /// See `remora_squashfs::application::SquashfsServiceInterface::build`.
     SquashfsBuild {
         inputs: Vec<PathBuf>,
@@ -99,6 +102,7 @@ impl BatchStep {
             BatchStep::ImageMkdir(_) => "image-mkdir",
             BatchStep::ImageCpDir(_) => "image-cp-dir",
             BatchStep::InstallerPack(_) => "installer-pack",
+            BatchStep::InstallerUnpack(_) => "installer-unpack",
             BatchStep::SquashfsBuild { .. } => "squashfs-build",
             BatchStep::FactoryProvision { .. } => "factory-provision",
         }

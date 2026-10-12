@@ -122,6 +122,12 @@ impl BatchServiceInterface for BatchControllerImpl {
                         .await
                         .change_context(Error::Step { index, kind })?;
                 }
+                BatchStep::InstallerUnpack(request) => {
+                    self.installer
+                        .unpack(&request, ctx)
+                        .await
+                        .change_context(Error::Step { index, kind })?;
+                }
                 BatchStep::SquashfsBuild {
                     inputs,
                     output,

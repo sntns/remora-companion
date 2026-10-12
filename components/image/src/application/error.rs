@@ -26,6 +26,8 @@ pub enum Error {
     UnsupportedEntry(PathBuf),
     #[error("the partition is vfat, which has no file owners")]
     NoOwners,
+    #[error("failed to write {0}")]
+    WriteOutput(PathBuf),
     #[error("copy was cancelled")]
     Cancelled,
 }

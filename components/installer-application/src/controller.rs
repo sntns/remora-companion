@@ -1,6 +1,6 @@
 use std::{
-    fs::File,
-    io::Read,
+    fs::{File, OpenOptions},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -8,11 +8,11 @@ use error_stack::{Report, ResultExt};
 use remora_convert::application::{self as convert, ConvertService};
 use remora_image::{
     application::ImageService,
-    model::{FillRequest, PartitionRole, PartitionSelector},
+    model::{DumpRequest, FillRequest, PartitionRole, PartitionSelector},
 };
 use remora_installer::{
     application::{Error, InstallerServiceInterface, Result},
-    model::{PackOutcome, PackRequest},
+    model::{PackOutcome, PackRequest, UnpackOutcome, UnpackRequest},
 };
 use remora_progress::OperationContext;
 use remora_scratch::ScratchDir;
@@ -77,15 +77,7 @@ impl InstallerControllerImpl {
 #[async_trait::async_trait]
 impl InstallerServiceInterface for InstallerControllerImpl {
     async fn pack(&self, request: &PackRequest, ctx: &OperationContext) -> Result<PackOutcome> {
-        let dir = match request.output.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-            _ => PathBuf::from("."),
-        };
-        // Next to the output, not in the system's temp dir: the raw
-        // installer is sparse but its payload is real data, often more
-        // than a tmpfs holds.
-        let scratch = ScratchDir::new_in(&dir, ".remora-installer-")
-            .change_context_lazy(|| Error::Scratch(request.output.clone()))?;
+        let scratch = scratch_next_to(&request.output)?;
 
         let raw = scratch.join("installer.wic");
         self.convert
@@ -123,6 +115,81 @@ impl InstallerServiceInterface for InstallerControllerImpl {
             bundled,
         })
     }
+
+    async fn unpack(
+        &self,
+        request: &UnpackRequest,
+        ctx: &OperationContext,
+    ) -> Result<UnpackOutcome> {
+        let scratch = scratch_next_to(&request.output)?;
+
+        let raw = scratch.join("installer.wic");
+        self.convert
+            .to_raw(&request.installer, &raw, &scoped(ctx, "installer"))
+            .await
+            .change_context_lazy(|| Error::DecodeInstaller(request.installer.clone()))?;
+
+        ctx.sink.phase("extracting the image");
+        let table = self
+            .image
+            .inspect(&raw)
+            .await
+            .change_context(Error::Extract)?;
+        let partition_index = table
+            .select_role(PartitionRole::Installer)
+            .change_context(Error::Extract)?
+            .index;
+        self.image
+            .dump_partition(
+                &DumpRequest {
+                    image: raw.clone(),
+                    partition: PartitionSelector::Index(partition_index),
+                    output: request.output.clone(),
+                },
+                ctx,
+            )
+            .await
+            .change_context(Error::Extract)?;
+
+        // The partition, up to its 1 MiB boundary, past the tar's end:
+        // only the tar is the image's bundle.
+        let trimmed = (|| {
+            if !starts_with_tar(&request.output)? {
+                return Err(Report::new(Error::NoPayload(request.installer.clone())));
+            }
+            let len = tar_len(&request.output)?;
+            OpenOptions::new()
+                .write(true)
+                .open(&request.output)
+                .and_then(|file| file.set_len(len))
+                .change_context_lazy(|| Error::Write(request.output.clone()))?;
+            Ok(len)
+        })();
+        let payload_bytes = match trimmed {
+            Ok(len) => len,
+            Err(report) => {
+                let _ = std::fs::remove_file(&request.output);
+                return Err(report);
+            }
+        };
+
+        Ok(UnpackOutcome {
+            payload_bytes,
+            partition_index,
+        })
+    }
+}
+
+/// A scratch directory next to `output`, not in the system's temp dir: a
+/// raw installer is sparse, but its payload is real data, often more than
+/// a tmpfs holds.
+fn scratch_next_to(output: &Path) -> Result<ScratchDir> {
+    let dir = match output.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    ScratchDir::new_in(&dir, ".remora-installer-")
+        .change_context_lazy(|| Error::Scratch(output.to_path_buf()))
 }
 
 /// `ctx`, its phases named after `scope`: `convert`'s own ("decoding",
@@ -134,6 +201,58 @@ fn scoped(ctx: &OperationContext, scope: &str) -> OperationContext {
 /// Where a tar header's magic sits: "ustar", in POSIX and GNU tars alike.
 const TAR_MAGIC_OFFSET: usize = 257;
 const TAR_MAGIC: &[u8] = b"ustar";
+
+const TAR_BLOCK: u64 = 512;
+/// What a tar is written by: its end padded to a whole record, 20 blocks.
+const TAR_RECORD: u64 = 20 * TAR_BLOCK;
+
+/// The length of the tar at the start of `path`, its end-of-archive and
+/// last record's padding included: whatever follows (a partition's zero
+/// tail) is not part of it. Walks its headers, each followed by its
+/// member's blocks; the first all-zero block starts the end-of-archive
+/// marker, two blocks long.
+fn tar_len(path: &Path) -> Result<u64> {
+    let read = || Error::Read(path.to_path_buf());
+    let mut file = File::open(path).change_context_lazy(read)?;
+    let file_len = file.metadata().change_context_lazy(read)?.len();
+    let mut header = [0u8; TAR_BLOCK as usize];
+    let mut offset = 0u64;
+    loop {
+        if offset + TAR_BLOCK > file_len {
+            // No end-of-archive: the whole file is the tar.
+            return Ok(file_len);
+        }
+        file.seek(SeekFrom::Start(offset))
+            .and_then(|_| file.read_exact(&mut header))
+            .change_context_lazy(read)?;
+        if header.iter().all(|&b| b == 0) {
+            let end = (offset + 2 * TAR_BLOCK).div_ceil(TAR_RECORD) * TAR_RECORD;
+            return Ok(end.min(file_len));
+        }
+        let size = tar_member_size(&header).ok_or_else(|| Report::new(read()))?;
+        offset += TAR_BLOCK + size.div_ceil(TAR_BLOCK) * TAR_BLOCK;
+    }
+}
+
+/// A tar header's member size: octal, or GNU's base-256 (high bit of its
+/// first byte set) for members past 8 GiB.
+fn tar_member_size(header: &[u8; TAR_BLOCK as usize]) -> Option<u64> {
+    let field = &header[124..136];
+    if field[0] & 0x80 != 0 {
+        return field[1..]
+            .iter()
+            .try_fold(u64::from(field[0] & 0x7f), |acc, &b| {
+                acc.checked_mul(256)?.checked_add(u64::from(b))
+            });
+    }
+    let digits = std::str::from_utf8(field)
+        .ok()?
+        .trim_matches(|c: char| c == '\0' || c == ' ');
+    if digits.is_empty() {
+        return Some(0);
+    }
+    u64::from_str_radix(digits, 8).ok()
+}
 
 /// Whether `path` starts with a tar header: a `.bmaptar` bundle, whatever
 /// its name.

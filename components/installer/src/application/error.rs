@@ -16,6 +16,12 @@ pub enum Error {
     Embed,
     #[error("failed to encode {0}")]
     Encode(PathBuf),
+    #[error("failed to take the image out of the installer's payload partition")]
+    Extract,
+    #[error("{0}'s payload partition holds no .bmaptar (an installer never packed?)")]
+    NoPayload(PathBuf),
+    #[error("failed to write {0}")]
+    Write(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;
