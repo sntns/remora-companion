@@ -159,16 +159,16 @@ disk:
 
 | Variable | |
 |---|---|
-| `RMRA_ADDRESS` | the gateway, `host:port` (or with `http://`/`https://`) — required |
 | `RMRA_TOKEN` | an access key's token — required |
+| `RMRA_ADDRESS` | the gateway, `host:port` (or with `http://`/`https://`) — `api.eu2.sntns.io:50051` by default |
 | `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN (there are no aliases) |
 | `RMRA_PLAINTEXT` | `true` for plaintext h2c (local development stacks only) |
 | `RMRA_CA_FILE` | a PEM certificate authority to trust, on top of the system's |
 | `RMRA_SERVER_NAME` | the name to verify the gateway's certificate against |
 
 ```
-export RMRA_ADDRESS=api.eu2.sntns.io:50051 RMRA_TOKEN=…   # from the CI's secrets
-rmra whoami      # context env (from RMRA_ADDRESS and RMRA_TOKEN)
+export RMRA_TOKEN=…   # from the CI's secrets; the gateway: api.eu2.sntns.io:50051
+rmra whoami      # context env (from RMRA_TOKEN)
 rmra device ls
 ```
 

@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::{
     error::{context_error, prompt_error, Error, Result},
     login::RoleArgs,
-    selection::{ADDRESS_ENV, TOKEN_ENV},
+    selection::TOKEN_ENV,
 };
 
 /// The production gateway a fresh `login` suggests.
@@ -389,7 +389,7 @@ async fn list(
                             .assumed_role
                             .clone()
                             .unwrap_or_else(|| "—".to_owned()),
-                        format!("defined by {ADDRESS_ENV} and {TOKEN_ENV}, not stored"),
+                        format!("defined by {TOKEN_ENV}, not stored"),
                     ],
                     true,
                 );
@@ -471,7 +471,7 @@ pub(crate) fn describe_selection(selection: Selection) -> &'static str {
         Selection::Environment => "from RMRA_CONTEXT",
         Selection::Current => "current",
         Selection::Only => "the only context",
-        Selection::Defined => "from RMRA_ADDRESS and RMRA_TOKEN",
+        Selection::Defined => "from RMRA_TOKEN",
     }
 }
 
