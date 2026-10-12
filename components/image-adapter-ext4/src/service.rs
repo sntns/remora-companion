@@ -233,6 +233,21 @@ fn create_dir(
     Ok(())
 }
 
+/// Set `dest_path`'s owner inside the ext4 filesystem occupying
+/// `[offset, offset + size)` of `image`.
+fn chown(
+    image: &Path,
+    offset: u64,
+    size: u64,
+    dest_path: &str,
+    uid: u32,
+    gid: u32,
+) -> std::result::Result<(), Error> {
+    let fs = mount_window(image, offset, size)?;
+    fs.apply_chown(dest_path, uid, gid)?;
+    Ok(())
+}
+
 /// Format `image` (created/truncated to exactly `size_bytes`) as a fresh
 /// ext4 filesystem — the "mkfs" half of `mkfs.ext4 -d CONFIG_DIR`, decomposed
 /// since `am-fs-ext4`'s `format_filesystem` has no populate-at-format option
@@ -293,6 +308,18 @@ impl Ext4Adapter for Ext4AdapterImpl {
         create_dir(image, offset, size, dest_path, mode).map_err(Report::new)
     }
 
+    fn chown(
+        &self,
+        image: &Path,
+        offset: u64,
+        size: u64,
+        dest_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<()> {
+        chown(image, offset, size, dest_path, uid, gid).map_err(Report::new)
+    }
+
     fn format(
         &self,
         image: &Path,
@@ -349,6 +376,19 @@ impl PartitionFilesystem for Ext4AdapterImpl {
         mode: u16,
     ) -> partition_fs::Result<()> {
         Ext4Adapter::create_dir(self, image, offset, size, dest_path, mode)
+            .change_context(partition_fs::Error::Ext4)
+    }
+
+    fn chown(
+        &self,
+        image: &Path,
+        offset: u64,
+        size: u64,
+        dest_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> partition_fs::Result<()> {
+        Ext4Adapter::chown(self, image, offset, size, dest_path, uid, gid)
             .change_context(partition_fs::Error::Ext4)
     }
 }

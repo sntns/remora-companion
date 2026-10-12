@@ -5,7 +5,7 @@ use remora_format::human_size;
 use remora_image::{
     application::ImageService,
     model::{
-        CpDirRequest, InjectRequest, MkdirRequest, PartitionRole, PartitionSelector,
+        CpDirRequest, InjectRequest, MkdirRequest, Owner, PartitionRole, PartitionSelector,
         PartitionTable, TableKind,
     },
 };
@@ -62,6 +62,11 @@ pub enum PartitionCommand {
         /// `src` is a directory (each entry keeps its own host mode).
         #[arg(long, default_value_t = 0o644)]
         mode: u16,
+
+        /// Numeric `UID:GID` owning every entry copied in (ext4 only), e.g.
+        /// `1000:1000`. Only when `src` is a directory; root otherwise.
+        #[arg(long, value_name = "UID:GID")]
+        owner: Option<Owner>,
     },
 
     /// Create a directory inside one partition's filesystem (the parent of
@@ -135,6 +140,7 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
             image,
             partition,
             mode,
+            owner,
         }) => {
             let selector = parse_partition_selector(&partition)?;
             if src.is_dir() {
@@ -143,6 +149,7 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     source_dir: src,
                     dest_path: dest_path.clone(),
                     partition: selector,
+                    owner,
                 };
                 let (sink, stream) = remora_progress::channel();
                 let follow = remora_tui::follow(stream);
@@ -159,6 +166,9 @@ pub async fn run(command: Command, service: &ImageService) -> Result<()> {
                     remora_tui::accent(image.display())
                 ));
             } else {
+                if owner.is_some() {
+                    return Err(error_stack::Report::new(Error::OwnerOnFile));
+                }
                 let request = InjectRequest {
                     image: image.clone(),
                     source: src,

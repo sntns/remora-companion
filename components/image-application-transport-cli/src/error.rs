@@ -4,6 +4,8 @@ pub enum Error {
         "'{0}' is not a partition index or a known role (shared/efi/slota/slotb/data/installer)"
     )]
     ParseSelector(String),
+    #[error("--owner applies to a directory only")]
+    OwnerOnFile,
     #[error("failed to run image command")]
     Image,
 }

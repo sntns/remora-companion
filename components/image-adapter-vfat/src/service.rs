@@ -286,6 +286,18 @@ impl PartitionFilesystem for VfatAdapterImpl {
         VfatAdapter::create_dir(self, image, offset, size, dest_path, mode)
             .change_context(partition_fs::Error::Vfat)
     }
+
+    fn chown(
+        &self,
+        _image: &Path,
+        _offset: u64,
+        _size: u64,
+        _dest_path: &str,
+        _uid: u32,
+        _gid: u32,
+    ) -> partition_fs::Result<()> {
+        Err(Report::new(partition_fs::Error::NoOwners))
+    }
 }
 
 #[cfg(test)]

@@ -6,5 +6,5 @@ pub use partition_table::{
     TableKind,
 };
 pub use request::{
-    CpDirRequest, FillOutcome, FillRequest, InjectRequest, MkdirRequest, FILL_ALIGNMENT,
+    CpDirRequest, FillOutcome, FillRequest, InjectRequest, MkdirRequest, Owner, FILL_ALIGNMENT,
 };

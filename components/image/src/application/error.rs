@@ -24,6 +24,8 @@ pub enum Error {
     Walk(PathBuf),
     #[error("unsupported filesystem entry: {0}")]
     UnsupportedEntry(PathBuf),
+    #[error("the partition is vfat, which has no file owners")]
+    NoOwners,
     #[error("copy was cancelled")]
     Cancelled,
 }

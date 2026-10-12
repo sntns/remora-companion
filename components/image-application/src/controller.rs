@@ -80,6 +80,16 @@ impl ImageControllerImpl {
         image: &Path,
         select: impl FnOnce(&PartitionTable) -> Result<PartitionEntry>,
     ) -> Result<(PartitionEntry, &dyn PartitionFilesystem)> {
+        let (entry, kind) = self.resolve_kind(image, select)?;
+        Ok((entry, self.backend(kind)))
+    }
+
+    /// `resolve`, naming the filesystem rather than its backend.
+    fn resolve_kind(
+        &self,
+        image: &Path,
+        select: impl FnOnce(&PartitionTable) -> Result<PartitionEntry>,
+    ) -> Result<(PartitionEntry, FsKind)> {
         let table = self
             .partition_table
             .read(image)
@@ -89,7 +99,7 @@ impl ImageControllerImpl {
             .partition_table
             .detect_fs_kind(image, entry.start_bytes)
             .change_context(Error::ReadPartitionTable)?;
-        Ok((entry, self.backend(kind)))
+        Ok((entry, kind))
     }
 
     fn resolve_by_role(
@@ -106,12 +116,17 @@ impl ImageControllerImpl {
     }
 
     fn cp_dir_blocking(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()> {
-        let (entry, backend) = self.resolve(&request.image, |table| {
+        let (entry, kind) = self.resolve_kind(&request.image, |table| {
             table
                 .select(request.partition)
                 .cloned()
                 .change_context(Error::SelectPartition)
         })?;
+        // Refused before anything is written, not halfway through the copy.
+        if request.owner.is_some() && kind == FsKind::Vfat {
+            return Err(Report::new(Error::NoOwners));
+        }
+        let backend = self.backend(kind);
 
         let walked = self
             .fs_walk
@@ -156,6 +171,18 @@ impl ImageControllerImpl {
                 WalkEntryKind::Symlink { .. } => {
                     return Err(Report::new(Error::UnsupportedEntry(walked_entry.path)));
                 }
+            }
+            if let Some(owner) = request.owner {
+                backend
+                    .chown(
+                        &request.image,
+                        entry.start_bytes,
+                        entry.size_bytes,
+                        &dest_path,
+                        owner.uid,
+                        owner.gid,
+                    )
+                    .change_context(Error::Write)?;
             }
         }
         ctx.sink.progress(total, total);

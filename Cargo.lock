@@ -3838,6 +3838,7 @@ dependencies = [
  "fatfs",
  "remora-progress",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

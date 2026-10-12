@@ -36,6 +36,17 @@ pub trait Ext4Adapter: Send + Sync {
         mode: u16,
     ) -> Result<()>;
 
+    /// Set `dest_path`'s owner to the numeric `uid`/`gid`.
+    fn chown(
+        &self,
+        image: &Path,
+        offset: u64,
+        size: u64,
+        dest_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<()>;
+
     fn format(
         &self,
         image: &Path,
