@@ -66,8 +66,9 @@ Le **point de commit** est la validation de l'étiquette. Le hub n'écrit son id
 - **Point d'accès recommandé** : le **hotspot du portable station** (Linux NetworkManager : station en 10.42.0.1 ; Windows : 192.168.137.1).
 - **Découverte de la station**, sans mDNS (absent de l'image), dans l'ordre :
   1. URLs explicites de la config du hub ;
-  2. `http://<passerelle par défaut>:8484` ;
-  3. sondage de chaque candidat par `GET /v1/hello`.
+  2. la station annoncée par le serveur DHCP du réseau d'atelier, dans l'option privée **224** du bail (`claim.dhcp-option`) : une URL `http(s)://…`, ou `hôte[:port]` (port de la config du hub par défaut). Utile quand la station n'est pas la passerelle. Avec dnsmasq : `dhcp-option-force=224,"http://10.42.0.1:8484"` (`force` : NetworkManager ne la demande pas, mais la garde) ;
+  3. `http://<passerelle par défaut>:8484` ;
+  4. sondage de chaque candidat par `GET /v1/hello`.
 - **Une seule station par réseau d'atelier** : deux stations ont deux journaux distincts et pourraient émettre deux serials pour un même hub.
 - **SSID et PSK** sont intégrés à l'image. Le profil réseau n'est actif **qu'en mode claim**. Une fuite du PSK n'expose que le réseau d'atelier.
 
@@ -437,6 +438,8 @@ Il est actif si `claim.enabled` et que `factory-identity-path` est absent.
 claim:
   enabled: true
   station-urls: []
+  station-from-dhcp: true                                     # option DHCP ci-dessous (§2)
+  dhcp-option: 224                                            # 224-254, sauf 249 et 252
   station-from-gateway: true
   port: 8484
   poll-interval: 1s
