@@ -9,14 +9,18 @@ use remora_context::{
     },
 };
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    service::DEFAULT_ADDRESS,
+};
 
 /// Where the context override comes from in the environment: one variable
 /// for every binary, since they share the contexts.
 pub const CONTEXT_ENV: &str = "RMRA_CONTEXT";
 
 /// A context defined whole by the environment, for an ephemeral container
-/// or a CI job: the gateway and an access key's token, both required...
+/// or a CI job: an access key's token, required, and the gateway, by
+/// default `DEFAULT_ADDRESS` (api.eu2.sntns.io:50051)...
 pub const ADDRESS_ENV: &str = "RMRA_ADDRESS";
 pub const TOKEN_ENV: &str = "RMRA_TOKEN";
 /// ...and, optionally, the role it acts as (a URN), plaintext for a local
@@ -38,7 +42,7 @@ pub const DEFINED_NAME: &str = "env";
 #[derive(clap::Args, Debug)]
 pub struct ContextArgs {
     /// The context to use for this command, overriding `context use` and a
-    /// context defined by RMRA_ADDRESS and RMRA_TOKEN.
+    /// context defined by RMRA_TOKEN.
     #[arg(short = 'c', long = "context", env = CONTEXT_ENV, value_name = "CONTEXT")]
     #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
     context: Option<String>,
@@ -84,28 +88,22 @@ fn choose(
 
 /// The context `vars` define, if they do. Empty variables count as unset.
 fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedContext>> {
-    let (address, token) = match (vars(ADDRESS_ENV), vars(TOKEN_ENV)) {
-        (Some(address), Some(token)) => (address, token),
-        (None, None) => {
-            let rest = [ASSUME_ROLE_ENV, PLAINTEXT_ENV, CA_FILE_ENV, SERVER_NAME_ENV];
-            return match rest.into_iter().find(|name| vars(name).is_some()) {
-                Some(name) => Err(usage(format!(
-                    "{name} is set without {ADDRESS_ENV} and {TOKEN_ENV}, which define the context"
-                ))),
-                None => Ok(None),
-            };
-        }
-        (Some(_), None) => {
-            return Err(usage(format!(
-                "{ADDRESS_ENV} is set without {TOKEN_ENV}: set both"
-            )))
-        }
-        (None, Some(_)) => {
-            return Err(usage(format!(
-                "{TOKEN_ENV} is set without {ADDRESS_ENV}: set both"
-            )))
-        }
+    let Some(token) = vars(TOKEN_ENV) else {
+        let rest = [
+            ADDRESS_ENV,
+            ASSUME_ROLE_ENV,
+            PLAINTEXT_ENV,
+            CA_FILE_ENV,
+            SERVER_NAME_ENV,
+        ];
+        return match rest.into_iter().find(|name| vars(name).is_some()) {
+            Some(name) => Err(usage(format!(
+                "{name} is set without {TOKEN_ENV}, which defines the context"
+            ))),
+            None => Ok(None),
+        };
     };
+    let address = vars(ADDRESS_ENV).unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
     // Its role can only be a URN: an alias needs a stored context's roles.
     let assumed_role = vars(ASSUME_ROLE_ENV);
     if let Some(role) = assumed_role.as_deref().filter(|role| !is_role_urn(role)) {
@@ -321,6 +319,15 @@ mod tests {
         // Not even a debug line shows the token.
         assert!(!format!("{defined:?}").contains("s3cret"));
 
+        // RMRA_TOKEN alone: the default gateway.
+        let token_only = choose(None, vars(&[(TOKEN_ENV, "s3cret")]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            token_only.defined.unwrap().context.endpoint.address,
+            DEFAULT_ADDRESS
+        );
+
         // Nothing set: no override; RMRA_CONTEXT alone names a stored one.
         assert!(choose(None, vars(&[])).unwrap().is_none());
         let named = choose(Some("eu2".into()), vars(&[])).unwrap().unwrap();
@@ -334,7 +341,6 @@ mod tests {
     fn a_partial_or_contradictory_environment_is_a_usage_error() {
         let both = [(ADDRESS_ENV, "gateway:50051"), (TOKEN_ENV, "t")];
         assert!(usage_of(choose(None, vars(&both[..1]))).contains("without RMRA_TOKEN"));
-        assert!(usage_of(choose(None, vars(&both[1..]))).contains("without RMRA_ADDRESS"));
         assert!(usage_of(choose(None, vars(&[(PLAINTEXT_ENV, "1")]))).contains("RMRA_PLAINTEXT"));
         assert!(usage_of(choose(Some("eu2".into()), vars(&both))).contains("RMRA_CONTEXT"));
 

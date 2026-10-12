@@ -47,7 +47,7 @@ pub fn hint<C>(report: &Report<C>, program: &str) -> Option<String> {
     Some(match report.downcast_ref::<ContextError>()? {
         ContextError::NoContext => format!(
             "create one with `{program} context create <name>`, or log in with `{program} login` \
-             (or define one with {ADDRESS_ENV} and {TOKEN_ENV})"
+             (or define one with {TOKEN_ENV}, and {ADDRESS_ENV} for another gateway)"
         ),
         ContextError::Ambiguous => format!(
             "pick one with `{program} context use <name>`, or `{program} --context <name> …`"

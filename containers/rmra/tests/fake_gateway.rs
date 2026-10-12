@@ -623,10 +623,7 @@ async fn a_context_defined_by_the_environment() {
         stderr.contains("urn:sntns:iam:local:acme:user:ada"),
         "{stderr}"
     );
-    assert!(
-        stderr.contains("from RMRA_ADDRESS and RMRA_TOKEN"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("from RMRA_TOKEN"), "{stderr}");
     assert!(!stderr.contains(TOKEN), "the token leaked: {stderr}");
 
     let (code, stdout, stderr) = rmra
@@ -676,11 +673,12 @@ async fn a_context_defined_by_the_environment() {
         .collect();
     assert!(leftovers.is_empty(), "written to the config: {leftovers:?}");
 
-    // Half an environment, or one that also names a context: usage errors.
-    let (code, _, stderr) = rmra.run_with(&["whoami"], &env[1..], b"").await;
+    // No token (the address alone has a default, not the token), or one
+    // that also names a context: usage errors.
+    let (code, _, stderr) = rmra.run_with(&["whoami"], &[env[0], env[2]], b"").await;
     assert_eq!(code, 2);
     assert!(
-        stderr.contains("RMRA_TOKEN is set without RMRA_ADDRESS"),
+        stderr.contains("RMRA_ADDRESS is set without RMRA_TOKEN"),
         "{stderr}"
     );
     let mut named = env.to_vec();
