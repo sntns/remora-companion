@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use error_stack::ResultExt;
 use remora_format::human_size;
-use remora_installer::{application::InstallerService, model::PackRequest};
+use remora_installer::{
+    application::InstallerService,
+    model::{PackRequest, UnpackRequest},
+};
 use remora_progress::OperationContext;
 
 use super::error::{Error, Result};
@@ -25,6 +28,19 @@ pub enum Command {
         image: PathBuf,
 
         /// The new installer, e.g. my-installer-f3apl.wic.bmaptar.
+        #[arg(long)]
+        output: PathBuf,
+    },
+
+    /// Take out the disk image an installer flashes, as the `.bmaptar` its
+    /// payload partition holds: `pack`'s inverse. Provision it with
+    /// `image`/`identity`/`config`, then `pack` it back into that same
+    /// installer.
+    Unpack {
+        /// The installer, e.g. laplaylist-installer-f3apl.wic.bmaptar.
+        installer: PathBuf,
+
+        /// The image written, e.g. laplaylist-image-f3apl.wic.bmaptar.
         #[arg(long)]
         output: PathBuf,
     },
@@ -62,6 +78,29 @@ pub async fn run(command: Command, service: &InstallerService) -> Result<()> {
                 },
                 outcome.partition_index,
                 human_size(outcome.partition_bytes),
+            ));
+            Ok(())
+        }
+        Command::Unpack { installer, output } => {
+            let (sink, stream) = remora_progress::channel();
+            let follow = remora_tui::follow(stream);
+            let result = service
+                .unpack(
+                    &UnpackRequest {
+                        installer: installer.clone(),
+                        output: output.clone(),
+                    },
+                    &OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c()),
+                )
+                .await;
+            follow.finish(&result).await;
+            let outcome = result.change_context(Error::Unpack)?;
+            remora_tui::success(format!(
+                "Wrote {}: the {} image in {}'s partition #{}",
+                remora_tui::accent(output.display()),
+                human_size(outcome.payload_bytes),
+                installer.display(),
+                outcome.partition_index,
             ));
             Ok(())
         }

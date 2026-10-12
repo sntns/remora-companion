@@ -677,6 +677,21 @@ removed afterwards. As a batch step:
   "image": "my-device.wic", "output": "my-installer-f3apl.wic.bmaptar" }
 ```
 
+`installer unpack` is its inverse: the image an installer installs, taken
+back out as the `.bmaptar` its payload partition holds (byte for byte the
+one packed). An installer alone is then enough to provision its image and
+pack it back:
+
+```
+remora-etcher installer unpack laplaylist-installer-f3apl.wic.bmaptar \
+  --output laplaylist-image-f3apl.wic.bmaptar
+```
+
+```json
+{ "step": "installer-unpack", "installer": "laplaylist-installer-f3apl.wic.bmaptar",
+  "output": "laplaylist-image-f3apl.wic.bmaptar" }
+```
+
 `image partition list` shows an installer's payload partition with the
 `Installer` role.
 

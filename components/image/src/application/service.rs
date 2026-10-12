@@ -3,8 +3,8 @@ use std::path::Path;
 use remora_progress::OperationContext;
 
 use crate::model::{
-    CpDirRequest, FillOutcome, FillRequest, InjectRequest, MkdirRequest, PartitionRole,
-    PartitionTable,
+    CpDirRequest, DumpRequest, FillOutcome, FillRequest, InjectRequest, MkdirRequest,
+    PartitionRole, PartitionTable,
 };
 
 use super::error::Result;
@@ -59,6 +59,15 @@ pub trait ImageServiceInterface: Send + Sync {
         request: &FillRequest,
         ctx: &OperationContext,
     ) -> Result<FillOutcome>;
+
+    /// Write `request.output` with the raw bytes of whichever partition
+    /// `request.partition` resolves to, all of them (no filesystem read):
+    /// the inverse of `fill_partition`, e.g. an installer's payload taken
+    /// back out. Returns how many bytes were written.
+    ///
+    /// Reports the bytes copied through `ctx`, and stops between chunks
+    /// when it's cancelled (the output is then removed).
+    async fn dump_partition(&self, request: &DumpRequest, ctx: &OperationContext) -> Result<u64>;
 
     /// Write `contents` to `dest_path` inside whichever partition has role
     /// `role` — resolved from the image's own layout (see

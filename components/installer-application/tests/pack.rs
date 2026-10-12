@@ -3,7 +3,8 @@
 //! partition, partitioned by the real `sfdisk`, a dev-only tool) packed
 //! with a product image given as a `.bmaptar` and as a raw `.wic`, the
 //! output decoded back to check its ESP is untouched and its payload is
-//! the image, byte for byte once decoded.
+//! the image, byte for byte once decoded. And `unpack`, its inverse:
+//! the packed `.bmaptar` taken back out as it was given.
 
 use std::{
     fs,
@@ -35,7 +36,7 @@ use remora_image_adapter_vfat::VfatAdapterImpl;
 use remora_image_application::ImageControllerImpl;
 use remora_installer::{
     application::{Error, InstallerService},
-    model::PackRequest,
+    model::{PackRequest, UnpackRequest},
 };
 use remora_installer_application::InstallerControllerImpl;
 use remora_progress::OperationContext;
@@ -348,4 +349,87 @@ async fn refuses_an_installer_without_a_payload_partition() {
         .unwrap_err();
     assert!(matches!(err.current_context(), Error::Embed), "{err:?}");
     assert!(!dir.join("out.wic.bmaptar").exists());
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk, a Linux-only dev tool"
+)]
+async fn unpacks_the_bmaptar_it_packed() {
+    let dir = TempDir::new();
+    let installer_bundle = installer_bmaptar(&dir).await;
+    let product = product_wic(&dir);
+    let product_bundle = dir.join("product.wic.bmaptar");
+    convert()
+        .from_raw(&product, &product_bundle, &OperationContext::noop())
+        .await
+        .unwrap();
+    let packed = dir.join("packed-installer.wic.bmaptar");
+    let packed_outcome = installer()
+        .pack(
+            &PackRequest {
+                installer: installer_bundle,
+                image: product_bundle.clone(),
+                output: packed.clone(),
+            },
+            &OperationContext::noop(),
+        )
+        .await
+        .unwrap();
+    // Padded to its partition's 1 MiB boundary: something to trim.
+    assert!(packed_outcome.partition_bytes > packed_outcome.payload_bytes);
+
+    let unpacked = dir.join("unpacked.wic.bmaptar");
+    let outcome = installer()
+        .unpack(
+            &UnpackRequest {
+                installer: packed,
+                output: unpacked.clone(),
+            },
+            &OperationContext::noop(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.partition_index, 2);
+    assert_eq!(outcome.payload_bytes, packed_outcome.payload_bytes);
+    assert_eq!(
+        fs::read(&unpacked).unwrap(),
+        fs::read(&product_bundle).unwrap()
+    );
+
+    let left: Vec<_> = fs::read_dir(&dir.0)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(".remora-installer-"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk, a Linux-only dev tool"
+)]
+async fn refuses_to_unpack_an_installer_never_packed() {
+    let dir = TempDir::new();
+    // Its payload partition is all zeros: no .bmaptar in it.
+    let installer_bundle = installer_bmaptar(&dir).await;
+    let output = dir.join("unpacked.wic.bmaptar");
+
+    let err = installer()
+        .unpack(
+            &UnpackRequest {
+                installer: installer_bundle,
+                output: output.clone(),
+            },
+            &OperationContext::noop(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.current_context(), Error::NoPayload(_)),
+        "{err:?}"
+    );
+    assert!(!output.exists());
 }
