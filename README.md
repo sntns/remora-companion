@@ -487,6 +487,18 @@ remora-etcher image partition mkdir /play/tplst-app-config \
 Works against ext4 or vfat partitions, auto-detected from the partition
 itself — you don't need to know which.
 
+What's copied belongs to root. For data a device's own app writes, give a
+directory to its user with `--owner UID:GID` (numeric: the device's ids, not
+your host's) — ext4 only, vfat has no owners:
+
+```
+remora-etcher image partition cp ./staging / \
+  --image remora.wic --partition data --owner 1000:1000
+```
+
+In a batch recipe, that's `"owner": {"uid": 1000, "gid": 1000}` on an
+`image-cp-dir` step.
+
 ### Give a device its identity
 
 ```

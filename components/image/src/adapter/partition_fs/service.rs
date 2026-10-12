@@ -35,6 +35,18 @@ pub trait PartitionFilesystem: Send + Sync {
         mode: u16,
     ) -> Result<()>;
 
+    /// Set `dest_path`'s owner to the numeric `uid`/`gid`. Refused by a
+    /// backend without owners (vfat).
+    fn chown(
+        &self,
+        image: &Path,
+        offset: u64,
+        size: u64,
+        dest_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<()>;
+
     /// Like `create_dir`, but treats "already exists" as success.
     ///
     /// Backends disagree on whether re-creating an existing directory is an

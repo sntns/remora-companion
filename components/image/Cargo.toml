@@ -20,3 +20,6 @@ serde.workspace = true
 # benefit (the actual DI seam is the *port trait*, not the value shape).
 am-fs-ext4 = "0.4"
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }
+
+[dev-dependencies]
+serde_json.workspace = true

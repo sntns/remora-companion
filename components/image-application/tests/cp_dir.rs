@@ -27,7 +27,7 @@ use remora_image::{
         vfat::VfatAdapter,
     },
     application::ImageService,
-    model::{CpDirRequest, PartitionSelector},
+    model::{CpDirRequest, Owner, PartitionSelector},
 };
 use remora_image_adapter_ext4::Ext4AdapterImpl;
 use remora_image_adapter_partition_table::PartitionTableAdapterImpl;
@@ -136,6 +136,7 @@ async fn run_cp_dir_round_trip(mkfs: &str) {
                 source_dir: source.clone(),
                 dest_path: "/".to_string(),
                 partition: PartitionSelector::Index(1),
+                owner: None,
             },
             &remora_progress::OperationContext::noop(),
         )
@@ -168,4 +169,105 @@ async fn cp_dir_round_trips_on_an_ext4_partition() {
 )]
 async fn cp_dir_round_trips_on_a_vfat_partition() {
     run_cp_dir_round_trip("vfat").await;
+}
+
+/// `uid:gid` of `path` inside the ext4 partition, per the real `debugfs`.
+fn ext4_owner(disk: &std::path::Path, path: &str) -> String {
+    let standalone = temp_path("owner-fs");
+    let bytes = fs::read(disk).unwrap();
+    let start = PARTITION_OFFSET as usize;
+    fs::write(&standalone, &bytes[start..start + PARTITION_SIZE as usize]).unwrap();
+    let output = Command::new("debugfs")
+        .args(["-R", &format!("stat {path}")])
+        .arg(&standalone)
+        .output()
+        .expect("debugfs not available");
+    let _ = fs::remove_file(&standalone);
+    let stat = String::from_utf8_lossy(&output.stdout);
+    let field = |name: &str| {
+        let rest = &stat[stat.find(name).unwrap_or_else(|| panic!("{stat}")) + name.len()..];
+        rest.split_whitespace().next().unwrap().to_string()
+    };
+    format!("{}:{}", field("User:"), field("Group:"))
+}
+
+fn source_tree() -> PathBuf {
+    let source = temp_path("source-dir");
+    fs::create_dir_all(source.join("nested")).unwrap();
+    fs::write(source.join("top.txt"), b"top-level\n").unwrap();
+    fs::write(source.join("nested/inner.txt"), b"nested-file\n").unwrap();
+    source
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mke2fs/debugfs, Linux-only dev tools"
+)]
+async fn cp_dir_owns_every_entry_on_an_ext4_partition() {
+    let disk = build_disk_with_partition("ext4");
+    let source = source_tree();
+
+    controller()
+        .cp_dir(
+            &CpDirRequest {
+                image: disk.clone(),
+                source_dir: source.clone(),
+                dest_path: "/".to_string(),
+                partition: PartitionSelector::Index(1),
+                owner: Some(Owner {
+                    uid: 1000,
+                    gid: 1001,
+                }),
+            },
+            &remora_progress::OperationContext::noop(),
+        )
+        .await
+        .unwrap();
+
+    for path in ["/top.txt", "/nested", "/nested/inner.txt"] {
+        assert_eq!(ext4_owner(&disk, path), "1000:1001", "{path}");
+    }
+    // The destination itself was there before: not part of the copy.
+    assert_eq!(ext4_owner(&disk, "/"), "0:0");
+
+    let _ = fs::remove_dir_all(&source);
+    let _ = fs::remove_file(&disk);
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires sfdisk/mkfs.vfat, Linux-only dev tools"
+)]
+async fn cp_dir_refuses_an_owner_on_a_vfat_partition_before_writing() {
+    let disk = build_disk_with_partition("vfat");
+    let source = source_tree();
+
+    let result = controller()
+        .cp_dir(
+            &CpDirRequest {
+                image: disk.clone(),
+                source_dir: source.clone(),
+                dest_path: "/".to_string(),
+                partition: PartitionSelector::Index(1),
+                owner: Some(Owner {
+                    uid: 1000,
+                    gid: 1000,
+                }),
+            },
+            &remora_progress::OperationContext::noop(),
+        )
+        .await;
+
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        remora_image::application::Error::NoOwners
+    ));
+    assert!(!VfatAdapterImpl
+        .exists(&disk, PARTITION_OFFSET, PARTITION_SIZE, "/top.txt")
+        .unwrap());
+
+    let _ = fs::remove_dir_all(&source);
+    let _ = fs::remove_file(&disk);
 }
