@@ -524,8 +524,9 @@ impl pb::device_service_server::DeviceService for TestGateway {
         *signed += 1;
         Ok(Response::new(
             pb::DeviceServiceCreateFactoryDeviceResponse {
+                // As the platform renders it: no `urn:` prefix.
                 factory_device_name: format!(
-                    "urn:sntns:remora:test:{TENANT}:factory-device:{serial}"
+                    "sntns:remora:test:{TENANT}:factory-device:{serial}"
                 ),
                 certificate_reference: reference(&format!("certificate-{serial}-{signed}")),
                 certificate: format!("idevid {serial}").into_bytes(),

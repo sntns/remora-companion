@@ -30,10 +30,11 @@ fn request(serial: &DeviceSerial, csr_der: &[u8]) -> pb::DeviceServiceCreateFact
     request
 }
 
-/// The tenant of a URN (`urn:<partition>:<service>:<region>:<tenant>:...`):
-/// the account id a factory device's name carries for its manufacturer.
-fn tenant(urn: &str) -> Option<&str> {
-    let mut parts = urn.strip_prefix("urn:")?.split(':');
+/// The tenant of a platform name (`<partition>:<service>:<region>:<tenant>:
+/// <qualifier>:<path>`, as the platform renders a factory device's name, or
+/// the same behind `urn:`): the account id it carries for its manufacturer.
+fn tenant(name: &str) -> Option<&str> {
+    let mut parts = name.strip_prefix("urn:").unwrap_or(name).split(':');
     let tenant = parts.nth(3)?;
     (!tenant.is_empty() && parts.next().is_some()).then_some(tenant)
 }
@@ -207,7 +208,12 @@ mod tests {
     }
 
     #[test]
-    fn a_urn_names_its_tenant() {
+    fn a_name_carries_its_tenant() {
+        // What the platform returns: no `urn:` prefix.
+        assert_eq!(
+            tenant("sntns:remora:eu2:6f1c:factory-device:1H7Z"),
+            Some("6f1c")
+        );
         assert_eq!(
             tenant("urn:sntns:remora:eu2:6f1c:factory-device:1H7Z"),
             Some("6f1c")
