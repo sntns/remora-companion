@@ -265,6 +265,7 @@ fn environment(invocation: &HookInvocation) -> Vec<(&'static str, String)> {
             claim.image.compatible.clone().unwrap_or_default(),
         ),
         ("REMORA_ACCESS_URL", issued(|i| &i.access_url)),
+        ("REMORA_OWNER_ACCOUNT", issued(|i| &i.owner_account)),
         (
             "REMORA_SERIAL_POLICY",
             policy.unwrap_or_default().to_string(),
@@ -320,6 +321,7 @@ fn record(invocation: &HookInvocation) -> serde_json::Value {
             "factory_device_name": identity.factory_device_name,
             "key_id": identity.key_id,
             "access_url": identity.access_url,
+            "owner_account": identity.owner_account,
         })),
     })
 }
@@ -373,6 +375,7 @@ mod tests {
                         server_certificate_authority_der: b"server ca".to_vec(),
                         key_id: "urn:test:certificate-1H7Z-1".into(),
                         access_url: "https://access.test/access/v1".into(),
+                        owner_account: "urn:sntns:iam:test:6f1c:account".into(),
                     }),
                     state: Some(ClaimState::Issued),
                     label: Some(LabelState::Active),
@@ -447,7 +450,7 @@ mod tests {
             r#"set -u
 echo "$1|$REMORA_EVENT|$REMORA_CLAIM_ID|$REMORA_SERIAL|$REMORA_FACTORY_DEVICE_NAME|$REMORA_HOSTNAME"
 echo "$REMORA_TEMP_HOSTNAME|$REMORA_BOARD|$REMORA_ETH_MAC|$REMORA_BSP_SERIAL|$REMORA_MACHINE_ID"
-echo "$REMORA_IMAGE_VERSION|$REMORA_IMAGE_COMPATIBLE|$REMORA_ACCESS_URL"
+echo "$REMORA_IMAGE_VERSION|$REMORA_IMAGE_COMPATIBLE|$REMORA_ACCESS_URL|$REMORA_OWNER_ACCOUNT"
 echo "$REMORA_SERIAL_POLICY|$REMORA_DEVICE_NAME_TEMPLATE|$REMORA_CONTEXT|$REMORA_ATTEMPT|$REMORA_JOURNAL"
 cat >&2"#,
             true,
@@ -462,7 +465,7 @@ cat >&2"#,
             format!(
                 "label|label|9f3c|1H7Z|urn:test:factory-device:1H7Z|1H7Z\n\
                  e2b4a1c09f13|hub-v2||c3d2|1abf\n\
-                 1.4.0|v2|https://access.test/access/v1\n\
+                 1.4.0|v2|https://access.test/access/v1|urn:sntns:iam:test:6f1c:account\n\
                  |{{bsp_serial}}|factory|2|{}\n",
                 journal.display()
             )

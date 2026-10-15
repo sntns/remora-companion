@@ -119,6 +119,7 @@ fn config(root: &Path) -> StationConfig {
                 BoardPolicy::DeviceName(DeviceNameTemplate::parse("{bsp_serial}").unwrap()),
             ),
         ]),
+        owners: BTreeMap::new(),
     }
 }
 

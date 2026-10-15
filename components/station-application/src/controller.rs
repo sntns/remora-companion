@@ -293,7 +293,11 @@ fn platform_error(report: Report<factory::Error>) -> Report<Error> {
         factory::Error::Context(_) => Error::Unavailable,
         _ => match report.downcast_ref::<provisioning::Error>() {
             Some(provisioning::Error::AlreadyExists(name)) => Error::AlreadyExists(name.clone()),
-            Some(provisioning::Error::Refused) => Error::Refused,
+            // Made but owned by nobody: someone assigns it, a retry
+            // would only make another.
+            Some(provisioning::Error::Refused | provisioning::Error::Assign { .. }) => {
+                Error::Refused
+            }
             _ => Error::Unavailable,
         },
     };
@@ -730,10 +734,11 @@ impl Shared {
             hardware: request.hardware.clone(),
             image: request.image.clone(),
         };
+        let owner = running.config.owner_for(&request.hardware.board);
         let outcome = match self.record_durably(running, id, received).await {
             Ok(()) => self
                 .factory
-                .provision_csr(running.over.as_ref(), serial, &request.csr_der)
+                .provision_csr(running.over.as_ref(), serial, &owner, &request.csr_der)
                 .await
                 .map_err(platform_error),
             Err(report) => Err(report),

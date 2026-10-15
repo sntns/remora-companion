@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
-use remora_factory::model::DeviceSerial;
+use remora_factory::model::{DeviceOwner, DeviceSerial};
 
 use super::claim::HardwareInfo;
 
@@ -34,11 +34,19 @@ pub struct StationConfig {
     /// The boards accepted, and how each one's devices are named. Any
     /// other board is refused.
     pub boards: BTreeMap<String, BoardPolicy>,
+    /// The account each board's devices are assigned to, when it isn't
+    /// the manufacturer's own: a board not listed here gets that one.
+    pub owners: BTreeMap<String, DeviceOwner>,
 }
 
 impl StationConfig {
     pub const DEFAULT_PRESENCE_TIMEOUT: Duration = Duration::from_secs(10);
     pub const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// The account `board`'s devices are assigned to.
+    pub fn owner_for(&self, board: &str) -> DeviceOwner {
+        self.owners.get(board).cloned().unwrap_or_default()
+    }
 }
 
 /// What `start` reports once the station is ready to serve.

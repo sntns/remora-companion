@@ -163,7 +163,8 @@ Le hub interroge cette route **toutes les secondes** tant qu'il n'a pas reçu `l
     "certificate_authority": "<base64 DER>",
     "server_certificate_authority": "<base64 DER>",
     "key_id": "<certificate_reference.urn>",
-    "access_url": "https://…"
+    "access_url": "https://…",
+    "owner_account": "<URN du compte propriétaire>"
   }
 }
 ```
@@ -217,6 +218,7 @@ boards:                           # boards acceptés ; tout autre board → 403
   # hub-v1:
   #   create-factory-device:
   #     device-name: "{bsp_serial}"
+  #     owner-account: <id ou URN du compte>   # défaut : le compte fabricant
 ```
 
 - **Approbation automatique** : tout claim d'un board configuré est émis immédiatement. Le contrôle humain se fait à l'étiquetage (§4.5).
@@ -224,7 +226,8 @@ boards:                           # boards acceptés ; tout autre board → 403
   - `serial-number-policy` **ou** `device-name`. Exactement l'un des deux, comme `DeviceSerial::from_parts`.
   - `device-name` est un gabarit sur les champs `hardware` du claim (`{bsp_serial}`, `{eth_mac}`, `{temp_hostname}`, `{board}`).
   - `force` n'est **pas** exposé : le SAV est hors périmètre. Un `device-name` déjà existant renvoie 409, journalisé.
-- **Contexte** : il doit avoir `remora::create-factory-device`, plus `remora::use-serial-number-policy` sur chaque policy utilisée. On recommande un **contexte `access-key` dédié**, avec un rôle limité à ces permissions.
+  - `owner-account` (optionnel) : le compte auquel le device est assigné (`AssignFactoryDevice`) juste après sa création, celui où il s'enrôle au premier boot. Par défaut, le compte fabricant lui-même (le tenant du contexte). Un device créé mais que la plateforme refuse d'assigner est refusé (`403`) : quelqu'un doit l'assigner, une nouvelle tentative en créerait un autre.
+- **Contexte** : il doit avoir `remora::create-factory-device`, `remora::assign-factory-device`, plus `remora::use-serial-number-policy` sur chaque policy utilisée. On recommande un **contexte `access-key` dédié**, avec un rôle limité à ces permissions.
 - **Validation au démarrage**, avant d'écouter :
   - le contexte se résout et est connecté : la station appelle `whoami` sur la plateforme, donc des credentials révoqués l'empêchent de démarrer (et, en cours de route, renvoient `503 unavailable` aux hubs avec une alerte à l'opérateur) ;
   - le gabarit de chaque board est valide ;
@@ -321,6 +324,7 @@ Arborescence sous `hooks:` (par défaut `./station.d`) :
 | `REMORA_MACHINE_ID` | `1abf…` |
 | `REMORA_IMAGE_VERSION` / `REMORA_IMAGE_COMPATIBLE` | `1.4.0` / `v2` |
 | `REMORA_ACCESS_URL` | `https://…` |
+| `REMORA_OWNER_ACCOUNT` | URN du compte auquel le device est assigné |
 | `REMORA_SERIAL_POLICY` / `REMORA_DEVICE_NAME_TEMPLATE` | selon le board |
 | `REMORA_CONTEXT` | `factory` |
 | `REMORA_ATTEMPT` | `1` (`2`, `3`… en cas de réimpression ou de reprise) |

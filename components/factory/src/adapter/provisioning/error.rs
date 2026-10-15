@@ -6,6 +6,10 @@ pub enum Error {
     AlreadyExists(String),
     #[error("factory-device provisioning was refused")]
     Refused,
+    /// The device exists, with its credential, but belongs to nobody yet:
+    /// assigning it again is someone's job, making it again would fail.
+    #[error("{serial} was manufactured but could not be assigned to {owner}")]
+    Assign { serial: String, owner: String },
     /// The context's credentials no longer authenticate (revoked, expired):
     /// a matter for whoever runs the tool, not a refusal of this device.
     #[error("the platform did not accept the context's credentials")]

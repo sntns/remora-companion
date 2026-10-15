@@ -103,6 +103,37 @@ impl DeviceSerial {
     }
 }
 
+/// Which account a manufactured device is assigned to, the step after it
+/// is made (`AssignFactoryDevice`): what the device enrolls into at first
+/// boot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum DeviceOwner {
+    /// The manufacturing account itself -- the context's own tenant.
+    #[default]
+    Manufacturer,
+    /// Another account, by id or URN, e.g. the customer's.
+    Account(String),
+}
+
+impl DeviceOwner {
+    /// `None` (or an empty one) is the manufacturer.
+    pub fn from_account(account: Option<String>) -> Self {
+        match account {
+            Some(account) if !account.is_empty() => Self::Account(account),
+            _ => Self::Manufacturer,
+        }
+    }
+}
+
+impl std::fmt::Display for DeviceOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Manufacturer => f.write_str("the manufacturing account"),
+            Self::Account(account) => f.write_str(account),
+        }
+    }
+}
+
 /// A CSR that passed verification: PKCS#10, a P-256 key, and a valid
 /// self-signature -- what the platform will accept, checked before it is
 /// asked. Carries what a caller may need to recognise the key again
@@ -117,9 +148,11 @@ pub struct VerifiedCsr {
 
 /// What a successful `provision` reports back to its caller: the serial
 /// actually issued (to print on the label -- also the certificate's CN) and
-/// the device's URN (the certificate's URI SAN).
+/// the device's URN (the certificate's URI SAN) and the account it was
+/// assigned to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionedDevice {
     pub serial_number: String,
     pub factory_device_name: String,
+    pub owner_account: String,
 }

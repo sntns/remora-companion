@@ -1,7 +1,7 @@
 use remora_context::model::ResolvedContext;
 
 use super::error::Result;
-use crate::model::DeviceSerial;
+use crate::model::{DeviceOwner, DeviceSerial};
 
 /// What the platform's factory-device call hands back, before the
 /// locally-generated private key is added at the application layer (see
@@ -27,6 +27,10 @@ pub struct ProvisionedIdentity {
     /// Empty when a deployment hasn't configured an access-url yet; the
     /// application layer treats that as a hard failure, not a default.
     pub access_url: String,
+    /// The account the device was assigned to, as the platform names it
+    /// (its URN). Empty where nobody said, e.g. on a hub that got its
+    /// identity from a station.
+    pub owner_account: String,
 }
 
 /// DI seam for `remora-factory-application`: the call to `sntns-platform`'s
@@ -43,10 +47,14 @@ pub trait FactoryProvisioningAdapter: Send + Sync {
     /// An explicit device name that was already manufactured is refused
     /// with `Error::AlreadyExists` unless its `force` is set, in which case
     /// the platform re-signs it and revokes the previous IDevID.
+    ///
+    /// The device made is then assigned to `owner`; a device made but not
+    /// assigned fails with `Error::Assign`, naming its serial.
     async fn provision(
         &self,
         context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity>;
 }

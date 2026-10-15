@@ -22,6 +22,9 @@ use remora_platform_grpc::sntns::service::{
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
+/// The account every token authenticates into: the manufacturer.
+pub const TENANT: &str = "6f1c2a52-6a8e-4c39-9d7e-3c5f0b1e2a10";
+
 fn reference(name: &str) -> Option<ResourceReference> {
     Some(ResourceReference {
         name: name.to_owned(),
@@ -67,6 +70,9 @@ pub struct State {
     deployments: BTreeMap<String, StoredDeployment>,
     /// Manufactured serials, with how many times each was signed.
     pub factory_devices: BTreeMap<String, u32>,
+    /// Assigned serials, with the account each was last assigned to, as
+    /// asked (an id or a URN).
+    pub factory_owners: BTreeMap<String, String>,
     /// Every call is refused as unauthenticated, as for credentials
     /// revoked after login.
     pub revoked: bool,
@@ -518,13 +524,62 @@ impl pb::device_service_server::DeviceService for TestGateway {
         *signed += 1;
         Ok(Response::new(
             pb::DeviceServiceCreateFactoryDeviceResponse {
-                factory_device_name: format!("urn:test:factory-device:{serial}"),
+                factory_device_name: format!(
+                    "urn:sntns:remora:test:{TENANT}:factory-device:{serial}"
+                ),
                 certificate_reference: reference(&format!("certificate-{serial}-{signed}")),
                 certificate: format!("idevid {serial}").into_bytes(),
                 certificate_authority_certificate: b"factory ca".to_vec(),
                 server_certificate_authority_certificate: b"server ca".to_vec(),
                 access_url: "https://access.test/access/v1".into(),
                 serial_number: serial,
+            },
+        ))
+    }
+
+    /// Assigns like the platform: a serial this account made, to an
+    /// account id or URN.
+    async fn assign_factory_device(
+        &self,
+        request: Request<pb::DeviceServiceAssignFactoryDeviceRequest>,
+    ) -> Result<Response<pb::DeviceServiceAssignFactoryDeviceResponse>, Status> {
+        let request = request.into_inner();
+        let mut state = self.state();
+        if state.revoked {
+            return Err(Status::unauthenticated("invalid access key"));
+        }
+        if !state.factory_devices.contains_key(&request.device_name) {
+            return Err(Status::not_found("no such device was manufactured"));
+        }
+        let owner = &request.owner_account;
+        let urn = match owner {
+            owner if owner.starts_with("urn:") => owner.clone(),
+            owner
+                if !owner.is_empty()
+                    && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') =>
+            {
+                format!("urn:sntns:iam:test:{owner}:account")
+            }
+            _ => {
+                return Err(Status::invalid_argument(
+                    "owner-account must be an account id or URN",
+                ))
+            }
+        };
+        state
+            .factory_owners
+            .insert(request.device_name.clone(), owner.clone());
+        Ok(Response::new(
+            pb::DeviceServiceAssignFactoryDeviceResponse {
+                factory_device_reference: reference(&format!(
+                    "factory-device-{}",
+                    request.device_name
+                )),
+                owner_reference: Some(ResourceReference {
+                    urn,
+                    ..Default::default()
+                }),
+                voucher: format!("voucher {}", request.device_name).into_bytes(),
             },
         ))
     }

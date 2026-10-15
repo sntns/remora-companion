@@ -51,6 +51,9 @@ struct Identity {
     server_certificate_authority: String,
     key_id: String,
     access_url: String,
+    /// Absent from a journal written before devices were assigned.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    owner_account: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -126,6 +129,7 @@ fn identity_line(identity: &ProvisionedIdentity) -> Identity {
         server_certificate_authority: STANDARD.encode(&identity.server_certificate_authority_der),
         key_id: identity.key_id.clone(),
         access_url: identity.access_url.clone(),
+        owner_account: identity.owner_account.clone(),
     }
 }
 
@@ -146,6 +150,7 @@ fn identity_of(line: Identity) -> std::result::Result<ProvisionedIdentity, Strin
         factory_device_name: line.factory_device_name,
         key_id: line.key_id,
         access_url: line.access_url,
+        owner_account: line.owner_account,
     })
 }
 
@@ -374,6 +379,7 @@ mod tests {
             server_certificate_authority_der: b"server ca".to_vec(),
             key_id: "urn:test:certificate-1H7Z-1".into(),
             access_url: "https://access.test/access/v1".into(),
+            owner_account: "urn:sntns:iam:test:6f1c:account".into(),
         }
     }
 

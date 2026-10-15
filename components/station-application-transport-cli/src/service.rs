@@ -60,6 +60,10 @@ pub struct ServeArgs {
     /// {bsp_serial}, {eth_mac}, {temp_hostname}, {board} (repeatable).
     #[arg(long = "device-name", value_name = "BOARD=TEMPLATE")]
     pub(crate) device_names: Vec<String>,
+    /// Assign BOARD's devices to ACCOUNT, an account id or URN, instead of
+    /// the manufacturing account (repeatable).
+    #[arg(long = "owner-account", value_name = "BOARD=ACCOUNT")]
+    pub(crate) owner_accounts: Vec<String>,
 }
 
 #[derive(clap::Args)]

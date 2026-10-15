@@ -185,6 +185,10 @@ pub struct IdentityBody {
     /// The certificate reference's URN.
     pub key_id: String,
     pub access_url: String,
+    /// The account the device was assigned to (URN). Optional: a station
+    /// predating assignment doesn't send it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_account: String,
 }
 
 impl IdentityBody {
@@ -203,6 +207,7 @@ impl IdentityBody {
             factory_device_name: self.factory_device_name,
             key_id: self.key_id,
             access_url: self.access_url,
+            owner_account: self.owner_account,
         })
     }
 }
@@ -243,6 +248,7 @@ impl From<ClaimStatus> for ClaimStatusBody {
                     .encode(identity.server_certificate_authority_der),
                 key_id: identity.key_id,
                 access_url: identity.access_url,
+                owner_account: identity.owner_account,
             },
         }
     }

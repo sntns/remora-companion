@@ -6,7 +6,7 @@ use remora_progress::OperationContext;
 use super::error::Result;
 use crate::{
     adapter::{key::DeviceKey, provisioning::ProvisionedIdentity},
-    model::{DeviceSerial, PrivateKey, ProvisionedDevice, VerifiedCsr},
+    model::{DeviceOwner, DeviceSerial, PrivateKey, ProvisionedDevice, VerifiedCsr},
 };
 
 /// The factory vertical's application-facing port: manufacture a device --
@@ -49,11 +49,13 @@ pub trait FactoryServiceInterface: Send + Sync {
     /// call fails instead unless an override is given for that case.
     ///
     /// Made as the context `over` selects (else the current one): its login
-    /// and role decide which account manufactures the device.
+    /// and role decide which account manufactures the device. The device
+    /// is then assigned to `owner` -- by default that same account.
     async fn provision(
         &self,
         over: Option<&ContextOverride>,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         access_url_override: Option<&str>,
         output: &Path,
         ctx: &OperationContext,
@@ -70,6 +72,7 @@ pub trait FactoryServiceInterface: Send + Sync {
         &self,
         over: Option<&ContextOverride>,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity>;
 

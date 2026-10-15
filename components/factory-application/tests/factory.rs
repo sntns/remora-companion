@@ -28,7 +28,7 @@ use remora_factory::{
         },
     },
     application::FactoryServiceInterface,
-    model::DeviceSerial,
+    model::{DeviceOwner, DeviceSerial},
 };
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
@@ -47,6 +47,7 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
         &self,
         _context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         _csr_der: &[u8],
     ) -> provisioning::Result<ProvisionedIdentity> {
         let device_name = serial_of(serial);
@@ -58,7 +59,16 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
+            owner_account: owner_of(owner),
         })
+    }
+}
+
+/// The account a fake adapter "assigns" to.
+fn owner_of(owner: &DeviceOwner) -> String {
+    match owner {
+        DeviceOwner::Manufacturer => "test:iam:account:manufacturer".into(),
+        DeviceOwner::Account(account) => account.clone(),
     }
 }
 
@@ -198,6 +208,7 @@ async fn provisions_a_device_and_renders_a_well_formed_yaml() {
                 device_name: "e2e-serial-0001".to_string(),
                 force: false,
             },
+            &DeviceOwner::Manufacturer,
             None,
             &output,
             &OperationContext::noop(),
@@ -249,6 +260,7 @@ impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
         &self,
         _context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         _csr_der: &[u8],
     ) -> provisioning::Result<ProvisionedIdentity> {
         let device_name = serial_of(serial);
@@ -260,6 +272,7 @@ impl FactoryProvisioningAdapter for EmptyAccessUrlProvisioning {
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: String::new(),
+            owner_account: owner_of(owner),
         })
     }
 }
@@ -275,6 +288,7 @@ async fn fails_when_the_platform_omits_an_access_url_and_no_override_was_given()
                 device_name: "e2e-serial-0003".to_string(),
                 force: false,
             },
+            &DeviceOwner::Manufacturer,
             None,
             &output,
             &OperationContext::noop(),
@@ -299,6 +313,7 @@ async fn honors_the_access_url_override_when_the_platform_response_is_empty() {
                 device_name: "e2e-serial-0004".to_string(),
                 force: false,
             },
+            &DeviceOwner::Manufacturer,
             Some("https://override.example.invalid/access/v1"),
             &output,
             &OperationContext::noop(),
@@ -326,6 +341,7 @@ impl FactoryProvisioningAdapter for RecordingProvisioning {
         &self,
         _context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         _csr_der: &[u8],
     ) -> provisioning::Result<ProvisionedIdentity> {
         self.seen.lock().unwrap().push(serial.clone());
@@ -338,6 +354,7 @@ impl FactoryProvisioningAdapter for RecordingProvisioning {
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
+            owner_account: owner_of(owner),
         })
     }
 }
@@ -347,7 +364,14 @@ async fn provision_recording(serial: DeviceSerial) -> (Vec<DeviceSerial>, String
     let seen = Arc::new(Mutex::new(Vec::new()));
 
     let device = controller(RecordingProvisioning { seen: seen.clone() })
-        .provision(None, &serial, None, &output, &OperationContext::noop())
+        .provision(
+            None,
+            &serial,
+            &DeviceOwner::Manufacturer,
+            None,
+            &output,
+            &OperationContext::noop(),
+        )
         .await
         .expect("provisioning should succeed against the fake adapter");
 
@@ -416,7 +440,12 @@ async fn provision_csr_refuses_a_bad_csr_without_calling_the_platform() {
 
     let seen = Arc::new(Mutex::new(Vec::new()));
     let report = controller(RecordingProvisioning { seen: seen.clone() })
-        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), b"garbage")
+        .provision_csr(
+            None,
+            &DeviceSerial::FromPolicy("hubs".into()),
+            &DeviceOwner::Manufacturer,
+            b"garbage",
+        )
         .await
         .unwrap_err();
     assert!(matches!(report.current_context(), Error::InvalidCsr));
@@ -431,10 +460,16 @@ async fn provision_csr_returns_the_identity_for_a_device_held_key() {
     let key = DeviceKeyAdapterImpl.generate(None).await.unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let identity = controller(RecordingProvisioning { seen: seen.clone() })
-        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .provision_csr(
+            None,
+            &DeviceSerial::FromPolicy("hubs".into()),
+            &DeviceOwner::Account("acme".into()),
+            &key.csr_der,
+        )
         .await
         .unwrap();
     assert_eq!(identity.serial_number, "hubs-1H7Z");
+    assert_eq!(identity.owner_account, "acme");
     assert_eq!(
         identity.access_url,
         "https://remora.access.eu2.sntns.io/access/v1"
@@ -448,7 +483,12 @@ async fn provision_csr_has_no_override_for_an_empty_access_url() {
 
     let key = DeviceKeyAdapterImpl.generate(None).await.unwrap();
     let report = controller(EmptyAccessUrlProvisioning)
-        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .provision_csr(
+            None,
+            &DeviceSerial::FromPolicy("hubs".into()),
+            &DeviceOwner::Manufacturer,
+            &key.csr_der,
+        )
         .await
         .unwrap_err();
     assert!(matches!(report.current_context(), Error::MissingAccessUrl));
@@ -462,7 +502,12 @@ async fn a_device_held_key_and_an_identity_issued_elsewhere_make_its_credential(
     let factory = controller(FakeProvisioning);
     let key = factory.generate_device_key().await.unwrap();
     let identity = factory
-        .provision_csr(None, &DeviceSerial::FromPolicy("hubs".into()), &key.csr_der)
+        .provision_csr(
+            None,
+            &DeviceSerial::FromPolicy("hubs".into()),
+            &DeviceOwner::Manufacturer,
+            &key.csr_der,
+        )
         .await
         .unwrap();
     let output = temp_path("claimed");

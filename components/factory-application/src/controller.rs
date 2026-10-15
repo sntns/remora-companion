@@ -12,7 +12,9 @@ use remora_factory::{
         provisioning::{FactoryProvisioningAdapterService, ProvisionedIdentity},
     },
     application::{Error, FactoryServiceInterface, Result},
-    model::{DeviceSerial, FactoryCredential, PrivateKey, ProvisionedDevice, VerifiedCsr},
+    model::{
+        DeviceOwner, DeviceSerial, FactoryCredential, PrivateKey, ProvisionedDevice, VerifiedCsr,
+    },
 };
 use remora_progress::OperationContext;
 
@@ -63,13 +65,14 @@ impl FactoryControllerImpl {
         &self,
         context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         csr_der: &[u8],
         access_url_override: Option<&str>,
     ) -> Result<ProvisionedIdentity> {
         self.verify_csr(csr_der).await?;
         let mut identity = self
             .provisioning
-            .provision(context, serial, csr_der)
+            .provision(context, serial, owner, csr_der)
             .await
             .change_context(Error::Provision)?;
         if identity.access_url.is_empty() {
@@ -108,6 +111,7 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         access_url_override: Option<&str>,
         output: &Path,
         ctx: &OperationContext,
@@ -137,12 +141,13 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         }
         ctx.sink.phase("requesting factory device credential");
         let identity = self
-            .issue(&context, serial, &key.csr_der, access_url_override)
+            .issue(&context, serial, owner, &key.csr_der, access_url_override)
             .await?;
 
         let device = ProvisionedDevice {
             serial_number: identity.serial_number.clone(),
             factory_device_name: identity.factory_device_name.clone(),
+            owner_account: identity.owner_account.clone(),
         };
         ctx.sink.phase("writing remora-factory.yaml");
         self.write(key.private_key, identity, output).await?;
@@ -155,10 +160,11 @@ impl FactoryServiceInterface for FactoryControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity> {
         let context = self.resolve(over).await?;
-        self.issue(&context, serial, csr_der, None).await
+        self.issue(&context, serial, owner, csr_der, None).await
     }
 
     async fn verify_csr(&self, csr_der: &[u8]) -> Result<VerifiedCsr> {

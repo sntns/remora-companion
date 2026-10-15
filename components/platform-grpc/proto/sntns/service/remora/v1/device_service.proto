@@ -10,6 +10,7 @@ service DeviceService {
     rpc GetDevice(DeviceServiceGetDeviceRequest) returns (DeviceServiceGetDeviceResponse);
     rpc ListDevices(DeviceServiceListDevicesRequest) returns (DeviceServiceListDevicesResponse);
     rpc CreateFactoryDevice(DeviceServiceCreateFactoryDeviceRequest) returns (DeviceServiceCreateFactoryDeviceResponse);
+    rpc AssignFactoryDevice(DeviceServiceAssignFactoryDeviceRequest) returns (DeviceServiceAssignFactoryDeviceResponse);
 }
 
 message DeviceDescriptor {
@@ -67,4 +68,21 @@ message DeviceServiceCreateFactoryDeviceResponse {
     string access_url = 6;
     // The serial the device was created under: what goes on the label.
     string serial_number = 7;
+}
+
+// Transfers a manufactured device to the account that will operate it. The
+// manufacturer is the caller's own account.
+message DeviceServiceAssignFactoryDeviceRequest {
+    // The device's name -- its durable hardware serial.
+    string device_name = 1;
+    // The account that will operate the device: an account id or URN.
+    string owner_account = 2;
+}
+
+message DeviceServiceAssignFactoryDeviceResponse {
+    .sntns.service.v1.ResourceReference factory_device_reference = 1;
+    .sntns.service.v1.ResourceReference owner_reference = 2;
+    // The manufacturer's signed statement of the assignment; the device
+    // verifies it against the factory anchor it was built with.
+    bytes voucher = 3;
 }

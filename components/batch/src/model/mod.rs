@@ -84,6 +84,10 @@ pub enum BatchStep {
         /// See `FactoryServiceInterface::provision`'s `force` doc comment.
         #[serde(default)]
         force: bool,
+        /// The account the device is assigned to, by id or URN; default:
+        /// the manufacturing account (see `remora_factory::model::DeviceOwner`).
+        #[serde(default)]
+        owner_account: Option<String>,
         output: PathBuf,
     },
 }

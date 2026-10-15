@@ -36,11 +36,12 @@ use remora_factory::{
         provisioning::FactoryProvisioningAdapterService,
     },
     application::FactoryService,
+    model::DeviceOwner,
 };
 use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
-use remora_ota_adapter_grpc::test_gateway::TestGateway;
+use remora_ota_adapter_grpc::test_gateway::{TestGateway, TENANT};
 use remora_station::{
     adapter::{
         hooks::HookRunnerAdapterService,
@@ -129,6 +130,7 @@ fn config(root: &Path) -> StationConfig {
             "hub-v2".to_string(),
             BoardPolicy::SerialNumberPolicy("hubs-v2".into()),
         )]),
+        owners: BTreeMap::new(),
     }
 }
 
@@ -424,6 +426,46 @@ async fn the_quota_counts_this_run_only() {
     let report = third.claim(&station).await.unwrap_err();
     assert!(matches!(report.current_context(), Error::QuotaReached(1)));
     assert_eq!(platform_calls(&gateway), 2);
+    station.service.shutdown().await.unwrap();
+}
+
+/// A board's devices go to the manufacturer's own account unless the
+/// station names another for it; one the platform won't assign to waits
+/// for someone, the device made all the same.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_board_assigns_its_devices_to_its_owner() {
+    let (gateway, resolved) = TestGateway::serve().await;
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    for (board, owner) in [("hub-v3", "0b7e"), ("hub-v4", "not an account")] {
+        config.boards.insert(
+            board.into(),
+            BoardPolicy::SerialNumberPolicy(format!("hubs-{board}")),
+        );
+        config
+            .owners
+            .insert(board.into(), DeviceOwner::Account(owner.into()));
+    }
+    let station = Station::start(&contexts(&resolved), config).await;
+
+    let own = Hub::new(1).claim(&station).await.unwrap();
+    let mut sold = Hub::new(2);
+    sold.hardware.board = "hub-v3".into();
+    let sold = sold.claim(&station).await.unwrap();
+    let owners = gateway.0.lock().unwrap().factory_owners.clone();
+    assert_eq!(owners[&own.identity.serial_number], TENANT);
+    assert_eq!(owners[&sold.identity.serial_number], "0b7e");
+    assert_eq!(
+        sold.identity.owner_account,
+        "urn:sntns:iam:test:0b7e:account"
+    );
+
+    let mut stray = Hub::new(3);
+    stray.hardware.board = "hub-v4".into();
+    let report = stray.claim(&station).await.unwrap_err();
+    assert!(matches!(report.current_context(), Error::Refused));
+    assert_eq!(platform_calls(&gateway), 3);
+    assert_eq!(gateway.0.lock().unwrap().factory_owners.len(), 2);
     station.service.shutdown().await.unwrap();
 }
 

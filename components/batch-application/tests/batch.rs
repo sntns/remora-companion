@@ -42,7 +42,7 @@ use remora_factory::{
         },
     },
     application::FactoryService,
-    model::DeviceSerial,
+    model::{DeviceOwner, DeviceSerial},
 };
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
@@ -143,6 +143,7 @@ impl FactoryProvisioningAdapter for UnusedProvisioning {
         &self,
         _context: &remora_context::model::ResolvedContext,
         _serial: &DeviceSerial,
+        _owner: &DeviceOwner,
         _csr_der: &[u8],
     ) -> provisioning::Result<ProvisionedIdentity> {
         unreachable!("no test in this file exercises a FactoryProvision step")
@@ -452,6 +453,14 @@ async fn stops_at_the_first_failing_step_without_running_the_rest() {
     }
 }
 
+/// The account a fake adapter "assigns" to.
+fn owner_of(owner: &DeviceOwner) -> String {
+    match owner {
+        DeviceOwner::Manufacturer => "test:iam:account:manufacturer".into(),
+        DeviceOwner::Account(account) => account.clone(),
+    }
+}
+
 /// The serial a fake adapter "issues": the explicit name as-is, or a
 /// made-up allocation standing in for the platform's policy.
 fn serial_of(serial: &DeviceSerial) -> String {
@@ -469,6 +478,7 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
         &self,
         _context: &remora_context::model::ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         _csr_der: &[u8],
     ) -> provisioning::Result<ProvisionedIdentity> {
         let device_name = serial_of(serial);
@@ -480,6 +490,7 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
             server_certificate_authority_der: b"fake-server-ca-der".to_vec(),
             key_id: format!("test:kms:certificate:{device_name}"),
             access_url: "https://remora.access.eu2.sntns.io/access/v1".to_string(),
+            owner_account: owner_of(owner),
         })
     }
 }
@@ -541,6 +552,7 @@ async fn runs_a_factory_provision_step() {
                 context: None,
                 access_url: None,
                 force: false,
+                owner_account: None,
                 output: output.clone(),
             }],
             None,

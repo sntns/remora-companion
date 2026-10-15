@@ -4242,6 +4242,7 @@ dependencies = [
  "humantime",
  "remora-claim",
  "remora-context",
+ "remora-factory",
  "remora-progress",
  "remora-station",
  "remora-station-application-transport-http",

@@ -101,6 +101,7 @@ fn status(claim: &str, state: ClaimState, label: LabelState) -> ClaimStatus {
             server_certificate_authority_der: b"server ca".to_vec(),
             key_id: "urn:test:certificate-1H7Z-1".into(),
             access_url: "https://access.test/access/v1".into(),
+            owner_account: "urn:sntns:iam:test:6f1c:account".into(),
         },
     }
 }

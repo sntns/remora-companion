@@ -536,12 +536,16 @@ Remora rootfs (gzip, 128 KiB blocks, real uid/gid/mode preserved).
 ```
 remora-etcher -c factory factory provision --serial-policy hubs --output remora-factory.yaml
 remora-etcher -c factory factory provision --device-name 1H7Z --force --output remora-factory.yaml
+remora-etcher -c factory factory provision --serial-policy hubs --owner-account <account id or URN> --output remora-factory.yaml
 ```
 
 Generates the device's key locally and has the platform issue its IDevID,
 as the selected context: its login (or the role it acts as) needs
-`remora::create-factory-device`, and `remora::use-serial-number-policy` on
-the policy. `--serial-policy` allocates a fresh serial, printed alone on
+`remora::create-factory-device`, `remora::assign-factory-device`, and
+`remora::use-serial-number-policy` on the policy. The device is then
+assigned to the account it enrolls into at first boot: the manufacturing
+account itself (the context's tenant) unless `--owner-account` names
+another (`"owner_account"` in a batch step). `--serial-policy` allocates a fresh serial, printed alone on
 stdout for the label; `--device-name` uses one chosen elsewhere, refused if
 already manufactured unless `--force` (re-signed, the old IDevID revoked).
 The resulting `remora-factory.yaml` is bundled into an image with
@@ -586,11 +590,13 @@ boards:                           # any other board is refused
   hub-v1:
     create-factory-device:
       device-name: "{bsp_serial}"  # or {eth_mac}, {temp_hostname}, {board}
+      owner-account: <account id or URN>  # default: the manufacturing account
 ```
 
 Every key has its option (`--listen`, `--journal`, `--hooks`,
 `--max-claims`, `--confirm`, `--presence-timeout`, `--hook-timeout`,
-`--serial-policy BOARD=POLICY`, `--device-name BOARD=TEMPLATE`), which wins
+`--serial-policy BOARD=POLICY`, `--device-name BOARD=TEMPLATE`,
+`--owner-account BOARD=ACCOUNT`), which wins
 over the file. Each issued serial is printed on stdout; the dashboard is on
 stderr. The journal (one JSON object per transition) is the production
 register -- serial, MACs, BSP serial, machine-id, date, context -- and the

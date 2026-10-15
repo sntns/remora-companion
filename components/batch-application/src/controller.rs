@@ -6,7 +6,10 @@ use remora_batch::{
 use remora_config::application::ConfigService;
 use remora_context::model::{ContextOverride, Selection};
 use remora_convert::application::ConvertService;
-use remora_factory::{application::FactoryService, model::DeviceSerial};
+use remora_factory::{
+    application::FactoryService,
+    model::{DeviceOwner, DeviceSerial},
+};
 use remora_identity::application::IdentityService;
 use remora_image::application::ImageService;
 use remora_installer::application::InstallerService;
@@ -144,16 +147,19 @@ impl BatchServiceInterface for BatchControllerImpl {
                     context,
                     access_url,
                     force,
+                    owner_account,
                     output,
                 } => {
                     let serial = DeviceSerial::from_parts(device_name, serial_number_policy, force)
                         .change_context(Error::InvalidStep { index, kind })?;
+                    let owner = DeviceOwner::from_account(owner_account);
                     let step_over =
                         context.map(|name| ContextOverride::named(name, Selection::Flag));
                     self.factory
                         .provision(
                             step_over.as_ref().or(over),
                             &serial,
+                            &owner,
                             access_url.as_deref(),
                             &output,
                             ctx,

@@ -8,6 +8,7 @@ use std::{
 };
 
 use error_stack::{Report, ResultExt};
+use remora_factory::model::DeviceOwner;
 use remora_station::model::{BoardPolicy, ConfirmMode, StationConfig};
 use serde::Deserialize;
 
@@ -45,6 +46,9 @@ struct BoardFile {
 struct CreateFactoryDevice {
     serial_number_policy: Option<String>,
     device_name: Option<String>,
+    /// The account the board's devices are assigned to, by id or URN;
+    /// default: the manufacturing account.
+    owner_account: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, clap::ValueEnum)]
@@ -70,6 +74,8 @@ pub(crate) struct Overrides {
     pub serial_policies: Vec<String>,
     /// `BOARD=TEMPLATE`, likewise.
     pub device_names: Vec<String>,
+    /// `BOARD=ACCOUNT`, the board's owner only.
+    pub owner_accounts: Vec<String>,
 }
 
 pub(crate) fn read(path: &Path) -> Result<StationFile> {
@@ -121,13 +127,18 @@ pub(crate) fn resolve(
         .unwrap_or_else(|| DEFAULT_LISTEN.parse().expect("the default address parses"));
 
     let mut boards = BTreeMap::new();
+    let mut owners = BTreeMap::new();
     for (board, settings) in file.boards {
         let CreateFactoryDevice {
             serial_number_policy,
             device_name,
+            owner_account,
         } = settings.create_factory_device;
         let policy = BoardPolicy::from_parts(serial_number_policy, device_name)
             .change_context_lazy(|| invalid(format!("boards.{board}.create-factory-device")))?;
+        if let DeviceOwner::Account(account) = DeviceOwner::from_account(owner_account) {
+            owners.insert(board.clone(), DeviceOwner::Account(account));
+        }
         boards.insert(board, policy);
     }
     for value in &overrides.serial_policies {
@@ -142,6 +153,14 @@ pub(crate) fn resolve(
         let policy = BoardPolicy::from_parts(None, Some(template.to_string()))
             .change_context_lazy(|| invalid(format!("--device-name {value:?}")))?;
         boards.insert(board.to_string(), policy);
+    }
+    for value in &overrides.owner_accounts {
+        let (board, account) = board_value("owner-account", value)?;
+        if !boards.contains_key(board) {
+            return Err(Report::new(invalid(format!("--owner-account {value:?}")))
+                .attach(format!("board {board} has no serial-policy or device-name")));
+        }
+        owners.insert(board.to_string(), DeviceOwner::Account(account.to_string()));
     }
 
     let config = StationConfig {
@@ -175,6 +194,7 @@ pub(crate) fn resolve(
             )?,
         },
         boards,
+        owners,
     };
     if config.presence_timeout.is_zero() || config.hook_timeout.is_zero() {
         return Err(Report::new(invalid("presence-timeout, hook-timeout"))
@@ -204,6 +224,7 @@ boards:
   hub-v1:
     create-factory-device:
       device-name: "{bsp_serial}"
+      owner-account: urn:sntns:iam:eu2:0b7e:account
 "#;
 
     #[test]
@@ -226,6 +247,11 @@ boards:
             config.boards["hub-v1"],
             BoardPolicy::DeviceName(DeviceNameTemplate::parse("{bsp_serial}").unwrap())
         );
+        assert_eq!(config.owner_for("hub-v2"), DeviceOwner::Manufacturer);
+        assert_eq!(
+            config.owner_for("hub-v1"),
+            DeviceOwner::Account("urn:sntns:iam:eu2:0b7e:account".into())
+        );
     }
 
     #[test]
@@ -239,6 +265,7 @@ boards:
             presence_timeout: Some(Duration::from_secs(2)),
             serial_policies: vec!["hub-v1=hubs-v1".into()],
             device_names: vec!["hub-virtual={temp_hostname}".into()],
+            owner_accounts: vec!["hub-v2=6f1c".into()],
             ..Overrides::default()
         };
         let (listen, config) = resolve(file, Path::new("/srv"), overrides).unwrap();
@@ -252,6 +279,23 @@ boards:
             BoardPolicy::SerialNumberPolicy("hubs-v1".into())
         );
         assert_eq!(config.boards.len(), 3);
+        assert_eq!(
+            config.owner_for("hub-v2"),
+            DeviceOwner::Account("6f1c".into())
+        );
+        // A board's serial overridden keeps its owner.
+        assert_eq!(
+            config.owner_for("hub-v1"),
+            DeviceOwner::Account("urn:sntns:iam:eu2:0b7e:account".into())
+        );
+        assert_eq!(config.owner_for("hub-virtual"), DeviceOwner::Manufacturer);
+
+        let file: StationFile = yaml_serde::from_str(SPEC_EXAMPLE).unwrap();
+        let unknown = Overrides {
+            owner_accounts: vec!["hub-v3=6f1c".into()],
+            ..Overrides::default()
+        };
+        assert!(resolve(file, Path::new("/srv"), unknown).is_err());
     }
 
     #[test]

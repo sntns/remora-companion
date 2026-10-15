@@ -43,6 +43,7 @@ pub(crate) async fn run(
             hook_timeout: args.hook_timeout,
             serial_policies: args.serial_policies,
             device_names: args.device_names,
+            owner_accounts: args.owner_accounts,
         },
     )?;
 
@@ -59,9 +60,15 @@ pub(crate) async fn run(
     let boards: Vec<String> = config
         .boards
         .iter()
-        .map(|(board, policy)| match policy {
-            BoardPolicy::SerialNumberPolicy(policy) => format!("{board} (policy {policy})"),
-            BoardPolicy::DeviceName(template) => format!("{board} (device-name {template})"),
+        .map(|(board, policy)| {
+            let serial = match policy {
+                BoardPolicy::SerialNumberPolicy(policy) => format!("policy {policy}"),
+                BoardPolicy::DeviceName(template) => format!("device-name {template}"),
+            };
+            match config.owners.get(board) {
+                Some(owner) => format!("{board} ({serial}, owner {owner})"),
+                None => format!("{board} ({serial})"),
+            }
         })
         .collect();
     let (journal, hooks) = (config.journal.clone(), config.hooks.clone());

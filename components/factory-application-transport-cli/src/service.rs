@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use error_stack::ResultExt;
 use remora_context::model::ContextOverride;
-use remora_factory::{application::FactoryService, model::DeviceSerial};
+use remora_factory::{
+    application::FactoryService,
+    model::{DeviceOwner, DeviceSerial},
+};
 use remora_progress::OperationContext;
 
 use crate::error::{provision_error, Error, Result};
@@ -44,6 +47,12 @@ pub enum Command {
         #[arg(long, requires = "device_name", conflicts_with = "serial_policy")]
         force: bool,
 
+        /// The account the device is assigned to once made -- the one it
+        /// enrolls into at first boot: an account id or URN. Default: the
+        /// manufacturing account itself (the context's).
+        #[arg(long, value_name = "ACCOUNT")]
+        owner_account: Option<String>,
+
         /// Escape hatch, not the normal path: the platform's response
         /// always carries the access-tier URL a device should use. Only
         /// consulted when that response comes back empty, which means a
@@ -55,8 +64,9 @@ pub enum Command {
 }
 
 /// The context's login (or the role it acts as) needs the
-/// `remora::create-factory-device` action, and `remora::use-serial-number-
-/// policy` on the policy it allocates from.
+/// `remora::create-factory-device` and `remora::assign-factory-device`
+/// actions, and `remora::use-serial-number-policy` on the policy it
+/// allocates from.
 pub async fn run(
     command: Command,
     service: &FactoryService,
@@ -68,15 +78,17 @@ pub async fn run(
             device_name,
             output,
             force,
+            owner_account,
             access_url,
         } => {
             let serial = DeviceSerial::from_parts(device_name, serial_policy, force)
                 .change_context(Error::InvalidSerial)?;
+            let owner = DeviceOwner::from_account(owner_account);
             let (sink, stream) = remora_progress::channel();
             let follow = remora_tui::follow(stream);
             let ctx = OperationContext::new(sink, remora_progress::cancelled_by_ctrl_c());
             let result = service
-                .provision(over, &serial, access_url.as_deref(), &output, &ctx)
+                .provision(over, &serial, &owner, access_url.as_deref(), &output, &ctx)
                 .await;
             drop(ctx);
             follow.finish(&result).await;
@@ -85,9 +97,10 @@ pub async fn run(
             // The serial alone on stdout, so a label printer (or a script)
             // can consume it; the human-readable summary goes to stderr.
             remora_tui::success(format!(
-                "Provisioned {} {}, credential in {}",
+                "Provisioned {} {}, assigned to {}, credential in {}",
                 remora_tui::accent(&device.serial_number),
                 remora_tui::dim(format!("({})", device.factory_device_name)),
+                remora_tui::accent(&device.owner_account),
                 remora_tui::accent(output.display())
             ));
             println!("{}", device.serial_number);

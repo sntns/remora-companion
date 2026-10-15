@@ -10,6 +10,7 @@ publish.workspace = true
 remora-station = { path = "../station" }
 remora-station-application-transport-http = { path = "../station-application-transport-http" }
 remora-claim = { path = "../claim" }
+remora-factory = { path = "../factory" }
 remora-context = { path = "../context" }
 remora-progress = { path = "../progress" }
 remora-tui = { path = "../tui" }

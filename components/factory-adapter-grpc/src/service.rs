@@ -2,7 +2,7 @@ use error_stack::Report;
 use remora_context::model::ResolvedContext;
 use remora_factory::{
     adapter::provisioning::{Error, FactoryProvisioningAdapter, ProvisionedIdentity, Result},
-    model::DeviceSerial,
+    model::{DeviceOwner, DeviceSerial},
 };
 use remora_platform_grpc::{
     connect, sntns::service::remora::v1 as pb, status_summary, Connection, GatewayChannel,
@@ -30,18 +30,28 @@ fn request(serial: &DeviceSerial, csr_der: &[u8]) -> pb::DeviceServiceCreateFact
     request
 }
 
+/// The tenant of a URN (`urn:<partition>:<service>:<region>:<tenant>:...`):
+/// the account id a factory device's name carries for its manufacturer.
+fn tenant(urn: &str) -> Option<&str> {
+    let mut parts = urn.strip_prefix("urn:")?.split(':');
+    let tenant = parts.nth(3)?;
+    (!tenant.is_empty() && parts.next().is_some()).then_some(tenant)
+}
+
 #[async_trait::async_trait]
 impl FactoryProvisioningAdapter for FactoryGatewayAdapterImpl {
     async fn provision(
         &self,
         context: &ResolvedContext,
         serial: &DeviceSerial,
+        owner: &DeviceOwner,
         csr_der: &[u8],
     ) -> Result<ProvisionedIdentity> {
         let channel = connect(&Connection::for_resolved(context))
             .await
             .map_err(|report| report.change_context(Error::Request))?;
-        let response = Devices::new(channel)
+        let mut devices = Devices::new(channel);
+        let response = devices
             .create_factory_device(request(serial, csr_der))
             .await
             .map_err(|status| {
@@ -65,6 +75,37 @@ impl FactoryProvisioningAdapter for FactoryGatewayAdapterImpl {
             .ok_or_else(|| {
                 Report::new(Error::ParseResponse).attach("no certificate reference URN")
             })?;
+        // The manufacturer is the caller, whose tenant names the device.
+        let owner_account = match owner {
+            DeviceOwner::Account(account) => account.clone(),
+            DeviceOwner::Manufacturer => tenant(&response.factory_device_name)
+                .ok_or_else(|| {
+                    Report::new(Error::ParseResponse).attach(format!(
+                        "no tenant in factory device name {:?}",
+                        response.factory_device_name
+                    ))
+                })?
+                .to_string(),
+        };
+        let assigned = devices
+            .assign_factory_device(pb::DeviceServiceAssignFactoryDeviceRequest {
+                device_name: response.serial_number.clone(),
+                owner_account: owner_account.clone(),
+            })
+            .await
+            .map_err(|status| {
+                let error = Error::Assign {
+                    serial: response.serial_number.clone(),
+                    owner: owner_account.clone(),
+                };
+                Report::new(error).attach(status_summary(&status))
+            })?
+            .into_inner();
+        let owner_account = assigned
+            .owner_reference
+            .map(|reference| reference.urn)
+            .filter(|urn| !urn.is_empty())
+            .unwrap_or(owner_account);
         Ok(ProvisionedIdentity {
             serial_number: response.serial_number,
             factory_device_name: response.factory_device_name,
@@ -73,13 +114,14 @@ impl FactoryProvisioningAdapter for FactoryGatewayAdapterImpl {
             server_certificate_authority_der: response.server_certificate_authority_certificate,
             key_id,
             access_url: response.access_url,
+            owner_account,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use remora_ota_adapter_grpc::test_gateway::TestGateway;
+    use remora_ota_adapter_grpc::test_gateway::{TestGateway, TENANT};
 
     use super::*;
 
@@ -121,7 +163,12 @@ mod tests {
         let adapter = FactoryGatewayAdapterImpl;
 
         let issued = adapter
-            .provision(&context, &DeviceSerial::FromPolicy("hubs".into()), b"csr")
+            .provision(
+                &context,
+                &DeviceSerial::FromPolicy("hubs".into()),
+                &DeviceOwner::Manufacturer,
+                b"csr",
+            )
             .await
             .unwrap();
         assert_eq!(issued.serial_number, "hubs-1");
@@ -129,18 +176,94 @@ mod tests {
         assert_eq!(issued.access_url, "https://access.test/access/v1");
 
         adapter
-            .provision(&context, &explicit("1H7Z", false), b"csr")
+            .provision(
+                &context,
+                &explicit("1H7Z", false),
+                &DeviceOwner::Manufacturer,
+                b"csr",
+            )
             .await
             .unwrap();
         let report = adapter
-            .provision(&context, &explicit("1H7Z", false), b"csr")
+            .provision(
+                &context,
+                &explicit("1H7Z", false),
+                &DeviceOwner::Manufacturer,
+                b"csr",
+            )
             .await
             .unwrap_err();
         assert!(matches!(report.current_context(), Error::AlreadyExists(name) if name == "1H7Z"));
         let resigned = adapter
-            .provision(&context, &explicit("1H7Z", true), b"csr")
+            .provision(
+                &context,
+                &explicit("1H7Z", true),
+                &DeviceOwner::Manufacturer,
+                b"csr",
+            )
             .await
             .unwrap();
         assert_eq!(resigned.key_id, "urn:test:certificate-1H7Z-2");
+    }
+
+    #[test]
+    fn a_urn_names_its_tenant() {
+        assert_eq!(
+            tenant("urn:sntns:remora:eu2:6f1c:factory-device:1H7Z"),
+            Some("6f1c")
+        );
+        assert_eq!(tenant("urn:test:factory-device:1H7Z"), None);
+        assert_eq!(tenant("urn:sntns:remora:eu2::factory-device:1H7Z"), None);
+        assert_eq!(tenant("1H7Z"), None);
+    }
+
+    /// By default the device goes to the manufacturer's own account, the
+    /// tenant its factory device name carries; else to the account asked.
+    #[tokio::test]
+    async fn assigns_what_it_manufactures() {
+        let (gateway, context) = TestGateway::serve().await;
+        let adapter = FactoryGatewayAdapterImpl;
+
+        let own = adapter
+            .provision(
+                &context,
+                &explicit("1H7Z", false),
+                &DeviceOwner::Manufacturer,
+                b"csr",
+            )
+            .await
+            .unwrap();
+        assert_eq!(gateway.0.lock().unwrap().factory_owners["1H7Z"], TENANT);
+        assert_eq!(
+            own.owner_account,
+            format!("urn:sntns:iam:test:{TENANT}:account")
+        );
+
+        let customer = "urn:sntns:iam:test:0b7e:account";
+        let sold = adapter
+            .provision(
+                &context,
+                &explicit("2K4P", false),
+                &DeviceOwner::Account(customer.into()),
+                b"csr",
+            )
+            .await
+            .unwrap();
+        assert_eq!(gateway.0.lock().unwrap().factory_owners["2K4P"], customer);
+        assert_eq!(sold.owner_account, customer);
+
+        let report = adapter
+            .provision(
+                &context,
+                &explicit("3M9Q", false),
+                &DeviceOwner::Account("not an account".into()),
+                b"csr",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            report.current_context(),
+            Error::Assign { serial, .. } if serial == "3M9Q"
+        ));
     }
 }
