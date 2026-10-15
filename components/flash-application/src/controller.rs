@@ -227,6 +227,9 @@ impl Progress {
         }
         let done = self.copied.load(Ordering::Relaxed);
         match self.total.load(Ordering::Relaxed) {
+            // Still opening the image (a release's waits on its download
+            // for the bmap): nothing to say yet.
+            0 if done == 0 => {}
             // A compressed image without a bmap: no size to go by but the
             // decompressed bytes themselves.
             0 => sink.log(format!("{} written", human_size(done))),
