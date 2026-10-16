@@ -3729,7 +3729,6 @@ dependencies = [
  "remora-flash",
  "remora-flash-adapter-bmap",
  "remora-flash-adapter-file",
- "remora-format",
  "remora-progress",
  "tar",
  "tokio",

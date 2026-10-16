@@ -23,7 +23,6 @@ use remora_flash::{
         ImageSummary,
     },
 };
-use remora_format::human_size;
 use remora_progress::{OperationContext, ProgressSink};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
@@ -231,8 +230,7 @@ impl Progress {
             // for the bmap): nothing to say yet.
             0 if done == 0 => {}
             // A compressed image without a bmap: no size to go by but the
-            // decompressed bytes themselves.
-            0 => sink.log(format!("{} written", human_size(done))),
+            // decompressed bytes themselves (total 0: unknown).
             total => sink.progress_bytes(done, total),
         }
     }

@@ -13,7 +13,6 @@ tokio.workspace = true
 remora-disk = { path = "../disk" }
 remora-flash = { path = "../flash" }
 error-stack.workspace = true
-remora-format = { path = "../format" }
 tokio-util.workspace = true
 remora-context = { path = "../context" }
 tracing = "0.1"

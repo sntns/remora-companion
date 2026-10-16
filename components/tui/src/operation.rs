@@ -116,11 +116,24 @@ impl Phase {
     }
 
     fn progress(&mut self, done: u64, total: u64, unit: Unit) {
-        if total == 0 {
-            return;
-        }
         if unit == Unit::Bytes {
             self.rate.get_or_insert_with(Rate::new).sample(done);
+        }
+        if total == 0 {
+            // No size to make a bar of (a compressed image without a bmap):
+            // bytes are still worth a count and a throughput, in place under
+            // the spinner -- or off a terminal, as a log line would be.
+            if let Some(rate) = &self.rate {
+                let detail = rate.detail(done, 0);
+                match self.line {
+                    Some(_) => {
+                        self.detail = detail;
+                        self.redraw();
+                    }
+                    None => self.log(&detail),
+                }
+            }
+            return;
         }
         let Some(line) = &self.line else {
             let tenth = done.min(total) * 10 / total;
@@ -316,9 +329,13 @@ impl Rate {
         (elapsed >= 0.5).then(|| last.1.saturating_sub(first.1) as f64 / elapsed)
     }
 
-    /// `120.3 MiB of 634.1 MiB · 31.2 MiB/s · 17s left`
+    /// `120.3 MiB of 634.1 MiB · 31.2 MiB/s · 17s left`, or with no
+    /// `total` (0: unknown) `120.3 MiB · 31.2 MiB/s`.
     fn detail(&self, done: u64, total: u64) -> String {
-        let sizes = format!("{} of {}", crate::bytes(done), crate::bytes(total));
+        let sizes = match total {
+            0 => crate::bytes(done),
+            total => format!("{} of {}", crate::bytes(done), crate::bytes(total)),
+        };
         match self.per_second() {
             Some(speed) if done >= total => format!("{sizes} · {}/s", crate::bytes(speed as u64)),
             Some(speed) if speed >= 1.0 => format!(
@@ -382,6 +399,18 @@ mod tests {
             rate.detail(2 << 20, 6 << 20),
             "2.0 MiB of 6.0 MiB · 1.0 MiB/s · 4s left"
         );
+    }
+
+    #[test]
+    fn a_rate_with_no_total_shows_the_count_and_its_speed() {
+        let mut rate = Rate::new();
+        rate.sample(0);
+        assert_eq!(rate.detail(0, 0), "0 B");
+
+        rate.started = Instant::now() - Duration::from_secs(5);
+        let start = Instant::now() - Duration::from_secs(2);
+        rate.samples = VecDeque::from([(start, 0), (start + Duration::from_secs(2), 2 << 20)]);
+        assert_eq!(rate.detail(2 << 20, 0), "2.0 MiB · 1.0 MiB/s");
     }
 
     #[test]
