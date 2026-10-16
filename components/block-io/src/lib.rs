@@ -9,9 +9,11 @@ mod len;
 #[cfg(target_os = "macos")]
 mod macos;
 mod sector;
+mod sync;
 #[cfg(windows)]
 mod windows;
 
 pub use block_file::BlockFile;
 pub use len::{len, len_of};
 pub use sector::SectorIo;
+pub use sync::sync;

@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{len, SectorIo};
+use crate::{len, sync, SectorIo};
 
 /// A file, or a disk device given in its place, read and written like a
 /// file: a device's end is its capacity (where Linux's seek would land,
@@ -66,13 +66,17 @@ impl BlockFile {
     /// What was written, on the disk.
     pub fn sync_all(&mut self) -> io::Result<()> {
         self.flush()?;
-        self.get_ref().sync_all()
+        sync(self.get_ref())
     }
 
-    /// What was written, on the disk (its data, if not its metadata).
+    /// What was written, on the disk (its data, if not its metadata). A
+    /// device has no metadata of its own: synced whole.
     pub fn sync_data(&mut self) -> io::Result<()> {
         self.flush()?;
-        self.get_ref().sync_data()
+        match self.end {
+            Some(_) => sync(self.get_ref()),
+            None => self.get_ref().sync_data(),
+        }
     }
 
     /// The file (or device) underneath, for what only it can be asked (a
@@ -197,5 +201,9 @@ mod tests {
         disk.seek(SeekFrom::Start(3)).unwrap();
         let mut buf = [0; 7];
         disk.read_exact(&mut buf).unwrap();
+        // A device node refuses the filesystem's sync (macOS: `F_FULLFSYNC`,
+        // `ENOTTY`); a device's own one goes through.
+        disk.sync_all().unwrap();
+        disk.sync_data().unwrap();
     }
 }

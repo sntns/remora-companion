@@ -29,3 +29,35 @@ pub fn device_len(file: &File) -> io::Result<Option<u64>> {
     }
     Ok(Some(count * u64::from(size)))
 }
+
+/// `DKIOCSYNCHRONIZECACHE`: `_IO('d', 22)`.
+const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
+
+/// Flushes what was written to a disk device, `None` for anything else.
+/// `std`'s `sync_all` is `F_FULLFSYNC` here, a filesystem's request a
+/// device node refuses (`ENOTTY`): a plain `fsync` flushes a block
+/// device's buffer cache (a raw node has none), then the disk driver is
+/// asked to empty the drive's own cache -- best effort, as not every
+/// driver implements it.
+pub fn device_sync(file: &File) -> Option<io::Result<()>> {
+    let file_type = match file.metadata() {
+        Ok(meta) => meta.file_type(),
+        Err(e) => return Some(Err(e)),
+    };
+    if !file_type.is_block_device() && !file_type.is_char_device() {
+        return None;
+    }
+    // SAFETY: a live descriptor.
+    if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+        let error = io::Error::last_os_error();
+        if !matches!(
+            error.raw_os_error(),
+            Some(libc::ENOTTY | libc::ENOTSUP | libc::EINVAL)
+        ) {
+            return Some(Err(error));
+        }
+    }
+    // SAFETY: a live descriptor; the ioctl takes no argument.
+    unsafe { libc::ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
+    Some(Ok(()))
+}

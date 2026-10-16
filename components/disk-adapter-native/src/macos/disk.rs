@@ -34,8 +34,6 @@ const CRITICAL_MOUNT_PREFIX: &str = "/System/Volumes/";
 
 /// `DKIOCGETBLOCKSIZE`: `_IOR('d', 24, uint32_t)`.
 const DKIOCGETBLOCKSIZE: libc::c_ulong = 0x4004_6418;
-/// `DKIOCSYNCHRONIZECACHE`: `_IO('d', 22)`.
-const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
 
 pub fn enumerate() -> Result<Vec<DiskInfo>> {
     let session = Session::new().ok_or_else(|| Report::new(Error::Io))?;
@@ -175,15 +173,11 @@ impl Seek for RawDisk {
 
 impl DiskWrite for RawDisk {
     /// A raw node has no buffer cache to flush: what's left is ours, and
-    /// the drive's own cache, which the disk driver is asked to empty
-    /// (best effort: not every driver implements it).
+    /// the drive's own cache (see `remora_block_io::sync`; `sync_all`
+    /// would be refused).
     fn sync(&mut self) -> io::Result<()> {
         self.writer.flush()?;
-        let file = self.writer.get_ref();
-        file.sync_all()?;
-        // SAFETY: a live descriptor; the ioctl takes no argument.
-        unsafe { libc::ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
-        Ok(())
+        remora_block_io::sync(self.writer.get_ref())
     }
 
     /// Closes the node, then ejects the disk while mounts are still
