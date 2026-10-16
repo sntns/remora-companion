@@ -10,7 +10,13 @@ pub enum Error {
     NotBlockDevice(PathBuf),
     #[error("{0} is not a whole disk (a partition?)")]
     NotWholeDisk(PathBuf),
-    #[error("disk enumeration is not yet implemented on this OS")]
+    #[error("refusing to unmount {0}: it is the system disk")]
+    SystemDisk(PathBuf),
+    #[error("failed to unmount the volumes of {0}")]
+    Unmount(PathBuf),
+    #[error("failed to open {0} for writing")]
+    Open(PathBuf),
+    #[error("disk access is not yet implemented on this OS")]
     Unsupported,
 }
 

@@ -241,6 +241,13 @@ fn controller() -> BatchControllerImpl {
     let convert = convert();
 
     let image = ImageService::new(ImageControllerImpl::new(
+        remora_disk::application::DiskService::new(
+            remora_disk_application::DiskControllerImpl::new(
+                remora_disk::adapter::DiskAdapterService::new(
+                    remora_disk_adapter_native::DiskAdapterImpl,
+                ),
+            ),
+        ),
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),
@@ -505,6 +512,13 @@ impl FactoryProvisioningAdapter for FakeProvisioning {
 async fn runs_a_factory_provision_step() {
     let convert = convert();
     let image = ImageService::new(ImageControllerImpl::new(
+        remora_disk::application::DiskService::new(
+            remora_disk_application::DiskControllerImpl::new(
+                remora_disk::adapter::DiskAdapterService::new(
+                    remora_disk_adapter_native::DiskAdapterImpl,
+                ),
+            ),
+        ),
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),

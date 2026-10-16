@@ -444,8 +444,13 @@ or skip it with `--no-bmap`. The device may be given by any path to it
 (`/dev/disk/by-id/…`, a symlink): the checks run on the disk it really
 is. Refuses to overwrite what looks like the system
 disk, a non-removable disk unless you pass `--force`, and a disk smaller
-than the image; it doesn't ask for confirmation otherwise. Ctrl-C stops
-the copy (twice: at once).
+than the image; it doesn't ask for confirmation otherwise. Whatever of
+the disk is mounted is unmounted first (a volume in use refuses, and the
+flash with it). Ctrl-C stops
+the copy (twice: at once). Once written and flushed, the disk is ejected
+where the OS has the notion (macOS; Windows when its media is removable,
+a card in a reader), ready to be unplugged; `--no-eject` leaves it
+attached.
 
 ### List and inspect disks
 
@@ -455,7 +460,27 @@ remora-etcher disk list --all    # every disk
 remora-etcher disk info /dev/sdb
 ```
 
-Linux only for now — Windows/macOS disk enumeration isn't implemented yet.
+Linux, macOS and Windows.
+
+- **macOS:** a disk is `/dev/diskN` (`diskutil list` names them too) or its
+  raw `/dev/rdiskN`, and only whole physical disks are listed: an APFS
+  container's synthesized disk is a view of a partition, not a target. The
+  system disk is the one behind `/` and `/System/Volumes/*`, through its
+  APFS container. Writing a disk keeps macOS from mounting its volumes
+  again while it writes; flashing writes through the raw node. Run it with
+  `sudo`.
+- **Windows:** a disk is `\\.\PhysicalDriveN` (Disk Management's "Disk N");
+  a drive letter (`E:`) is refused as a volume, the error naming its disk.
+  Removable means removable media or a USB/SD bus. The system disk is the
+  one holding the Windows directory's volume. Writing a disk locks and
+  dismounts its volumes for as long as it's written, which keeps Windows
+  from mounting them again. Run it from an Administrator prompt.
+
+Wherever a disk's volumes are unmounted, one in use refuses, and the
+operation with it. `image` commands given a disk read its capacity from
+the disk driver, as neither macOS nor Windows seek to a device's end, and
+on Windows access it in whole sectors, the only access a disk takes
+there.
 
 ### Inspect an image's partitions
 
@@ -464,7 +489,10 @@ remora-etcher image inspect remora.wic
 remora-etcher image partition list remora.wic
 ```
 
-Works on a raw image file or directly on a block device. Each partition is
+Works on a raw image file or directly on a block device. Writing into a
+block device (`image inject`, `identity`, `config`, ...) unmounts its
+disk's volumes first, the system disk refused, so nothing writes a
+filesystem from under the OS's own mount of it. Each partition is
 labeled with its Remora role (shared/efi/slotA/slotB/data), found from the
 image's own layout: on GPT by partition name (`boot`, `slotA`, `slotB`,
 `data`; the EFI partition by its type, an unnamed slotB as the one unnamed
@@ -704,7 +732,7 @@ remora-etcher installer unpack laplaylist-installer-f3apl.wic.bmaptar \
 ---
 
 Not yet implemented: field validation against an actual meta-remora-produced
-wic image, and Windows/macOS disk support.
+wic image.
 
 ## Architecture
 

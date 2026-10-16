@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+remora-block-io = { path = "../block-io" }
 remora-image = { path = "../image" }
 error-stack.workspace = true
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }

@@ -1,6 +1,6 @@
 [package]
 name = "remora-disk-adapter-native"
-description = "Concrete DiskAdapter: enumerates disks via native OS facilities (/sys/block + /proc/self/mountinfo on Linux)"
+description = "Concrete DiskAdapter: enumerates, unmounts and opens disks via native OS facilities (/sys/block + /proc/self/mountinfo on Linux, DiskArbitration + IOKit on macOS, PhysicalDrive and volume ioctls on Windows)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,3 +9,20 @@ publish.workspace = true
 [dependencies]
 remora-disk = { path = "../disk" }
 error-stack.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+thiserror.workspace = true
+remora-block-io = { path = "../block-io" }
+
+[target.'cfg(windows)'.dependencies]
+remora-block-io = { path = "../block-io" }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_SystemInformation",
+] }

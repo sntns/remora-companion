@@ -244,6 +244,13 @@ mod tests {
 
     fn controller() -> ConfigControllerImpl {
         let image = ImageService::new(remora_image_application::ImageControllerImpl::new(
+            remora_disk::application::DiskService::new(
+                remora_disk_application::DiskControllerImpl::new(
+                    remora_disk::adapter::DiskAdapterService::new(
+                        remora_disk_adapter_native::DiskAdapterImpl,
+                    ),
+                ),
+            ),
             remora_image::adapter::partition_table::PartitionTableAdapterService::new(
                 remora_image_adapter_partition_table::PartitionTableAdapterImpl,
             ),

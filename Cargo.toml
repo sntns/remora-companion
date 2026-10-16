@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "components/format",
+    "components/block-io",
     "components/disk",
     "components/disk-application",
     "components/disk-adapter-native",

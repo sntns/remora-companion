@@ -1,4 +1,4 @@
-use std::fs::File;
+use remora_disk::adapter::DiskTarget;
 
 use super::error::Result;
 use crate::adapter::source::ImageStream;
@@ -54,10 +54,10 @@ pub trait BmapAdapter: Send + Sync {
     fn copy_with_bmap(
         &self,
         input: &mut ImageStream,
-        output: &mut File,
+        output: &mut DiskTarget,
         map: &BlockMap,
     ) -> Result<()>;
-    fn copy_without_bmap(&self, input: &mut ImageStream, output: &mut File) -> Result<()>;
+    fn copy_without_bmap(&self, input: &mut ImageStream, output: &mut DiskTarget) -> Result<()>;
 }
 
 /// Injectable handle to whatever `BmapAdapter` was wired at startup.

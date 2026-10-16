@@ -20,6 +20,7 @@ use std::{
 };
 
 use remora_disk::{
+    adapter::{DiskHold, DiskTarget},
     application::{DiskService, DiskServiceInterface, Error as DiskError, Result as DiskResult},
     model::DiskInfo,
 };
@@ -63,9 +64,12 @@ const BMAP_XML: &str = r#"<?xml version="1.0" ?>
 "#;
 
 /// Describes every path as `disk`, the way a disk service would describe
-/// the node it resolved a path to.
+/// the node it resolved a path to -- or, once `retarget` is set, as that
+/// disk from its second lookup on: the path pointed elsewhere meanwhile.
 struct StubDisk {
     disk: Option<DiskInfo>,
+    retarget: Option<DiskInfo>,
+    lookups: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -75,9 +79,26 @@ impl DiskServiceInterface for StubDisk {
     }
 
     async fn info(&self, _path: &Path) -> DiskResult<DiskInfo> {
-        self.disk
-            .clone()
-            .ok_or_else(|| error_stack::Report::new(DiskError::Info))
+        let lookup = self
+            .lookups
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        match &self.retarget {
+            Some(retarget) if lookup > 0 => Some(retarget.clone()),
+            _ => self.disk.clone(),
+        }
+        .ok_or_else(|| error_stack::Report::new(DiskError::Info))
+    }
+
+    async fn open(&self, disk: &DiskInfo) -> DiskResult<DiskTarget> {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&disk.path)
+            .map(DiskTarget::new)
+            .map_err(|e| error_stack::Report::new(e).change_context(DiskError::Open))
+    }
+
+    async fn hold(&self, _path: &Path) -> DiskResult<Option<DiskHold>> {
+        Ok(None)
     }
 }
 
@@ -87,7 +108,11 @@ fn controller(disk: DiskInfo) -> FlashControllerImpl {
 
 fn controller_with(disk: DiskInfo, release: StubRelease) -> FlashControllerImpl {
     FlashControllerImpl::new(
-        DiskService::new(StubDisk { disk: Some(disk) }),
+        DiskService::new(StubDisk {
+            disk: Some(disk),
+            retarget: None,
+            lookups: Default::default(),
+        }),
         ImageSourceAdapterService::new(ImageSourceAdapterImpl),
         BmapAdapterService::new(BmapAdapterImpl),
         ReleaseArtifactAdapterService::new(release),
@@ -255,6 +280,7 @@ async fn a_bmaptar_flashes_its_image_with_its_own_bmap() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let outcome = controller(removable_non_system_disk(&device_path))
         .flash(&request, &OperationContext::noop())
@@ -264,6 +290,8 @@ async fn a_bmaptar_flashes_its_image_with_its_own_bmap() {
     assert!(outcome.used_bmap);
     assert_eq!(outcome.bytes_written, (RANGE_A_LEN + RANGE_B_LEN) as u64);
     assert!(only_mapped_ranges_written(&device_path));
+    // A plain file target closes, nothing to eject.
+    assert!(!outcome.ejected);
 }
 
 /// What a factory job hands the flasher: the shipped `.bmaptar` converted
@@ -291,6 +319,7 @@ async fn a_bmaptar_made_by_convert_flashes_like_meta_remoras() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let controller = controller(removable_non_system_disk(&device_path));
     let summary = controller.inspect(&request).await.unwrap();
@@ -325,6 +354,7 @@ async fn a_bmaptar_with_a_corrupted_image_is_refused() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let result = controller(removable_non_system_disk(&device_path))
         .flash(&request, &OperationContext::noop())
@@ -347,6 +377,7 @@ async fn a_compressed_image_falls_back_to_its_sibling_bmap() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let outcome = controller(removable_non_system_disk(&device_path))
         .flash(&request, &OperationContext::noop())
@@ -370,6 +401,7 @@ async fn a_compressed_image_without_a_bmap_is_copied_whole() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let outcome = controller(removable_non_system_disk(&device_path))
         .flash(&request, &OperationContext::noop())
@@ -391,6 +423,7 @@ async fn bmap_copy_only_touches_mapped_ranges() {
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
 
     let outcome = controller(removable_non_system_disk(&device_path))
@@ -444,6 +477,7 @@ async fn bmap_copy_rejects_a_corrupted_image() {
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
 
     let result = controller(removable_non_system_disk(&device_path))
@@ -468,6 +502,7 @@ async fn flash_through_a_symlink_writes_the_disk_it_resolves_to() {
         bmap: BmapSource::File(bmap_path),
         device: link,
         force: false,
+        eject: true,
     };
     controller(removable_non_system_disk(&device_path))
         .flash(&request, &OperationContext::noop())
@@ -481,17 +516,29 @@ async fn flash_through_a_symlink_writes_the_disk_it_resolves_to() {
 async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
     let dir = tempdir("mismatch");
     let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
-    // The disk service vouches for another node than the one `device` opens.
-    let checked = dir.join("other.img");
-    fs::write(&checked, b"").unwrap();
+    // Checked as the disk it opens, then -- by the time it's opened -- as
+    // another one: the path was pointed elsewhere meanwhile.
+    let elsewhere = dir.join("other.img");
+    fs::write(&elsewhere, b"").unwrap();
 
     let request = FlashRequest {
         image: image_path.into(),
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
-    let err = controller(removable_non_system_disk(&checked))
+    let controller = FlashControllerImpl::new(
+        DiskService::new(StubDisk {
+            disk: Some(removable_non_system_disk(&device_path)),
+            retarget: Some(removable_non_system_disk(&elsewhere)),
+            lookups: Default::default(),
+        }),
+        ImageSourceAdapterService::new(ImageSourceAdapterImpl),
+        BmapAdapterService::new(BmapAdapterImpl),
+        ReleaseArtifactAdapterService::new(StubRelease::default()),
+    );
+    let err = controller
         .flash(&request, &OperationContext::noop())
         .await
         .unwrap_err();
@@ -501,6 +548,7 @@ async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
         Error::TargetMismatch { .. }
     ));
     assert!(untouched(&device_path));
+    assert!(fs::read(&elsewhere).unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -513,6 +561,7 @@ async fn flash_refuses_the_system_disk_without_a_separate_preflight() {
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: true,
+        eject: true,
     };
     let disk = DiskInfo {
         is_system_disk: true,
@@ -542,6 +591,7 @@ async fn preflight_refuses_a_disk_that_looks_like_the_system_disk() {
         bmap: BmapSource::File(bmap_path),
         device: device_path,
         force: true,
+        eject: true,
     };
     assert!(controller(disk).preflight(&request).await.is_err());
 }
@@ -561,6 +611,7 @@ async fn preflight_refuses_a_non_removable_disk_without_force() {
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     assert!(controller(disk.clone()).preflight(&request).await.is_err());
     request.force = true;
@@ -569,7 +620,7 @@ async fn preflight_refuses_a_non_removable_disk_without_force() {
 }
 
 #[tokio::test]
-async fn flash_reports_the_bytes_copied_then_syncs() {
+async fn flash_reports_the_bytes_copied_then_syncs_then_ejects() {
     use remora_progress::OperationEvent;
     use tokio_stream::StreamExt;
 
@@ -584,6 +635,7 @@ async fn flash_reports_the_bytes_copied_then_syncs() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let (sink, stream) = remora_progress::channel();
     let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
@@ -605,6 +657,30 @@ async fn flash_reports_the_bytes_copied_then_syncs() {
     // the copy reports.
     let mapped = (RANGE_A_LEN + RANGE_B_LEN) as u64;
     assert_eq!(progress.last(), Some(&(mapped, mapped)));
+    let phases: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            OperationEvent::Phase(phase) => Some(phase.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(phases.last_chunk(), Some(&["syncing", "ejecting"]));
+
+    // Without eject, the flush is the last thing it does.
+    let (sink, stream) = remora_progress::channel();
+    let ctx = OperationContext::new(sink, tokio_util::sync::CancellationToken::new());
+    controller(removable_non_system_disk(&device_path))
+        .flash(
+            &FlashRequest {
+                eject: false,
+                ..request
+            },
+            &ctx,
+        )
+        .await
+        .expect("flash should succeed");
+    drop(ctx);
+    let events: Vec<OperationEvent> = stream.collect().await;
     assert_eq!(
         events.last(),
         Some(&OperationEvent::Phase("syncing".into()))
@@ -624,6 +700,7 @@ async fn inspect_describes_a_bmaptar_without_writing() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let summary = controller(removable_non_system_disk(&device_path))
         .inspect(&request)
@@ -662,6 +739,7 @@ async fn an_image_larger_than_the_disk_is_refused_before_writing() {
         bmap: BmapSource::File(bmap_path),
         device: device_path.clone(),
         force: true,
+        eject: true,
     };
     let controller = controller(small);
     let err = controller.preflight(&request).await.unwrap_err();
@@ -709,6 +787,7 @@ async fn a_release_artifact_is_flashed_as_it_downloads() {
         bmap: BmapSource::Auto,
         device: device_path.clone(),
         force: false,
+        eject: true,
     };
     let summary = controller.inspect(&request).await.unwrap();
     assert_eq!(summary.bmap.unwrap().origin, BmapOrigin::Bundled);

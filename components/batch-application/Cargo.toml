@@ -21,6 +21,9 @@ error-stack.workspace = true
 async-trait.workspace = true
 
 [dev-dependencies]
+remora-disk = { path = "../disk" }
+remora-disk-application = { path = "../disk-application" }
+remora-disk-adapter-native = { path = "../disk-adapter-native" }
 remora-installer-application = { path = "../installer-application" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }

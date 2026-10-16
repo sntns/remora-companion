@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -10,7 +10,7 @@ use std::{
 
 use error_stack::{Report, ResultExt};
 use remora_context::model::ContextOverride;
-use remora_disk::{application::DiskService, model::DiskInfo};
+use remora_disk::{adapter::DiskTarget, application::DiskService, model::DiskInfo};
 use remora_flash::{
     adapter::{
         bmap::{BlockMap, BmapAdapterService},
@@ -160,10 +160,11 @@ impl FlashServiceInterface for FlashControllerImpl {
             received: progress.received.clone(),
         };
         let mut copy = tokio::task::spawn_blocking({
+            let disk = self.disk.clone();
             let readers = self.readers.clone();
             let request = request.clone();
             let progress = progress.clone();
-            move || run_flash(&readers, &request, &info, &progress, &fetch)
+            move || run_flash(&disk, &readers, &request, &info, &progress, &fetch)
         });
         let mut tick = tokio::time::interval(PROGRESS_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -178,7 +179,7 @@ impl FlashServiceInterface for FlashControllerImpl {
                 _ = tick.tick(), if !stopping => progress.report(&ctx.sink),
             }
         };
-        let (outcome, device) = match outcome {
+        let (outcome, mut device) = match outcome {
             Ok(done) => {
                 progress.report(&ctx.sink);
                 done
@@ -195,11 +196,23 @@ impl FlashServiceInterface for FlashControllerImpl {
         // means on the disk, ready to be unplugged.
         ctx.sink.phase("syncing");
         let path = request.device.clone();
-        tokio::task::spawn_blocking(move || device.sync_all())
+        let device = tokio::task::spawn_blocking(move || device.sync().map(|()| device))
             .await
             .expect("sync worker panicked")
             .change_context(Error::Sync(path))?;
-        Ok(outcome)
+
+        // Written and flushed: ejecting is for the operator's convenience,
+        // and its failure says the image is safe.
+        if !request.eject {
+            return Ok(outcome);
+        }
+        ctx.sink.phase("ejecting");
+        let path = request.device.clone();
+        let ejected = tokio::task::spawn_blocking(move || device.eject())
+            .await
+            .expect("eject worker panicked")
+            .change_context(Error::Eject(path))?;
+        Ok(FlashOutcome { ejected, ..outcome })
     }
 }
 
@@ -319,12 +332,13 @@ fn check_fits(summary: &ImageSummary, disk: &DiskInfo) -> Result<()> {
 /// Copies the image to the disk `checked` describes; hands the disk back,
 /// written but maybe not yet flushed.
 fn run_flash(
+    disk: &DiskService,
     readers: &Readers,
     request: &FlashRequest,
     checked: &DiskInfo,
     progress: &Progress,
     fetch: &Fetch,
-) -> Result<(FlashOutcome, File)> {
+) -> Result<(FlashOutcome, DiskTarget)> {
     let OpenedImage {
         source,
         map,
@@ -333,7 +347,7 @@ fn run_flash(
     let bmap = &readers.bmap;
     check_fits(&summary, checked)?;
 
-    let mut device = open_checked_device(&request.device, checked)?;
+    let mut device = open_checked_device(disk, &fetch.runtime, &request.device, checked)?;
 
     progress
         .total
@@ -347,6 +361,7 @@ fn run_flash(
         FlashOutcome {
             bytes_written: map.total_mapped_size(),
             used_bmap: true,
+            ejected: false,
         }
     } else {
         bmap.copy_without_bmap(&mut image, &mut device)
@@ -354,6 +369,7 @@ fn run_flash(
         FlashOutcome {
             bytes_written: image.position(),
             used_bmap: false,
+            ejected: false,
         }
     };
     Ok((outcome, device))
@@ -387,12 +403,20 @@ fn sibling_bmap(image: &Path) -> Option<PathBuf> {
 }
 
 /// Open the disk the guard checked, and only if `device` still resolves to
-/// it: the check was made on `checked.path`, the canonical node, so a
-/// `device` resolving anywhere else (a symlink retargeted since, a disk
-/// service describing another node) is refused rather than written.
-fn open_checked_device(device: &Path, checked: &DiskInfo) -> Result<File> {
-    let resolved =
-        fs::canonicalize(device).change_context_lazy(|| Error::OpenDevice(device.to_path_buf()))?;
+/// it: the disk vertical is asked again which disk `device` is, and a
+/// `device` resolving anywhere else than `checked.path` by now (a symlink
+/// retargeted since, a disk swapped behind the same number) is refused
+/// rather than written. The disk vertical opens it, its volumes unmounted.
+fn open_checked_device(
+    disk: &DiskService,
+    runtime: &Handle,
+    device: &Path,
+    checked: &DiskInfo,
+) -> Result<DiskTarget> {
+    let resolved = runtime
+        .block_on(disk.info(device))
+        .change_context_lazy(|| Error::Disk(device.to_path_buf()))?
+        .path;
     if resolved != checked.path {
         return Err(Report::new(Error::TargetMismatch {
             device: device.to_path_buf(),
@@ -400,9 +424,8 @@ fn open_checked_device(device: &Path, checked: &DiskInfo) -> Result<File> {
             checked: checked.path.clone(),
         }));
     }
-    OpenOptions::new()
-        .write(true)
-        .open(&checked.path)
+    runtime
+        .block_on(disk.open(checked))
         .change_context_lazy(|| Error::OpenDevice(checked.path.clone()))
 }
 

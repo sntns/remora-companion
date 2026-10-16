@@ -34,6 +34,8 @@ pub enum Error {
     },
     #[error("failed to flush the image to {0}")]
     Sync(PathBuf),
+    #[error("the image is written, but {0} failed to eject")]
+    Eject(PathBuf),
     #[error("flash was cancelled")]
     Cancelled,
 }

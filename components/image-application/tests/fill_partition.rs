@@ -33,6 +33,13 @@ const PAYLOAD_START: u64 = 4096 * SECTOR;
 
 fn controller() -> ImageService {
     ImageService::new(ImageControllerImpl::new(
+        remora_disk::application::DiskService::new(
+            remora_disk_application::DiskControllerImpl::new(
+                remora_disk::adapter::DiskAdapterService::new(
+                    remora_disk_adapter_native::DiskAdapterImpl,
+                ),
+            ),
+        ),
         PartitionTableAdapterService::new(PartitionTableAdapterImpl),
         Arc::new(Ext4AdapterImpl),
         Arc::new(VfatAdapterImpl),

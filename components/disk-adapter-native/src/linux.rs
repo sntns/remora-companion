@@ -1,13 +1,18 @@
 use std::{
     collections::HashSet,
-    fs,
-    os::unix::fs::{FileTypeExt, MetadataExt},
+    ffi::CString,
+    fs::{self, OpenOptions},
+    io,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{FileTypeExt, MetadataExt},
+    },
     path::{Path, PathBuf},
 };
 
 use error_stack::{Report, ResultExt};
 use remora_disk::{
-    adapter::{Error, Result},
+    adapter::{DiskHold, DiskTarget, Error, Result},
     model::DiskInfo,
 };
 
@@ -53,6 +58,142 @@ pub fn info(path: &Path) -> Result<DiskInfo> {
     // a node outside `/dev`, and it's this one the flash guard compares.
     info.path = canonical;
     Ok(info)
+}
+
+/// The kernel takes any write at any offset on a block device, through its
+/// page cache: the node opens as a plain file, once nothing of it is
+/// mounted (the copy rewrites the filesystems under any mount).
+pub fn open(disk: &DiskInfo) -> Result<DiskTarget> {
+    let meta = fs::metadata(&disk.path).change_context_lazy(|| Error::Open(disk.path.clone()))?;
+    let name = whole_disk_named(Path::new(SYS_BLOCK), &majmin(meta.rdev()))?
+        .ok_or_else(|| Report::new(Error::NotWholeDisk(disk.path.clone())))?;
+    unmount_disk(&name, &disk.path)?;
+    OpenOptions::new()
+        .write(true)
+        .open(&disk.path)
+        .map(DiskTarget::new)
+        .change_context_lazy(|| Error::Open(disk.path.clone()))
+}
+
+/// The whole disk behind `path`, a disk or one of its partitions, its
+/// volumes unmounted. Nothing mounts it again on its own (a desktop's
+/// automounter reacts to a disk appearing, not to its being unmounted), so
+/// the hold itself holds nothing.
+pub fn hold(path: &Path) -> Result<Option<DiskHold>> {
+    // Not there yet (an image about to be created) or not a device: an
+    // image file, nothing to unmount.
+    let Ok(meta) = fs::metadata(path) else {
+        return Ok(None);
+    };
+    if !meta.file_type().is_block_device() {
+        return Ok(None);
+    }
+    let name = disk_holding(Path::new(SYS_BLOCK), &majmin(meta.rdev()))?
+        .ok_or_else(|| Report::new(Error::NotFound(path.to_path_buf())))?;
+    if device_owns_majmin(
+        &Path::new(SYS_BLOCK).join(&name),
+        &name,
+        &system_device_majmins(),
+    ) {
+        return Err(Report::new(Error::SystemDisk(path.to_path_buf())));
+    }
+    unmount_disk(&name, path)?;
+    Ok(Some(DiskHold::new(())))
+}
+
+/// Unmounts every filesystem on the whole disk `name` or its partitions,
+/// the deepest mount point first.
+fn unmount_disk(name: &str, path: &Path) -> Result<()> {
+    let devs = disk_majmins(&Path::new(SYS_BLOCK).join(name), name);
+    let mountinfo = fs::read_to_string("/proc/self/mountinfo").change_context(Error::Io)?;
+    for mount_point in mount_points_on(&mountinfo, &devs) {
+        let target = CString::new(mount_point.as_os_str().as_bytes())
+            .change_context_lazy(|| Error::Unmount(path.to_path_buf()))?;
+        // SAFETY: a NUL-terminated path.
+        if unsafe { libc::umount2(target.as_ptr(), 0) } != 0 {
+            let error = io::Error::last_os_error();
+            let hint = match error.raw_os_error() {
+                Some(libc::EBUSY) => "it is in use".to_owned(),
+                Some(libc::EPERM) => "unmounting takes root: run it with sudo".to_owned(),
+                _ => error.to_string(),
+            };
+            return Err(Report::new(error)
+                .change_context(Error::Unmount(path.to_path_buf()))
+                .attach(format!("{}: {hint}", mount_point.display())));
+        }
+    }
+    Ok(())
+}
+
+/// The `major:minor` of the whole disk at `sys_dir` and of each of its
+/// partitions.
+fn disk_majmins(sys_dir: &Path, name: &str) -> HashSet<String> {
+    let mut devs: HashSet<String> = read_trimmed(&sys_dir.join("dev")).into_iter().collect();
+    if let Ok(entries) = fs::read_dir(sys_dir) {
+        for entry in entries.flatten() {
+            let entry_name = entry.file_name().to_string_lossy().into_owned();
+            if entry_name.starts_with(name) && entry_name != name {
+                devs.extend(read_trimmed(&entry.path().join("dev")));
+            }
+        }
+    }
+    devs
+}
+
+/// Where a device in `devs` is mounted, per `/proc/self/mountinfo`, the
+/// deepest mount point first: one mounted inside another goes before it.
+fn mount_points_on(mountinfo: &str, devs: &HashSet<String>) -> Vec<PathBuf> {
+    let mut points: Vec<PathBuf> = mountinfo
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            (fields.len() > 4 && devs.contains(fields[2]))
+                .then(|| PathBuf::from(unescape_mount_point(fields[4])))
+        })
+        .collect();
+    points.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+    points.dedup();
+    points
+}
+
+/// A mount point as `proc(5)` spells it: space, tab, newline and backslash
+/// as 3-digit octal escapes (`\040`).
+fn unescape_mount_point(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let octal = bytes
+            .get(i + 1..i + 4)
+            .filter(|d| bytes[i] == b'\\' && d.iter().all(|b| (b'0'..=b'7').contains(b)));
+        match octal {
+            Some(digits) => {
+                out.push(digits.iter().fold(0u16, |n, d| n * 8 + u16::from(d - b'0')) as u8);
+                i += 4;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The `/sys/block` entry that is `majmin`, or has it as one of its
+/// partitions.
+fn disk_holding(sys_block: &Path, majmin: &str) -> Result<Option<String>> {
+    if let Some(name) = whole_disk_named(sys_block, majmin)? {
+        return Ok(Some(name));
+    }
+    for entry in fs::read_dir(sys_block).change_context(Error::Io)? {
+        let entry = entry.change_context(Error::Io)?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if disk_majmins(&entry.path(), &name).contains(majmin) {
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
 }
 
 /// `major:minor`, as `/sys/block/*/dev` spells it, of a `st_rdev` (glibc's
@@ -338,6 +479,56 @@ mod tests {
         };
         let err = info(&Path::new("/dev").join(partition)).unwrap_err();
         assert!(matches!(err.current_context(), Error::NotWholeDisk(_)));
+    }
+
+    #[test]
+    fn mount_points_on_a_disk_come_deepest_first() {
+        let mountinfo = "\
+36 35 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw
+40 35 8:33 / /media/user/SD\\040CARD rw,relatime shared:1 - vfat /dev/sdc1 rw
+41 40 8:34 / /media/user/SD\\040CARD/inner rw,relatime shared:1 - ext4 /dev/sdc2 rw
+";
+        let devs = HashSet::from(["8:32".to_string(), "8:33".to_string(), "8:34".to_string()]);
+        assert_eq!(
+            mount_points_on(mountinfo, &devs),
+            [
+                PathBuf::from("/media/user/SD CARD/inner"),
+                PathBuf::from("/media/user/SD CARD"),
+            ]
+        );
+    }
+
+    #[test]
+    fn unescape_mount_point_decodes_octal_and_keeps_the_rest() {
+        assert_eq!(unescape_mount_point("/a\\040b\\134c"), "/a b\\c");
+        assert_eq!(unescape_mount_point("/plain\\x"), "/plain\\x");
+    }
+
+    #[test]
+    fn disk_holding_finds_a_partitions_disk() {
+        let fixture = SysBlockFixture::new();
+        fixture.disk("sda", "8:0");
+        fixture.disk("sdc", "8:32");
+        fixture.partition("sdc", "sdc2", "8:34");
+
+        assert_eq!(
+            disk_holding(&fixture.dir, "8:34").unwrap().as_deref(),
+            Some("sdc")
+        );
+        assert_eq!(
+            disk_holding(&fixture.dir, "8:0").unwrap().as_deref(),
+            Some("sda")
+        );
+        assert_eq!(disk_holding(&fixture.dir, "8:99").unwrap(), None);
+    }
+
+    #[test]
+    fn hold_has_nothing_to_hold_for_an_image_file() {
+        let fixture = SysBlockFixture::new();
+        let image = fixture.dir.join("disk.img");
+        fs::write(&image, b"").unwrap();
+        assert!(hold(&image).unwrap().is_none());
+        assert!(hold(&fixture.dir.join("not-yet.img")).unwrap().is_none());
     }
 
     #[test]

@@ -1,10 +1,11 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Seek, SeekFrom},
     path::Path,
 };
 
 use error_stack::{Report, ResultExt};
+use remora_block_io::BlockFile;
 use remora_image::{
     adapter::partition_table::{Error, PartitionTableAdapter, Result},
     model::{FsKind, PartitionTable},
@@ -17,7 +18,10 @@ pub struct PartitionTableAdapterImpl;
 
 impl PartitionTableAdapter for PartitionTableAdapterImpl {
     fn read(&self, path: &Path) -> Result<PartitionTable> {
-        let mut file = File::open(path).change_context_lazy(|| Error::Open(path.to_path_buf()))?;
+        // A GPT whose primary header is damaged is read from its backup,
+        // in the disk's last sector: its end must be the disk's.
+        let mut file =
+            BlockFile::open(path).change_context_lazy(|| Error::Open(path.to_path_buf()))?;
 
         let gpt_err = match gpt::read(&mut file) {
             Ok(table) => return Ok(table),
@@ -108,7 +112,8 @@ const FAT32_FILSYSTYPE_OFFSET: usize = 0x52;
 /// ext4 or vfat by reading its own on-disk signature, rather than inferring
 /// it from the partition's role.
 fn detect_fs_kind(image: &Path, partition_offset: u64) -> Result<FsKind> {
-    let mut file = File::open(image).change_context_lazy(|| Error::Open(image.to_path_buf()))?;
+    let mut file =
+        BlockFile::open(image).change_context_lazy(|| Error::Open(image.to_path_buf()))?;
 
     let mut magic = [0u8; 2];
     file.seek(SeekFrom::Start(
@@ -154,7 +159,10 @@ mod fs_kind_tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        File::create(&path).unwrap().write_all(bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
         path
     }
 

@@ -12,6 +12,9 @@ pub struct FlashRequest {
     /// Bypass the removable-disk check (still refuses a disk identified as
     /// the system disk regardless of this flag).
     pub force: bool,
+    /// Eject the disk once written, where the OS has the notion (macOS),
+    /// so it can be unplugged at once.
+    pub eject: bool,
 }
 
 /// Which `.bmap` drives the copy.
@@ -35,4 +38,6 @@ pub struct FlashOutcome {
     /// the full (decompressed) image size otherwise.
     pub bytes_written: u64,
     pub used_bmap: bool,
+    /// The disk was ejected after the copy.
+    pub ejected: bool,
 }

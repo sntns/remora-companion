@@ -64,8 +64,9 @@ pub struct Command {
     #[arg(long, conflicts_with = "bmap")]
     no_bmap: bool,
 
-    /// Destination device path, e.g. /dev/sdb. Its *whole disk* is
-    /// overwritten — not a single partition.
+    /// Destination device path, e.g. /dev/sdb (macOS: /dev/disk4, Windows:
+    /// \\.\PhysicalDrive1). Its *whole disk* is overwritten — not a single
+    /// partition.
     #[arg(long)]
     #[arg(add = remora_completion::values(remora_completion::Kind::Disk))]
     device: PathBuf,
@@ -74,6 +75,11 @@ pub struct Command {
     /// the system-disk refusal.
     #[arg(long)]
     force: bool,
+
+    /// Leave the disk attached once written. By default it's ejected where
+    /// the OS has the notion (macOS), ready to be unplugged.
+    #[arg(long)]
+    no_eject: bool,
 
     /// Accepted for scripts written when flash asked for confirmation; it
     /// no longer does.
@@ -98,6 +104,7 @@ pub async fn run(
         no_bmap,
         device,
         force,
+        no_eject,
         yes: _,
     } = command;
 
@@ -137,6 +144,7 @@ pub async fn run(
         bmap,
         device,
         force,
+        eject: !no_eject,
     };
 
     // Shown before the guard runs, so a refused flash still shows what it
@@ -190,6 +198,9 @@ pub async fn run(
             "(full copy, no bmap)"
         })
     ));
+    if outcome.ejected {
+        remora_tui::info("Ejected: the disk can be unplugged");
+    }
     Ok(())
 }
 

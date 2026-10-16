@@ -1,37 +1,58 @@
 use std::path::Path;
 
 use remora_disk::{
-    adapter::{DiskAdapter, Result},
+    adapter::{DiskAdapter, DiskHold, DiskTarget, Result},
     model::DiskInfo,
 };
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 use remora_disk::adapter::Error;
 
 #[cfg(target_os = "linux")]
-use crate::linux;
+use crate::linux as native;
+#[cfg(target_os = "macos")]
+use crate::macos as native;
+#[cfg(windows)]
+use crate::windows as native;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DiskAdapterImpl;
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 impl DiskAdapter for DiskAdapterImpl {
-    #[cfg(target_os = "linux")]
     fn enumerate(&self) -> Result<Vec<DiskInfo>> {
-        linux::enumerate()
+        native::enumerate()
     }
 
-    #[cfg(target_os = "linux")]
     fn info(&self, path: &Path) -> Result<DiskInfo> {
-        linux::info(path)
+        native::info(path)
     }
 
-    #[cfg(not(target_os = "linux"))]
+    fn open(&self, disk: &DiskInfo) -> Result<DiskTarget> {
+        native::open(disk)
+    }
+
+    fn hold(&self, path: &Path) -> Result<Option<DiskHold>> {
+        native::hold(path)
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+impl DiskAdapter for DiskAdapterImpl {
     fn enumerate(&self) -> Result<Vec<DiskInfo>> {
         Err(error_stack::Report::new(Error::Unsupported))
     }
 
-    #[cfg(not(target_os = "linux"))]
     fn info(&self, _path: &Path) -> Result<DiskInfo> {
         Err(error_stack::Report::new(Error::Unsupported))
+    }
+
+    fn open(&self, _disk: &DiskInfo) -> Result<DiskTarget> {
+        Err(error_stack::Report::new(Error::Unsupported))
+    }
+
+    /// No disk is ever written here but an image file: nothing to hold.
+    fn hold(&self, _path: &Path) -> Result<Option<DiskHold>> {
+        Ok(None)
     }
 }

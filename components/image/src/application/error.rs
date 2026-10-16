@@ -30,6 +30,8 @@ pub enum Error {
     WriteOutput(PathBuf),
     #[error("copy was cancelled")]
     Cancelled,
+    #[error("failed to unmount {0} to write into it")]
+    HoldDisk(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

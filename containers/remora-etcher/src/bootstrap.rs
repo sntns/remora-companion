@@ -202,6 +202,7 @@ pub async fn wire() -> Services {
 
     container
         .set_type(ImageService::new(ImageControllerImpl::new(
+            disk.clone(),
             partition_table,
             ext4_fs,
             vfat_fs,

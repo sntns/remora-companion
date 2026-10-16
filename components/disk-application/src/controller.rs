@@ -2,7 +2,7 @@ use std::path::Path;
 
 use error_stack::ResultExt;
 use remora_disk::{
-    adapter::DiskAdapterService,
+    adapter::{DiskAdapterService, DiskHold, DiskTarget},
     application::{DiskServiceInterface, Error, Result},
     model::DiskInfo,
 };
@@ -38,5 +38,24 @@ impl DiskServiceInterface for DiskControllerImpl {
             .await
             .expect("disk worker panicked")
             .change_context(Error::Info)
+    }
+
+    // Unmounting waits on the OS's disk arbitration: blocking too.
+    async fn open(&self, disk: &DiskInfo) -> Result<DiskTarget> {
+        let adapter = self.adapter.clone();
+        let disk = disk.clone();
+        tokio::task::spawn_blocking(move || adapter.open(&disk))
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Open)
+    }
+
+    async fn hold(&self, path: &Path) -> Result<Option<DiskHold>> {
+        let adapter = self.adapter.clone();
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || adapter.hold(&path))
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Hold)
     }
 }

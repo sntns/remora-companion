@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::model::DiskInfo;
+use crate::{
+    adapter::{DiskHold, DiskTarget},
+    model::DiskInfo,
+};
 
 use super::error::Result;
 
@@ -10,6 +13,11 @@ use super::error::Result;
 pub trait DiskServiceInterface: Send + Sync {
     async fn list(&self) -> Result<Vec<DiskInfo>>;
     async fn info(&self, path: &Path) -> Result<DiskInfo>;
+    /// The disk `disk` describes (as `info` returned it), opened to be
+    /// overwritten whole.
+    async fn open(&self, disk: &DiskInfo) -> Result<DiskTarget>;
+    /// See [`DiskAdapter::hold`](crate::adapter::DiskAdapter::hold).
+    async fn hold(&self, path: &Path) -> Result<Option<DiskHold>>;
 }
 
 /// Injectable handle to whatever `DiskServiceInterface` implementation was

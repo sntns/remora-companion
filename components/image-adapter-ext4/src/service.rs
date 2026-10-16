@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
     sync::{Arc, Mutex},
@@ -8,6 +8,7 @@ use std::{
 use error_stack::{Report, ResultExt};
 use fs_ext4::block_io::BlockDevice;
 use fs_ext4::Filesystem;
+use remora_block_io::BlockFile;
 use remora_image::adapter::{
     ext4::{Error, Ext4Adapter, Result},
     partition_fs::{self, PartitionFilesystem},
@@ -18,18 +19,14 @@ use remora_image::adapter::{
 /// mount that range directly without us copying the partition out to its
 /// own temporary file first.
 struct WindowedFileDevice {
-    file: Mutex<File>,
+    file: Mutex<BlockFile>,
     offset: u64,
     size: u64,
 }
 
 impl WindowedFileDevice {
     fn open_rw(path: &Path, offset: u64, size: u64) -> std::result::Result<Self, Error> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|e| Error::Io(path.to_path_buf(), e))?;
+        let file = BlockFile::open_rw(path).map_err(|e| Error::Io(path.to_path_buf(), e))?;
         Ok(Self {
             file: Mutex::new(file),
             offset,
@@ -93,7 +90,7 @@ fn refuse_if_needs_journal_recovery(
     image: &Path,
     partition_offset: u64,
 ) -> std::result::Result<(), Error> {
-    let mut file = File::open(image).map_err(|e| Error::Io(image.to_path_buf(), e))?;
+    let mut file = BlockFile::open(image).map_err(|e| Error::Io(image.to_path_buf(), e))?;
     let mut buf = [0u8; 100];
     file.seek(SeekFrom::Start(partition_offset + EXT4_SUPERBLOCK_OFFSET))
         .and_then(|_| file.read_exact(&mut buf))
@@ -120,12 +117,10 @@ fn refuse_if_needs_journal_recovery(
     Ok(())
 }
 
-/// `image`'s size in bytes, a block device's included: its metadata length
-/// is 0, only seeking to its end tells its capacity.
+/// `image`'s size in bytes, a disk device's included (its metadata length
+/// is 0).
 fn image_len(image: &Path) -> std::result::Result<u64, Error> {
-    File::open(image)
-        .and_then(|mut file| file.seek(SeekFrom::End(0)))
-        .map_err(|e| Error::Io(image.to_path_buf(), e))
+    remora_block_io::len_of(image).map_err(|e| Error::Io(image.to_path_buf(), e))
 }
 
 fn mount_window(image: &Path, offset: u64, size: u64) -> std::result::Result<Filesystem, Error> {
@@ -435,7 +430,7 @@ mod tests {
                     .parse()
                     .ok()?;
                 let node = Path::new("/dev").join(disk.file_name());
-                (sectors > 0 && File::open(&node).is_ok()).then_some((node, sectors * 512))
+                (sectors > 0 && std::fs::File::open(&node).is_ok()).then_some((node, sectors * 512))
             })
         });
         let Some((node, size)) = device else {

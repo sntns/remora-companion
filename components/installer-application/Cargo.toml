@@ -17,6 +17,9 @@ error-stack.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+remora-disk = { path = "../disk" }
+remora-disk-application = { path = "../disk-application" }
+remora-disk-adapter-native = { path = "../disk-adapter-native" }
 remora-convert-application = { path = "../convert-application" }
 remora-convert-adapter-bmaptar = { path = "../convert-adapter-bmaptar" }
 remora-convert-adapter-bzip2 = { path = "../convert-adapter-bzip2" }

@@ -2970,6 +2970,9 @@ dependencies = [
  "remora-convert-adapter-qcow2",
  "remora-convert-adapter-zstd",
  "remora-convert-application",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
  "remora-factory",
  "remora-factory-adapter-local",
  "remora-factory-application",
@@ -3007,6 +3010,14 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "remora-block-io"
+version = "0.19.3"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3159,6 +3170,9 @@ dependencies = [
  "async-trait",
  "error-stack",
  "remora-config",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
  "remora-fs-walk",
  "remora-image",
  "remora-image-adapter-ext4",
@@ -3466,7 +3480,11 @@ name = "remora-disk-adapter-native"
 version = "0.19.3"
 dependencies = [
  "error-stack",
+ "libc",
+ "remora-block-io",
  "remora-disk",
+ "thiserror 1.0.69",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3686,6 +3704,7 @@ version = "0.19.3"
 dependencies = [
  "bmap-parser",
  "error-stack",
+ "remora-disk",
  "remora-flash",
 ]
 
@@ -3797,6 +3816,9 @@ version = "0.19.3"
 dependencies = [
  "async-trait",
  "error-stack",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
  "remora-fs-walk",
  "remora-identity",
  "remora-identity-adapter-keygen",
@@ -3847,6 +3869,7 @@ version = "0.19.3"
 dependencies = [
  "am-fs-ext4",
  "error-stack",
+ "remora-block-io",
  "remora-image",
 ]
 
@@ -3857,6 +3880,7 @@ dependencies = [
  "error-stack",
  "gptman",
  "mbrman",
+ "remora-block-io",
  "remora-image",
 ]
 
@@ -3866,6 +3890,7 @@ version = "0.19.3"
 dependencies = [
  "error-stack",
  "fatfs",
+ "remora-block-io",
  "remora-image",
 ]
 
@@ -3875,6 +3900,10 @@ version = "0.19.3"
 dependencies = [
  "async-trait",
  "error-stack",
+ "remora-block-io",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
  "remora-fs-walk",
  "remora-image",
  "remora-image-adapter-ext4",
@@ -3973,6 +4002,9 @@ dependencies = [
  "remora-convert-adapter-qcow2",
  "remora-convert-adapter-zstd",
  "remora-convert-application",
+ "remora-disk",
+ "remora-disk-adapter-native",
+ "remora-disk-application",
  "remora-fs-walk",
  "remora-image",
  "remora-image-adapter-ext4",

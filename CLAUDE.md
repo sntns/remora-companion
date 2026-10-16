@@ -42,8 +42,8 @@ Each vertical is (at least) four crates, never one:
   (e.g. `-adapter-ext4` wraps `am-fs-ext4`). One crate per real backend, not
   per OS: cross-platform dispatch (`linux.rs`/`macos.rs`/`windows.rs` behind
   `#[cfg(target_os = "...")]`) stays *inside* one adapter crate (see
-  `remora-disk-adapter-native`, where only `linux.rs` exists yet and other
-  platforms are refused as unsupported) — only genuinely alternate backends
+  `remora-disk-adapter-native`, where `linux.rs`, `macos/` and `windows/`
+  exist and other platforms are refused as unsupported) — only genuinely alternate backends
   (ext4 vs. vfat, GPT vs. MBR within one reader) get split further, and GPT/
   MBR specifically stay as internal modules of one `-adapter-partition-table`
   crate because they're always tried together (`read()` falls back from one
@@ -78,7 +78,10 @@ The other unseamed utility crates, same reasoning: `remora-tui` (all
 terminal presentation, see below), `remora-completion` (dynamic shell
 completion: value kinds, the provider registry, the `completion` command,
 the remote-values `Cache` and `command_line()` for providers),
-`remora-progress` (progress events, `OperationContext`, and
+`remora-block-io` (a file, or a disk device in its place: its length --
+a device's metadata length is 0, and neither macOS nor Windows seek to its
+end, so the driver is asked -- and `SectorIo`/`BlockFile`, whole-sector
+access where a raw disk takes nothing else: Windows, macOS's raw nodes), `remora-progress` (progress events, `OperationContext`, and
 `cancelled_by_ctrl_c()`: the token every transport hands a long operation,
 so Ctrl-C stops it between steps), `remora-format`,
 `remora-unpack` (reading an image file -- a `.bmaptar` in place, bzip2/

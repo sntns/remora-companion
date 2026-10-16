@@ -8,5 +8,6 @@ publish.workspace = true
 
 [dependencies]
 remora-flash = { path = "../flash" }
+remora-disk = { path = "../disk" }
 error-stack.workspace = true
 bmap-parser = "0.2"

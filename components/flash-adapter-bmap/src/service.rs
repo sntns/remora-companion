@@ -1,6 +1,5 @@
-use std::fs::File;
-
 use error_stack::ResultExt;
+use remora_disk::adapter::DiskTarget;
 use remora_flash::adapter::{
     bmap::{BlockMap, BmapAdapter, Error, Result},
     source::ImageStream,
@@ -19,13 +18,13 @@ impl BmapAdapter for BmapAdapterImpl {
     fn copy_with_bmap(
         &self,
         input: &mut ImageStream,
-        output: &mut File,
+        output: &mut DiskTarget,
         map: &BlockMap,
     ) -> Result<()> {
         bmap_parser::copy(input, output, map.as_parsed()).change_context(Error::Copy)
     }
 
-    fn copy_without_bmap(&self, input: &mut ImageStream, output: &mut File) -> Result<()> {
+    fn copy_without_bmap(&self, input: &mut ImageStream, output: &mut DiskTarget) -> Result<()> {
         bmap_parser::copy_nobmap(input, output).change_context(Error::Copy)
     }
 }

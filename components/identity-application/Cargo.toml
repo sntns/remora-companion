@@ -17,6 +17,9 @@ async-trait.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+remora-disk = { path = "../disk" }
+remora-disk-application = { path = "../disk-application" }
+remora-disk-adapter-native = { path = "../disk-adapter-native" }
 # Real (not mocked) adapters, for an integration-style test of the use case
 # end to end — same posture as remora-squashfs-application's test.
 remora-identity-adapter-keygen = { path = "../identity-adapter-keygen" }

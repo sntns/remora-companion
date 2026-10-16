@@ -1,10 +1,10 @@
 use std::{
-    fs::{File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
 use error_stack::{Report, ResultExt};
+use remora_block_io::BlockFile;
 use remora_image::adapter::{
     partition_fs::{self, PartitionFilesystem},
     vfat::{Error, Result, VfatAdapter},
@@ -16,7 +16,7 @@ use remora_image::adapter::{
 /// `fatfs`'s `Read + Write + Seek` storage trait instead of
 /// `fs_ext4::BlockDevice`.
 struct WindowedFile {
-    file: File,
+    file: BlockFile,
     offset: u64,
     size: u64,
     pos: u64,
@@ -24,11 +24,7 @@ struct WindowedFile {
 
 impl WindowedFile {
     fn open_rw(path: &Path, offset: u64, size: u64) -> std::result::Result<Self, Error> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|e| Error::Io(path.to_path_buf(), e))?;
+        let file = BlockFile::open_rw(path).map_err(|e| Error::Io(path.to_path_buf(), e))?;
         Ok(Self {
             file,
             offset,
@@ -88,12 +84,10 @@ impl Seek for WindowedFile {
     }
 }
 
-/// `image`'s size in bytes, a block device's included: its metadata length
-/// is 0, only seeking to its end tells its capacity.
+/// `image`'s size in bytes, a disk device's included (its metadata length
+/// is 0).
 fn image_len(image: &Path) -> std::result::Result<u64, Error> {
-    File::open(image)
-        .and_then(|mut file| file.seek(SeekFrom::End(0)))
-        .map_err(|e| Error::Io(image.to_path_buf(), e))
+    remora_block_io::len_of(image).map_err(|e| Error::Io(image.to_path_buf(), e))
 }
 
 fn mount_window(
@@ -314,7 +308,10 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        File::create(&path).unwrap().set_len(size_bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(size_bytes)
+            .unwrap();
         path
     }
 

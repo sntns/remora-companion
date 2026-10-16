@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+remora-block-io = { path = "../block-io" }
 remora-image = { path = "../image" }
 error-stack.workspace = true
 am-fs-ext4 = "0.4"

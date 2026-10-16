@@ -17,7 +17,8 @@ pub enum Command {
 
     /// Show what we know about one disk.
     Info {
-        /// Device path, e.g. /dev/sdb.
+        /// Device path, e.g. /dev/sdb (macOS: /dev/disk4, Windows:
+        /// \\.\PhysicalDrive1).
         #[arg(add = remora_completion::values(remora_completion::Kind::Disk))]
         device: PathBuf,
     },

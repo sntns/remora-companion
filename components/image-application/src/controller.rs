@@ -6,6 +6,8 @@ use std::{
 };
 
 use error_stack::{Report, ResultExt};
+use remora_block_io::BlockFile;
+use remora_disk::application::DiskService;
 use remora_fs_walk::{FsWalkAdapterService, WalkEntryKind};
 use remora_image::{
     adapter::{
@@ -28,9 +30,12 @@ use remora_progress::OperationContext;
 ///
 /// Every operation is blocking file I/O on an image that can be gigabytes,
 /// so each runs on the blocking pool (see `blocking`), on a clone of this
-/// controller (every field is a cheap shared handle).
+/// controller (every field is a cheap shared handle). An image may be a
+/// disk device: the disk vertical holds it unmounted while it's written
+/// (see `writing`).
 #[derive(Clone)]
 pub struct ImageControllerImpl {
+    disk: DiskService,
     partition_table: PartitionTableAdapterService,
     ext4_fs: Arc<dyn PartitionFilesystem>,
     vfat_fs: Arc<dyn PartitionFilesystem>,
@@ -40,6 +45,7 @@ pub struct ImageControllerImpl {
 
 impl ImageControllerImpl {
     pub fn new(
+        disk: DiskService,
         partition_table: PartitionTableAdapterService,
         ext4_fs: Arc<dyn PartitionFilesystem>,
         vfat_fs: Arc<dyn PartitionFilesystem>,
@@ -47,6 +53,7 @@ impl ImageControllerImpl {
         ext4: Ext4AdapterService,
     ) -> Self {
         Self {
+            disk,
             partition_table,
             ext4_fs,
             vfat_fs,
@@ -64,6 +71,24 @@ impl ImageControllerImpl {
         tokio::task::spawn_blocking(move || op(&this))
             .await
             .expect("image worker panicked")
+    }
+
+    /// Run a write `op` on `image` like `blocking`, `image`'s disk held
+    /// meanwhile when it's a disk device: its volumes unmounted (and on
+    /// macOS kept so), since a filesystem written to from under the OS's
+    /// own mount of it is corrupted -- and macOS won't open a disk with a
+    /// mounted volume for writing at all.
+    async fn writing<T: Send + 'static>(
+        &self,
+        image: &Path,
+        op: impl FnOnce(&Self) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let _hold = self
+            .disk
+            .hold(image)
+            .await
+            .change_context_lazy(|| Error::HoldDisk(image.to_path_buf()))?;
+        self.blocking(op).await
     }
 
     fn backend(&self, kind: FsKind) -> &dyn PartitionFilesystem {
@@ -277,7 +302,7 @@ impl ImageControllerImpl {
             .cloned()
             .change_context(Error::SelectPartition)?;
 
-        let mut image = File::open(&request.image).change_context(Error::Read)?;
+        let mut image = BlockFile::open(&request.image).change_context(Error::Read)?;
         image
             .seek(SeekFrom::Start(entry.start_bytes))
             .change_context(Error::Read)?;
@@ -360,7 +385,7 @@ impl ImageServiceInterface for ImageControllerImpl {
 
     async fn inject(&self, request: &InjectRequest) -> Result<()> {
         let request = request.clone();
-        self.blocking(move |this| {
+        self.writing(&request.image.clone(), move |this| {
             let (entry, backend) = this.resolve(&request.image, |table| {
                 table
                     .select(request.partition)
@@ -387,7 +412,7 @@ impl ImageServiceInterface for ImageControllerImpl {
 
     async fn mkdir(&self, request: &MkdirRequest) -> Result<()> {
         let request = request.clone();
-        self.blocking(move |this| {
+        self.writing(&request.image.clone(), move |this| {
             let (entry, backend) = this.resolve(&request.image, |table| {
                 table
                     .select(request.partition)
@@ -411,8 +436,10 @@ impl ImageServiceInterface for ImageControllerImpl {
     async fn cp_dir(&self, request: &CpDirRequest, ctx: &OperationContext) -> Result<()> {
         let request = request.clone();
         let ctx = ctx.clone();
-        self.blocking(move |this| this.cp_dir_blocking(&request, &ctx))
-            .await
+        self.writing(&request.image.clone(), move |this| {
+            this.cp_dir_blocking(&request, &ctx)
+        })
+        .await
     }
 
     async fn fill_partition(
@@ -439,7 +466,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             dest_path.to_string(),
             contents.to_vec(),
         );
-        self.blocking(move |this| {
+        self.writing(&image.clone(), move |this| {
             let (entry, backend) = this.resolve_by_role(&image, role)?;
             backend
                 .write_file(
@@ -463,7 +490,7 @@ impl ImageServiceInterface for ImageControllerImpl {
         mode: u16,
     ) -> Result<()> {
         let (image, dest_path) = (image.to_path_buf(), dest_path.to_string());
-        self.blocking(move |this| {
+        self.writing(&image.clone(), move |this| {
             let (entry, backend) = this.resolve_by_role(&image, role)?;
             backend
                 .ensure_dir(
@@ -518,7 +545,7 @@ impl ImageServiceInterface for ImageControllerImpl {
         label: Option<&str>,
     ) -> Result<()> {
         let (image, label) = (image.to_path_buf(), label.map(str::to_string));
-        self.blocking(move |this| {
+        self.writing(&image.clone(), move |this| {
             this.ext4
                 .format(&image, size_bytes, block_size, label.as_deref())
                 .change_context_lazy(|| Error::Format(image.clone()))
@@ -538,7 +565,7 @@ impl ImageServiceInterface for ImageControllerImpl {
             dest_path.to_string(),
             contents.to_vec(),
         );
-        self.blocking(move |this| {
+        self.writing(&image.clone(), move |this| {
             let size = file_len(&image)?;
             this.ext4
                 .write_file(&image, 0, size, &dest_path, &contents, mode)
@@ -549,7 +576,7 @@ impl ImageServiceInterface for ImageControllerImpl {
 
     async fn ext4_file_mkdir(&self, image: &Path, dest_path: &str, mode: u16) -> Result<()> {
         let (image, dest_path) = (image.to_path_buf(), dest_path.to_string());
-        self.blocking(move |this| {
+        self.writing(&image.clone(), move |this| {
             let size = file_len(&image)?;
             this.ext4
                 .create_dir(&image, 0, size, &dest_path, mode)
@@ -570,12 +597,10 @@ impl ImageServiceInterface for ImageControllerImpl {
     }
 }
 
-/// A standalone filesystem image's whole length -- by seeking, since a
-/// block device's metadata length is 0.
+/// A standalone filesystem image's whole length, a disk device's included
+/// (its metadata length is 0).
 fn file_len(image: &Path) -> Result<u64> {
-    File::open(image)
-        .and_then(|mut file| file.seek(SeekFrom::End(0)))
-        .change_context_lazy(|| Error::ReadSource(image.to_path_buf()))
+    remora_block_io::len_of(image).change_context_lazy(|| Error::ReadSource(image.to_path_buf()))
 }
 
 /// `rel_path` joined with `/` under `base` regardless of host
