@@ -138,7 +138,7 @@ fn mount_window(image: &Path, offset: u64, size: u64) -> std::result::Result<Fil
     refuse_if_needs_journal_recovery(image, offset)?;
 
     let dev = Arc::new(WindowedFileDevice::open_rw(image, offset, size)?);
-    let fs = Filesystem::mount(dev)?;
+    let mut fs = Filesystem::mount(dev)?;
     fs.replay_journal_if_dirty()?;
     Ok(fs)
 }

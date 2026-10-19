@@ -10,4 +10,4 @@ publish.workspace = true
 remora-block-io = { path = "../block-io" }
 remora-image = { path = "../image" }
 error-stack.workspace = true
-am-fs-ext4 = "0.4"
+am-fs-ext4 = "0.7"

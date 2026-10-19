@@ -215,12 +215,3 @@ tokio-serial = { version = "5.4", default-features = false }
 vt100 = "0.16"
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
-
-# am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
-# aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes
-# an i8 array against a c_char field, which is unsigned there. One-line fix
-# upstream: https://github.com/christhomas/rust-fs-ext4/pull/36. Until that
-# merges and releases, use our fork's branch (also drops a sibling-checkout
-# path dep that only resolves in the upstream repo's own dev environment).
-[patch.crates-io]
-am-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }
