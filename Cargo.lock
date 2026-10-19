@@ -19,19 +19,21 @@ dependencies = [
 
 [[package]]
 name = "am-fs-core"
-version = "0.2.2"
+version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c00781b62009bed91093230d1cd103d6155b264a574c661876b33154a4fad58"
+checksum = "1c3ab1320434ce157415e71a3f63ede91878b523800d4c9059b0bcc0f3f738d3"
 
 [[package]]
 name = "am-fs-ext4"
-version = "0.4.0"
-source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#5f14a822563312d7b170f418729097eedb83d7f7"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d893d5dbb2c9c69caf86fd8fcd9aabff3892467194483d52a3aed14efdfb20"
 dependencies = [
  "am-fs-core",
  "bitflags 2.13.1",
  "caseless",
  "crc32c",
+ "js-sys",
  "unicode-normalization",
 ]
 
@@ -4581,9 +4583,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -5135,7 +5137,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

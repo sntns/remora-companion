@@ -18,7 +18,7 @@ serde.workspace = true
 # remora-flash's BlockMap: these are inert data, not infrastructure
 # access, and duplicating them would just be busywork with no isolation
 # benefit (the actual DI seam is the *port trait*, not the value shape).
-am-fs-ext4 = "0.4"
+am-fs-ext4 = "0.7"
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }
 
 [dev-dependencies]
