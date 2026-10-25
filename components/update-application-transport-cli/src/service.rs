@@ -2,7 +2,7 @@ use error_stack::Report;
 use remora_tui as tui;
 use remora_update::{
     application::{self, UpdateService},
-    model::{App, Installation, Version},
+    model::{App, Version},
 };
 
 use crate::error::{update_error, Error, Result};
@@ -49,11 +49,7 @@ pub async fn run(args: Args, service: &UpdateService, name: &str, version: &str)
         spinner.done(available);
         // What `update` itself would accept for this installation, so the
         // suggestion works when followed.
-        let how = match &check.installation {
-            Installation::Homebrew { formula } => format!("brew upgrade {formula}"),
-            Installation::Unmanaged { .. } => format!("{} update --force", app.name),
-            Installation::Installer { .. } => format!("{} update", app.name),
-        };
+        let how = crate::notice::how(&app.name, &check.installation);
         tui::step(format!("Update with {}", tui::accent(how)));
         return Ok(());
     }
@@ -93,7 +89,7 @@ pub async fn run(args: Args, service: &UpdateService, name: &str, version: &str)
 
 /// The running binary, as the update use case sees it. The release
 /// process keeps `CARGO_PKG_VERSION` semver, but a local build may not.
-fn running_app(name: &str, version: &str) -> Result<App> {
+pub(crate) fn running_app(name: &str, version: &str) -> Result<App> {
     let version =
         Version::parse(version).ok_or_else(|| Report::new(Error::Version(version.to_owned())))?;
     Ok(App {

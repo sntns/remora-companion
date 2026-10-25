@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::error::Result;
 use crate::model::{App, UpdateCheck};
 
@@ -7,6 +9,10 @@ pub trait UpdateServiceInterface: Send + Sync {
     /// Whether a newer release than `app`'s exists, and how `app` was
     /// installed.
     async fn check(&self, app: &App) -> Result<UpdateCheck>;
+    /// The newer release to tell the user about, if there is one. The feed
+    /// is asked at most once per `every`, whatever it answers; in between,
+    /// what it said last time stands.
+    async fn notice(&self, app: &App, every: Duration) -> Result<Option<UpdateCheck>>;
     /// Installs `check`'s latest release over `app`, where it is installed.
     /// `force` also replaces a binary its installer didn't put there (never
     /// a Homebrew one: brew would not know).

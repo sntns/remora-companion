@@ -125,6 +125,26 @@ async fn run() {
 
     let services = bootstrap::wire().await;
 
+    // The update notice, after the command: never around a session --
+    // `channel open` is ssh's ProxyCommand, its stderr ssh's terminal --
+    // nor for updating itself.
+    let notice = (!matches!(
+        options.command,
+        Commands::Channel(_)
+            | Commands::Ssh(_)
+            | Commands::Scp(_)
+            | Commands::Local(_)
+            | Commands::Update(_)
+            | Commands::Completion(_)
+    ))
+    .then(|| {
+        remora_update_application_transport_cli::Notice::start(
+            &services.update,
+            PROGRAM,
+            env!("CARGO_PKG_VERSION"),
+        )
+    });
+
     use remora_channel_application_transport_cli as channel;
     use remora_context_application_transport_cli as context;
     use remora_ota_application_transport_cli as ota;
@@ -208,6 +228,9 @@ async fn run() {
             verbose,
         ),
     };
+    if let Some(notice) = notice {
+        notice.show().await;
+    }
     // Exit now rather than return: `channel open` may still have a thread
     // blocked reading stdin, which would otherwise keep the runtime alive.
     std::process::exit(code);

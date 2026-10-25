@@ -3264,6 +3264,7 @@ dependencies = [
  "remora-station-application-transport-cli",
  "remora-tui",
  "remora-update",
+ "remora-update-adapter-file",
  "remora-update-adapter-github",
  "remora-update-application",
  "remora-update-application-transport-cli",
@@ -4043,6 +4044,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "remora-update-adapter-file"
+version = "0.20.1"
+dependencies = [
+ "async-trait",
+ "error-stack",
+ "remora-update",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "remora-update-adapter-github"
 version = "0.20.1"
 dependencies = [
@@ -4075,6 +4089,7 @@ dependencies = [
  "remora-tui",
  "remora-update",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -4192,6 +4207,7 @@ dependencies = [
  "remora-platform-http",
  "remora-tui",
  "remora-update",
+ "remora-update-adapter-file",
  "remora-update-adapter-github",
  "remora-update-application",
  "remora-update-application-transport-cli",

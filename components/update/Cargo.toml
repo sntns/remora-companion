@@ -1,6 +1,6 @@
 [package]
 name = "remora-update"
-description = "Domain crate for the update vertical: a binary updating itself from its public releases -- the release-feed and installer ports, and the update application port"
+description = "Domain crate for the update vertical: a binary updating itself from its public releases -- the release-feed, installer and check-state ports, and the update application port"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

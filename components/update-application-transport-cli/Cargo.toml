@@ -12,3 +12,4 @@ remora-tui = { path = "../tui" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }

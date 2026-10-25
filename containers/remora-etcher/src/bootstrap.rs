@@ -89,9 +89,13 @@ use remora_station_adapter_jsonl::JsonlJournalImpl;
 use remora_station_adapter_operator_tui::TuiOperatorImpl;
 use remora_station_application::StationControllerImpl;
 use remora_update::{
-    adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},
+    adapter::{
+        feed::ReleaseFeedAdapterService, installer::InstallerAdapterService,
+        state::CheckStateAdapterService,
+    },
     application::UpdateService,
 };
+use remora_update_adapter_file::FileCheckStateImpl;
 use remora_update_adapter_github::{DistInstallerImpl, GithubReleaseFeedImpl, RELEASES_REPO};
 use remora_update_application::UpdateControllerImpl;
 
@@ -580,6 +584,7 @@ pub async fn wire() -> Services {
         .set_type(UpdateService::new(UpdateControllerImpl::new(
             release_feed,
             dist_installer,
+            CheckStateAdapterService::new(FileCheckStateImpl::new(default_root())),
         )))
         .await;
     let update = container

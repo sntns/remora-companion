@@ -1,6 +1,6 @@
 mod version;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::SystemTime};
 
 pub use version::Version;
 
@@ -32,6 +32,14 @@ pub struct App {
     pub version: Version,
     /// The running executable.
     pub executable: PathBuf,
+}
+
+/// The last time a binary looked for a newer release, and what it found
+/// (`None` when it couldn't tell: the feed out of reach).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastCheck {
+    pub checked_at: SystemTime,
+    pub latest: Option<Release>,
 }
 
 /// What a check found.

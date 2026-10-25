@@ -63,6 +63,12 @@ the running one, the way it was installed (`--check` only tells); a Homebrew
 install is updated with `brew upgrade sntns/tap/rmra` (or
 `sntns/tap/remora-etcher`) instead.
 
+Once a day at most, each binary also looks for a newer release while a
+command runs, and says so after it, on stderr, with the command that
+updates it. Never in a script (stderr not a terminal), under `CI`, nor
+around an ssh session; `RMRA_NO_UPDATE_CHECK=1` (or
+`REMORA_ETCHER_NO_UPDATE_CHECK=1`) turns it off.
+
 ## rmra
 
 ### Act as a role, e.g. in another tenant

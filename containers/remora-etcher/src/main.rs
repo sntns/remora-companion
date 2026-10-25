@@ -137,8 +137,22 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
     let services = bootstrap::wire().await;
     let over = over.as_ref();
 
+    // The update notice, after the command: not for updating itself, nor
+    // under the station's console.
+    let notice = (!matches!(
+        options.command,
+        Commands::Update(_) | Commands::Completion(_) | Commands::Station(_)
+    ))
+    .then(|| {
+        remora_update_application_transport_cli::Notice::start(
+            &services.update,
+            "remora-etcher",
+            env!("CARGO_PKG_VERSION"),
+        )
+    });
+
     use remora_context_application_transport_cli as context;
-    match options.command {
+    let code = match options.command {
         Commands::Login(args) => exit_on_error(
             context::run_login(args, &services.context, over, "remora-etcher").await,
             verbose,
@@ -227,7 +241,11 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             args,
             "Contexts, roles, disks and paths complete with Tab.",
         ),
+    };
+    if let Some(notice) = notice {
+        notice.show().await;
     }
+    code
 }
 
 fn exit_on_error<C>(result: Result<(), error_stack::Report<C>>, verbose: bool) -> i32 {

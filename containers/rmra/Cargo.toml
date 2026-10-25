@@ -42,6 +42,7 @@ remora-device-application-transport-cli = { path = "../../components/device-appl
 remora-update = { path = "../../components/update" }
 remora-update-application = { path = "../../components/update-application" }
 remora-update-adapter-github = { path = "../../components/update-adapter-github" }
+remora-update-adapter-file = { path = "../../components/update-adapter-file" }
 remora-update-application-transport-cli = { path = "../../components/update-application-transport-cli" }
 remora-tui = { path = "../../components/tui" }
 remora-completion = { path = "../../components/completion" }

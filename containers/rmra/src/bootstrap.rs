@@ -34,9 +34,13 @@ use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
 use remora_ota_adapter_http::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_update::{
-    adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},
+    adapter::{
+        feed::ReleaseFeedAdapterService, installer::InstallerAdapterService,
+        state::CheckStateAdapterService,
+    },
     application::UpdateService,
 };
+use remora_update_adapter_file::FileCheckStateImpl;
 use remora_update_adapter_github::{DistInstallerImpl, GithubReleaseFeedImpl, RELEASES_REPO};
 use remora_update_application::UpdateControllerImpl;
 
@@ -239,7 +243,9 @@ pub async fn wire() -> Services {
 
     container
         .set_type(UpdateService::new(UpdateControllerImpl::new(
-            feed, installer,
+            feed,
+            installer,
+            CheckStateAdapterService::new(FileCheckStateImpl::new(default_root())),
         )))
         .await;
     let update = container
