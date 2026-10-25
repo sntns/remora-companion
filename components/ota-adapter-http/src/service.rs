@@ -73,6 +73,20 @@ fn log_entry(entry: model::DeploymentLogEntry) -> LogEntry {
     }
 }
 
+/// An upload's own resource: `PUT` to, `HEAD` for its offset, `POST` to
+/// commit.
+fn upload_url(gateway: &Gateway, upload: &InitialUpload) -> remora_platform_http::Url {
+    gateway.url([
+        "remora",
+        "v1",
+        "release",
+        &upload.release,
+        "artifact",
+        &upload.file_name,
+        &upload.content_id,
+    ])
+}
+
 /// A map filter, the way a REST route takes it: `<field>[key]=value`.
 fn filter(url: &mut remora_platform_http::Url, field: &str, labels: &Labels) {
     for (key, value) in labels {
@@ -187,27 +201,44 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         Ok(())
     }
 
-    /// 128 random bits, hex.
+    /// A random (version 4) UUID, the form the platform takes.
     fn new_content_id(&self) -> String {
         use rand_core::RngCore;
         let mut bytes = [0u8; 16];
         rand_core::OsRng.fill_bytes(&mut bytes);
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        format!(
+            "{}-{}-{}-{}-{}",
+            &hex[..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..]
+        )
     }
 
-    async fn upload_offset(&self, context: &ResolvedContext, content_id: &str) -> Result<u64> {
+    /// `HEAD` on the upload's own resource, which names its release.
+    async fn upload_offset(
+        &self,
+        context: &ResolvedContext,
+        upload: &InitialUpload,
+    ) -> Result<u64> {
         let gateway = gateway(context).await?;
-        let offset = gateway
-            .get::<model::UploadOffsetResponse>(gateway.url([
-                "remora",
-                "v1",
-                "release-artifact-upload-offset",
-                content_id,
-            ]))
-            .await
-            .map_err(classify)?
-            .artifact_content_offset;
-        Ok(u64::try_from(offset).unwrap_or(0))
+        let request = gateway.request(Method::HEAD, upload_url(&gateway, upload));
+        let response = gateway.execute(request).await.map_err(classify)?;
+        if !response.status().is_success() {
+            return Err(classify(Status::of(response).await));
+        }
+        response
+            .headers()
+            .get(artifact_upload::OFFSET_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or_else(|| {
+                Report::new(Error::Call).attach("the platform answered no Upload-Offset")
+            })
     }
 
     /// The platform's upload in short requests: the chunks streamed into
@@ -220,15 +251,7 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         offset: u64,
     ) -> Result<Box<dyn ArtifactSink>> {
         let gateway = gateway(context).await?;
-        let url = gateway.url([
-            "remora",
-            "v1",
-            "release",
-            &upload.release,
-            "artifact",
-            &upload.file_name,
-            &upload.content_id,
-        ]);
+        let url = upload_url(&gateway, &upload);
         Ok(Box::new(HttpArtifactSink {
             gateway,
             url,
@@ -824,14 +847,27 @@ mod tests {
         let adapter = OtaGatewayAdapterImpl;
         let whole = b"hello bundle";
         let mut sink = adapter
-            .begin_upload(&context, initial("id-1", whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-000000000001", whole),
+                0,
+            )
             .await
             .unwrap();
         sink.send(b"hello ".to_vec()).await.unwrap();
         sink.send(b"bundle".to_vec()).await.unwrap();
         sink.finish().await.unwrap();
 
-        assert_eq!(adapter.upload_offset(&context, "id-1").await.unwrap(), 12);
+        assert_eq!(
+            adapter
+                .upload_offset(
+                    &context,
+                    &initial("00000000-0000-4000-8000-000000000001", b"")
+                )
+                .await
+                .unwrap(),
+            12
+        );
         assert_eq!(gateway.artifact_bytes("r1", "bundle.raucb").unwrap(), whole);
         let release = adapter.get_release(&context, "r1").await.unwrap();
         assert_eq!(release.artifacts[0].tag_condition, "board:rp5");
@@ -845,7 +881,11 @@ mod tests {
 
         // Committed: never written again.
         let mut sink = adapter
-            .begin_upload(&context, initial("id-1", whole), 12)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-000000000001", whole),
+                12,
+            )
             .await
             .unwrap();
         sink.send(b"more".to_vec()).await.unwrap();
@@ -863,7 +903,11 @@ mod tests {
             .map(|i| (i % 251) as u8)
             .collect();
         let mut sink = adapter
-            .begin_upload(&context, initial("big", &whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-000000000002", &whole),
+                0,
+            )
             .await
             .unwrap();
         for chunk in whole.chunks(1024 * 1024) {
@@ -880,7 +924,11 @@ mod tests {
         let adapter = OtaGatewayAdapterImpl;
         let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
         let mut sink = adapter
-            .begin_upload(&context, initial("id-1", &bytes), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-000000000001", &bytes),
+                0,
+            )
             .await
             .unwrap();
         sink.send(bytes.clone()).await.unwrap();
@@ -927,7 +975,11 @@ mod tests {
         let whole = vec![0; 50 * 1024];
         gateway.0.lock().unwrap().fail_next_upload_after = Some(4);
         let mut sink = adapter
-            .begin_upload(&context, initial("id-2", &whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-000000000003", &whole),
+                0,
+            )
             .await
             .unwrap();
         let mut failed = None;
@@ -945,7 +997,16 @@ mod tests {
             format!("{report:?}").contains("connection reset"),
             "{report:?}"
         );
-        assert_eq!(adapter.upload_offset(&context, "id-2").await.unwrap(), 4);
+        assert_eq!(
+            adapter
+                .upload_offset(
+                    &context,
+                    &initial("00000000-0000-4000-8000-000000000003", b"")
+                )
+                .await
+                .unwrap(),
+            4
+        );
     }
 
     /// Waits until `done` holds of the fake's state.
@@ -961,8 +1022,8 @@ mod tests {
             "the gateway never got there: {:?}",
             (
                 state.abandoned_uploads,
-                state.upload_offset("a"),
-                state.upload_offset("b")
+                state.upload_offset("00000000-0000-4000-8000-00000000000a"),
+                state.upload_offset("00000000-0000-4000-8000-00000000000b")
             )
         );
     }
@@ -975,21 +1036,35 @@ mod tests {
 
         // Aborted on purpose: what arrived stays for a resume, uncommitted.
         let mut sink = adapter
-            .begin_upload(&context, initial("a", whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000a", whole),
+                0,
+            )
             .await
             .unwrap();
         sink.send(b"half a ".to_vec()).await.unwrap();
-        until(&gateway, |state| state.upload_offset("a") == 7).await;
+        until(&gateway, |state| {
+            state.upload_offset("00000000-0000-4000-8000-00000000000a") == 7
+        })
+        .await;
         sink.abort().await;
         until(&gateway, |state| state.abandoned_uploads == 1).await;
 
         // Dropped on an early return: same thing.
         let mut sink = adapter
-            .begin_upload(&context, initial("b", whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000b", whole),
+                0,
+            )
             .await
             .unwrap();
         sink.send(b"half".to_vec()).await.unwrap();
-        until(&gateway, |state| state.upload_offset("b") == 4).await;
+        until(&gateway, |state| {
+            state.upload_offset("00000000-0000-4000-8000-00000000000b") == 4
+        })
+        .await;
         drop(sink);
         until(&gateway, |state| state.abandoned_uploads == 2).await;
 
@@ -998,10 +1073,20 @@ mod tests {
         assert!(release.artifacts.is_empty());
 
         // From where it got, the rest; finishing commits the whole of it.
-        let offset = adapter.upload_offset(&context, "a").await.unwrap();
+        let offset = adapter
+            .upload_offset(
+                &context,
+                &initial("00000000-0000-4000-8000-00000000000a", b""),
+            )
+            .await
+            .unwrap();
         assert_eq!(offset, 7);
         let mut sink = adapter
-            .begin_upload(&context, initial("a", whole), offset)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000a", whole),
+                offset,
+            )
             .await
             .unwrap();
         sink.send(b"bundle".to_vec()).await.unwrap();
@@ -1017,7 +1102,11 @@ mod tests {
         let adapter = OtaGatewayAdapterImpl;
         let whole = b"half a bundle";
         let mut sink = adapter
-            .begin_upload(&context, initial("c", whole), 7)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000c", whole),
+                7,
+            )
             .await
             .unwrap();
         let _ = sink.send(b"bundle".to_vec()).await;
@@ -1027,7 +1116,14 @@ mod tests {
             format!("{report:?}").contains("holds 0 bytes"),
             "{report:?}"
         );
-        assert_eq!(gateway.0.lock().unwrap().upload_offset("c"), 0);
+        assert_eq!(
+            gateway
+                .0
+                .lock()
+                .unwrap()
+                .upload_offset("00000000-0000-4000-8000-00000000000c"),
+            0
+        );
     }
 
     /// The platform commits only the artifact announced: one whose bytes
@@ -1037,7 +1133,11 @@ mod tests {
         let (gateway, context) = with_release().await;
         let adapter = OtaGatewayAdapterImpl;
         let mut sink = adapter
-            .begin_upload(&context, initial("d", b"half a bundle"), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000d", b"half a bundle"),
+                0,
+            )
             .await
             .unwrap();
         sink.send(b"half a bungle".to_vec()).await.unwrap();
@@ -1048,7 +1148,16 @@ mod tests {
             "{report:?}"
         );
         assert!(gateway.artifact_bytes("r1", "bundle.raucb").is_none());
-        assert_eq!(adapter.upload_offset(&context, "d").await.unwrap(), 0);
+        assert_eq!(
+            adapter
+                .upload_offset(
+                    &context,
+                    &initial("00000000-0000-4000-8000-00000000000d", b"")
+                )
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     /// Storage gone mid-way: what was stored is where the rest goes.
@@ -1059,17 +1168,31 @@ mod tests {
         let whole = b"half a bundle";
         gateway.0.lock().unwrap().fail_next_upload_after = Some(7);
         let mut sink = adapter
-            .begin_upload(&context, initial("e", whole), 0)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000e", whole),
+                0,
+            )
             .await
             .unwrap();
         let _ = sink.send(whole.to_vec()).await;
         let report = sink.finish().await.unwrap_err();
         assert!(matches!(report.current_context(), Error::Unreachable));
 
-        let offset = adapter.upload_offset(&context, "e").await.unwrap();
+        let offset = adapter
+            .upload_offset(
+                &context,
+                &initial("00000000-0000-4000-8000-00000000000e", b""),
+            )
+            .await
+            .unwrap();
         assert_eq!(offset, 7);
         let mut sink = adapter
-            .begin_upload(&context, initial("e", whole), offset)
+            .begin_upload(
+                &context,
+                initial("00000000-0000-4000-8000-00000000000e", whole),
+                offset,
+            )
             .await
             .unwrap();
         sink.send(whole[offset as usize..].to_vec()).await.unwrap();
@@ -1081,7 +1204,13 @@ mod tests {
     async fn content_ids_are_fresh() {
         let adapter = OtaGatewayAdapterImpl;
         let id = adapter.new_content_id();
-        assert_eq!(id.len(), 32);
+        // A version 4 UUID, hyphenated.
+        assert_eq!(id.len(), 36);
+        assert_eq!(&id[14..15], "4");
+        assert_eq!(
+            remora_ota::model::upload_token(&id).as_deref(),
+            Some(id.as_str())
+        );
         assert_ne!(id, adapter.new_content_id());
     }
 

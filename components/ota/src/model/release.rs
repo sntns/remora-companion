@@ -123,3 +123,67 @@ mod tests {
         assert!(tags("").is_empty());
     }
 }
+
+/// Whether the platform takes `name` as an artifact's file name: one path
+/// segment of `[A-Za-z0-9._+~@-]`, not starting with a dot.
+pub fn is_artifact_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '~' | '@' | '-'))
+}
+
+/// An upload's resume token as the platform takes it, a UUID (hyphenated,
+/// lowercase); `None` for anything else. Its 32 bare hex digits are taken
+/// too, hyphenated.
+pub fn upload_token(token: &str) -> Option<String> {
+    let hex: String = token.chars().filter(|c| *c != '-').collect();
+    let hyphens_in_place = !token.contains('-')
+        || (token.len() == 36 && [8, 13, 18, 23].iter().all(|&i| &token[i..=i] == "-"));
+    if hex.len() != 32 || !hyphens_in_place || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let hex = hex.to_ascii_lowercase();
+    Some(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    #[test]
+    fn artifact_file_names() {
+        for good in ["update-rp5.raucb", "disk.wic.bmaptar", "a+b~c@d_e.1"] {
+            assert!(is_artifact_file_name(good), "{good}");
+        }
+        for bad in ["", ".hidden", "dir/file", "with space", "é.raucb", "a:b"] {
+            assert!(!is_artifact_file_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn upload_tokens() {
+        let uuid = "3c9609be-f00b-4fe9-9319-06d8be517230";
+        assert_eq!(upload_token(uuid).as_deref(), Some(uuid));
+        assert_eq!(
+            upload_token("3C9609BEF00B4FE9931906D8BE517230").as_deref(),
+            Some(uuid)
+        );
+        for bad in [
+            "token-1",
+            "",
+            "3c9609bef00b4fe9931906d8be51723",
+            "3c9609be-f00b4fe9-9319-06d8be517230x",
+        ] {
+            assert_eq!(upload_token(bad), None, "{bad}");
+        }
+    }
+}

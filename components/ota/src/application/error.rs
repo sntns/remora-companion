@@ -12,6 +12,10 @@ pub enum Error {
     UpdateRelease(String),
     #[error("failed to delete release {0:?}")]
     DeleteRelease(String),
+    #[error("{0:?} can't be an artifact's file name: only letters, digits and . _ + ~ @ -, not starting with a dot (choose another with --file-name)")]
+    ArtifactFileName(String),
+    #[error("{0:?} is not a resume token: the one an interrupted upload printed is a UUID")]
+    ResumeToken(String),
     /// Local, so not worth resuming: retrying wouldn't read it any better.
     #[error("failed to read {0}")]
     ReadArtifact(std::path::PathBuf),

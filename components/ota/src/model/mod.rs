@@ -6,8 +6,8 @@ pub use deployment::{
     DeploymentSummary, LogEntry, LogProgress, Planned, PlannedOutcome, Targets, WatchOutcome,
 };
 pub use release::{
-    tags, Artifact, DownloadOutcome, DownloadRequest, Release, ReleaseSummary, UploadOutcome,
-    UploadRequest,
+    is_artifact_file_name, tags, upload_token, Artifact, DownloadOutcome, DownloadRequest, Release,
+    ReleaseSummary, UploadOutcome, UploadRequest,
 };
 
 /// A label map, sorted for stable output.

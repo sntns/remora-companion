@@ -280,9 +280,9 @@ async fn an_interrupted_upload_resumes_with_the_printed_token() {
         .next()
         .unwrap()
         .chars()
-        .take_while(char::is_ascii_hexdigit)
+        .take_while(|c| c.is_ascii_hexdigit() || *c == '-')
         .collect::<String>();
-    assert_eq!(token.len(), 32, "{seen}");
+    assert_eq!(token.len(), 36, "{seen}");
     gateway.0.lock().unwrap().upload_chunk_delay = None;
     let (code, _, stderr) = rmra
         .run(&[

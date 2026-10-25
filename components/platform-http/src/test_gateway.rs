@@ -558,11 +558,42 @@ async fn delete_release(
 async fn upload_offset(
     Shared(gateway): Shared<TestGateway>,
     Path(id): Path<String>,
+    RawQuery(query): RawQuery,
 ) -> Answer<model::UploadOffsetResponse> {
+    // As the platform: an upload's offset is read within its release.
+    if query_value(query.as_deref(), "release_name").is_none_or(|name| name.is_empty()) {
+        return Err(rpc_error(
+            Code::InvalidArgument,
+            "release-name: cannot be blank.",
+        ));
+    }
     let offset = gateway.state().upload_offset(&id);
     Ok(Json(model::UploadOffsetResponse {
         artifact_content_offset: offset as i64,
     }))
+}
+
+/// The platform's rules for an upload's resource: a UUID content id, and a
+/// file name of one segment of `[A-Za-z0-9._+~@-]`, not starting with a
+/// dot.
+fn upload_refused(file_name: &str, content_id: &str) -> Option<Response> {
+    let uuid = content_id.len() == 36
+        && content_id.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        });
+    if !uuid {
+        return Some(text_error(
+            Code::InvalidArgument,
+            "the content id must be a UUID",
+        ));
+    }
+    let name_ok = !file_name.is_empty()
+        && !file_name.starts_with('.')
+        && file_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '~' | '@' | '-'));
+    (!name_ok).then(|| text_error(Code::InvalidArgument, "an invalid artifact file name"))
 }
 
 /// Counts an upload request as abandoned unless its body ended cleanly --
@@ -595,8 +626,11 @@ fn with_offset(mut response: Response, offset: usize) -> Response {
 /// The platform's `HEAD`: how far an upload got.
 async fn upload_head(
     Shared(gateway): Shared<TestGateway>,
-    Path((_release, _file_name, content_id)): Path<(String, String, String)>,
+    Path((_release, file_name, content_id)): Path<(String, String, String)>,
 ) -> Response {
+    if let Some(refused) = upload_refused(&file_name, &content_id) {
+        return refused;
+    }
     let offset = gateway.state().upload_offset(&content_id);
     with_offset(StatusCode::OK.into_response(), offset)
 }
@@ -606,10 +640,13 @@ async fn upload_head(
 /// committed.
 async fn upload_put(
     Shared(gateway): Shared<TestGateway>,
-    Path((release, _file_name, content_id)): Path<(String, String, String)>,
+    Path((release, file_name, content_id)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Some(refused) = upload_refused(&file_name, &content_id) {
+        return refused;
+    }
     let Some(offset) = header(&headers, artifact_upload::OFFSET_HEADER)
         .and_then(|offset| offset.parse::<usize>().ok())
     else {
@@ -690,6 +727,9 @@ async fn upload_commit(
     Json(request): Json<artifact_upload::CommitRequest>,
 ) -> Answer<artifact_upload::CommitResponse> {
     use sha2::Digest;
+    if let Some(refused) = upload_refused(&file_name, &content_id) {
+        return Err(refused);
+    }
     let mut state = gateway.state();
     if !state.releases.contains_key(&release) {
         return Err(not_found("release"));

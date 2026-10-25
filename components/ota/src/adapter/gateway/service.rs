@@ -103,7 +103,10 @@ pub trait OtaGatewayAdapter: Send + Sync {
     /// is the platform's contract, and making one takes randomness.
     fn new_content_id(&self) -> String;
     /// How many bytes the platform already holds for an upload's resume token.
-    async fn upload_offset(&self, context: &ResolvedContext, content_id: &str) -> Result<u64>;
+    /// How many bytes the platform holds for an upload (its release, file
+    /// name and content id).
+    async fn upload_offset(&self, context: &ResolvedContext, upload: &InitialUpload)
+        -> Result<u64>;
     /// Starts sending an artifact's bytes from `offset`: what the platform
     /// holds for its content id (see `upload_offset`).
     async fn begin_upload(

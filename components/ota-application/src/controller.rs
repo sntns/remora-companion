@@ -21,10 +21,10 @@ use remora_ota::{
     },
     application::{Error, OtaServiceInterface, Result},
     model::{
-        DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
-        DeploymentSummary, DownloadOutcome, DownloadRequest, Labels, LogEntry, Planned,
-        PlannedOutcome, Release, ReleaseSummary, Targets, UploadOutcome, UploadRequest,
-        WatchOutcome,
+        is_artifact_file_name, upload_token, DeployRequest, Deployment, DeploymentFilter,
+        DeploymentProgress, DeploymentStatus, DeploymentSummary, DownloadOutcome, DownloadRequest,
+        Labels, LogEntry, Planned, PlannedOutcome, Release, ReleaseSummary, Targets, UploadOutcome,
+        UploadRequest, WatchOutcome,
     },
 };
 use remora_progress::OperationContext;
@@ -612,10 +612,17 @@ impl OtaServiceInterface for OtaControllerImpl {
                 .map(str::to_owned)
                 .ok_or_else(|| Report::new(unreadable()))?,
         };
-        let content_id = request
-            .resume
-            .clone()
-            .unwrap_or_else(|| self.gateway.new_content_id());
+        // The platform's rules for both, told now rather than after
+        // reading the whole file.
+        if !is_artifact_file_name(&file_name) {
+            return Err(Report::new(Error::ArtifactFileName(file_name)));
+        }
+        let content_id = match &request.resume {
+            Some(token) => {
+                upload_token(token).ok_or_else(|| Report::new(Error::ResumeToken(token.clone())))?
+            }
+            None => self.gateway.new_content_id(),
+        };
         // The platform commits only an artifact of this length and hash:
         // a file that changes while uploading is refused, not published.
         let checksum_sha256 = match self.checksum(&request.path, ctx).await {
@@ -662,7 +669,7 @@ impl OtaServiceInterface for OtaControllerImpl {
                 0
             } else {
                 self.gateway
-                    .upload_offset(&context, &initial.content_id)
+                    .upload_offset(&context, &initial)
                     .await
                     .change_context_lazy(failed)?
             };
@@ -1145,7 +1152,7 @@ mod tests {
                     file_name: "update-rp5.raucb".into(),
                     content_type: "application/octet-stream".into(),
                     tag_condition: "board:rp5".into(),
-                    content_id: "token-1".into(),
+                    content_id: "00000000-0000-4000-8000-0000000000aa".into(),
                     content_length: bytes.len() as u64,
                     checksum_sha256: sha256(&bytes),
                 },
@@ -1167,17 +1174,49 @@ mod tests {
         let outcome = ota
             .upload(
                 None,
-                upload(&path, Some("token-1".into())),
+                upload(&path, Some("00000000-0000-4000-8000-0000000000aa".into())),
                 &OperationContext::noop(),
             )
             .await
             .unwrap();
-        assert_eq!(outcome.content_id, "token-1");
+        assert_eq!(outcome.content_id, "00000000-0000-4000-8000-0000000000aa");
         assert_eq!(outcome.resumed_from, (CHUNK / 2) as u64);
         assert_eq!(
             gateway.artifact_bytes("r1", "update-rp5.raucb").unwrap(),
             bytes
         );
+    }
+
+    /// What the platform would refuse is refused before the file is read.
+    #[tokio::test]
+    async fn an_unusable_file_name_or_token_is_refused_up_front() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ota, _) = controller(dir.path()).await;
+        ota.create_release(None, "r1", "1.0.0", &Labels::new())
+            .await
+            .unwrap();
+        let (path, _) = bundle(dir.path(), 10);
+
+        let mut request = upload(&path, None);
+        request.file_name = Some("my bundle.raucb".into());
+        let report = ota
+            .upload(None, request, &OperationContext::noop())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            report.current_context(),
+            Error::ArtifactFileName(_)
+        ));
+
+        let report = ota
+            .upload(
+                None,
+                upload(&path, Some("token-1".into())),
+                &OperationContext::noop(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::ResumeToken(_)));
     }
 
     #[tokio::test]
