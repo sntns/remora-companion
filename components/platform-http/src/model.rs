@@ -206,8 +206,8 @@ pub struct UploadOffsetResponse {
 }
 
 /// An artifact upload in as many short requests as it takes, the
-/// hand-written routes under
-/// `/remora/v1/release/{release_name}/artifact-upload/{artifact_content_id}`
+/// hand-written routes of one resource,
+/// `/remora/v1/release/{release_name}/artifact/{artifact_file_name}/{artifact_content_id}`
 /// (the content id is the client's own, kept for the whole upload):
 ///
 /// - `PUT` with [`artifact_upload::OFFSET_HEADER`] (what is stored so far)
@@ -216,9 +216,9 @@ pub struct UploadOffsetResponse {
 ///   an earlier request still writes, 410 once committed. A request cut
 ///   short keeps what it delivered.
 /// - `HEAD`: the offset, in the same header.
-/// - `POST .../commit` with [`artifact_upload::CommitRequest`]: the
-///   artifact, if what is stored has that length and checksum -- else 400,
-///   and what was stored is dropped.
+/// - `POST` with [`artifact_upload::CommitRequest`]: the artifact, if what
+///   is stored has that length and checksum -- else 400, and what was
+///   stored is dropped.
 pub mod artifact_upload {
     use serde::{Deserialize, Serialize};
 
@@ -231,7 +231,6 @@ pub mod artifact_upload {
     #[derive(Debug, Clone, Default, Serialize, Deserialize)]
     #[serde(default)]
     pub struct CommitRequest {
-        pub artifact_file_name: String,
         pub artifact_content_type: String,
         pub artifact_tag_condition: String,
         #[serde(with = "super::int64")]
@@ -624,12 +623,12 @@ mod tests {
         .unwrap();
         assert!(matches!(frame, deployment_log::Frame::Log { entry } if entry.result == "success"));
         let commit = serde_json::to_value(artifact_upload::CommitRequest {
-            artifact_file_name: "b.raucb".into(),
+            artifact_content_type: "application/octet-stream".into(),
             artifact_content_length: 12,
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(commit["artifact_file_name"], "b.raucb");
+        assert_eq!(commit["artifact_content_type"], "application/octet-stream");
         assert_eq!(commit["artifact_content_length"], "12");
     }
 }

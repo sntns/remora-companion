@@ -225,7 +225,8 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
             "v1",
             "release",
             &upload.release,
-            "artifact-upload",
+            "artifact",
+            &upload.file_name,
             &upload.content_id,
         ]);
         Ok(Box::new(HttpArtifactSink {
@@ -634,7 +635,7 @@ async fn put_outcome(answer: std::result::Result<Response, Status>) -> Result<u6
 
 struct HttpArtifactSink {
     gateway: Gateway,
-    /// `.../artifact-upload/{content_id}`.
+    /// `.../artifact/{file_name}/{content_id}`: written to, then committed.
     url: remora_platform_http::Url,
     upload: InitialUpload,
     /// What the platform holds, as of the last request that ended.
@@ -705,15 +706,10 @@ impl ArtifactSink for HttpArtifactSink {
             "" => "application/octet-stream".to_owned(),
             given => given.to_owned(),
         };
-        let mut url = self.url.clone();
-        url.path_segments_mut()
-            .expect("a base URL has a host")
-            .push("commit");
         self.gateway
             .post::<_, artifact_upload::CommitResponse>(
-                url,
+                self.url.clone(),
                 &artifact_upload::CommitRequest {
-                    artifact_file_name: self.upload.file_name.clone(),
                     artifact_content_type: content_type,
                     artifact_tag_condition: self.upload.tag_condition.clone(),
                     artifact_content_length: i64::try_from(self.upload.content_length)

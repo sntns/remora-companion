@@ -328,14 +328,11 @@ impl TestGateway {
             )
             // A request carries as much as the client sends: no cap.
             .route(
-                "/remora/v1/release/{release_name}/artifact-upload/{artifact_content_id}",
+                "/remora/v1/release/{release_name}/artifact/{artifact_file_name}/{artifact_content_id}",
                 put(upload_put)
                     .head(upload_head)
+                    .post(upload_commit)
                     .layer(DefaultBodyLimit::disable()),
-            )
-            .route(
-                "/remora/v1/release/{release_name}/artifact-upload/{artifact_content_id}/commit",
-                post(upload_commit),
             )
             .route(
                 "/remora/v1/release/{release_name}/artifact/{artifact_file_name}",
@@ -598,7 +595,7 @@ fn with_offset(mut response: Response, offset: usize) -> Response {
 /// The platform's `HEAD`: how far an upload got.
 async fn upload_head(
     Shared(gateway): Shared<TestGateway>,
-    Path((_release, content_id)): Path<(String, String)>,
+    Path((_release, _file_name, content_id)): Path<(String, String, String)>,
 ) -> Response {
     let offset = gateway.state().upload_offset(&content_id);
     with_offset(StatusCode::OK.into_response(), offset)
@@ -609,7 +606,7 @@ async fn upload_head(
 /// committed.
 async fn upload_put(
     Shared(gateway): Shared<TestGateway>,
-    Path((release, content_id)): Path<(String, String)>,
+    Path((release, _file_name, content_id)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
@@ -689,7 +686,7 @@ async fn upload_put(
 /// the announced length and checksum -- else what it holds is dropped.
 async fn upload_commit(
     Shared(gateway): Shared<TestGateway>,
-    Path((release, content_id)): Path<(String, String)>,
+    Path((release, file_name, content_id)): Path<(String, String, String)>,
     Json(request): Json<artifact_upload::CommitRequest>,
 ) -> Answer<artifact_upload::CommitResponse> {
     use sha2::Digest;
@@ -726,23 +723,21 @@ async fn upload_commit(
             ),
         ));
     }
-    if request.artifact_file_name.is_empty() || request.artifact_content_type.is_empty() {
+    if request.artifact_content_type.is_empty() {
         return Err(rpc_error(
             Code::InvalidArgument,
-            "artifact-file-name: cannot be blank; artifact-content-type: cannot be blank.",
+            "artifact-content-type: cannot be blank.",
         ));
     }
     state.committed_uploads.insert(content_id.clone());
     let descriptor = state.releases.get_mut(&release).expect("checked above");
-    descriptor
-        .artifacts
-        .retain(|a| a.file_name != request.artifact_file_name);
+    descriptor.artifacts.retain(|a| a.file_name != file_name);
     descriptor.artifacts.push(model::ReleaseArtifact {
         object_reference: Some(ResourceReference {
             id: content_id,
             ..Default::default()
         }),
-        file_name: request.artifact_file_name,
+        file_name,
         content_type: request.artifact_content_type,
         content_length: request.artifact_content_length,
         checksum_sha256: checksum,
