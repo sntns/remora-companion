@@ -24,15 +24,15 @@ From the [latest release](https://github.com/sntns/remora-companion/releases/lat
 macOS / Linux:
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.sh | sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/remora-etcher-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/install.sh | sh -s rmra
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sntns/remora-companion/releases/latest/download/install.sh | sh -s remora-etcher
 ```
 
 Windows (PowerShell):
 
 ```
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion/releases/latest/download/rmra-installer.ps1 | iex"
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/sntns/remora-companion/releases/latest/download/remora-etcher-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://github.com/sntns/remora-companion/releases/latest/download/install.ps1))) rmra"
+powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://github.com/sntns/remora-companion/releases/latest/download/install.ps1))) remora-etcher"
 ```
 
 Homebrew:
@@ -42,19 +42,18 @@ brew install sntns/tap/rmra
 brew install sntns/tap/remora-etcher
 ```
 
-Install either one or both. The installers put the binary in
-`~/.local/bin` (`RMRA_INSTALL_DIR=/path` to choose) and add it to your
-PATH. Linux binaries are static (musl): one binary for any distribution.
+Install either one or both. The install script runs the release's own
+installer (`<binary>-installer.sh`/`.ps1`, also usable alone), which puts
+the binary in `~/.local/bin` (`RMRA_INSTALL_DIR=/path` to choose) and adds
+it to your PATH, then enables its shell completion: one line added to your
+shell's startup file (`~/.zshrc`, `~/.bashrc`, fish's `config.fish`,
+PowerShell's `$PROFILE`), once. `NO_COMPLETION=1` skips that. Linux binaries
+are static (musl): one binary for any distribution.
 
-Then enable shell completion, e.g. for zsh (`rmra completion` gives the
-line for your own shell):
-
-```
-rmra completion zsh >> ~/.zshrc
-remora-etcher completion zsh >> ~/.zshrc
-```
-
-Each appends a line that only loads when its binary is on the PATH, e.g.
+To enable completion yourself (after a Homebrew install, or for another
+shell): `rmra completion --install` (or `rmra completion fish --install`);
+`rmra completion` alone prints the line instead. It only loads when its
+binary is on the PATH, e.g.
 `if command -v rmra >/dev/null; then source <(COMPLETE=zsh rmra); fi`, so
 it stays harmless once the tool is uninstalled.
 

@@ -24,6 +24,9 @@ tap = "sntns/homebrew-tap"
 publish-jobs = ["homebrew"]
 # Where the shell/powershell installers put the binaries: flat, no ~/.cargo.
 install-path = "~/.local/bin"
+# install.sh / install.ps1, published with each release: the release's own
+# installer, then the binary's shell completion (installers/).
+global-artifacts-jobs = ["./install-scripts"]
 # Build a plan on PRs (cheap), everything on tags.
 pr-run-mode = "plan"
 # Build provenance attestations: GitHub only offers them to public repos on

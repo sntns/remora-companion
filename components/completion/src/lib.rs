@@ -20,6 +20,7 @@ pub use cache::Cache;
 
 use std::{
     ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
@@ -161,6 +162,14 @@ pub struct Args {
     /// The shell to set up (default: from $SHELL).
     #[arg(value_enum)]
     shell: Option<Shell>,
+    /// Add the line to the shell's startup file yourself (once: running it
+    /// again changes nothing). What the install scripts run.
+    #[arg(long)]
+    install: bool,
+    /// With --install: the startup file to add it to, instead of the
+    /// shell's usual one (PowerShell's is `$PROFILE`, which only it knows).
+    #[arg(long, value_name = "PATH", requires = "install")]
+    file: Option<std::path::PathBuf>,
 }
 
 /// `<bin> completion`: says how to enable completion for `bin`, and prints
@@ -176,11 +185,85 @@ pub fn instructions(bin: &str, args: Args, completes: &str) -> i32 {
         ));
         return 1;
     };
+    if args.install {
+        return install_line(bin, shell, args.file, completes);
+    }
     let (file, line) = enable_line(bin, shell);
     remora_tui::note(format!("Enable completion: add this line to {file}"), &line);
     remora_tui::step(format!("Then open a new shell. {completes}"));
     println!("{line}");
     0
+}
+
+/// `<bin> completion --install`: adds the line enabling completion to the
+/// shell's startup file, unless it is there already.
+fn install_line(bin: &str, shell: Shell, file: Option<PathBuf>, completes: &str) -> i32 {
+    let (usual, line) = enable_line(bin, shell);
+    let Some(path) = file.or_else(|| startup_file(usual)) else {
+        remora_tui::warning(format!(
+            "Can't tell where {usual} is: pass it with --file, or add this line to it yourself: {line}"
+        ));
+        return 1;
+    };
+    match add_line(&path, &line, bin) {
+        Ok(false) => {
+            remora_tui::info(format!(
+                "{bin} completion is already enabled in {}",
+                path.display()
+            ));
+            0
+        }
+        Ok(true) => {
+            remora_tui::success(format!("Enabled {bin} completion in {}", path.display()));
+            remora_tui::step(format!("Open a new shell. {completes}"));
+            0
+        }
+        Err(error) => {
+            remora_tui::warning(format!(
+                "Can't write {}: {error}. Add this line to it yourself: {line}",
+                path.display()
+            ));
+            1
+        }
+    }
+}
+
+/// A shell's usual startup file, `~` expanded; `None` for one only the
+/// shell can name (PowerShell's `$PROFILE`) or without a home.
+fn startup_file(usual: &str) -> Option<PathBuf> {
+    let rest = usual.strip_prefix("~/")?;
+    Some(std::env::home_dir()?.join(rest))
+}
+
+/// Appends `line` (and a comment saying whose it is) to `path`, creating
+/// it and its directory if need be; `false` when `line` is there already.
+fn add_line(path: &Path, line: &str, bin: &str) -> std::io::Result<bool> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    if existing.lines().any(|existing| existing.trim() == line) {
+        return Ok(false);
+    }
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    // A blank line after what is there, never glued to its last line.
+    let separator = match existing.as_str() {
+        "" => "",
+        text if text.ends_with('\n') => "\n",
+        _ => "\n\n",
+    };
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    std::io::Write::write_all(
+        &mut file,
+        format!("{separator}# {bin} shell completion\n{line}\n").as_bytes(),
+    )?;
+    Ok(true)
 }
 
 fn shell_from_env() -> Option<Shell> {
@@ -265,5 +348,27 @@ mod tests {
             enable_line("rmra", Shell::Powershell).1,
             "if (Get-Command rmra -ErrorAction SilentlyContinue) { $env:COMPLETE = \"powershell\"; rmra | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE }"
         );
+    }
+
+    #[test]
+    fn installing_adds_the_line_once() {
+        let dir = std::env::temp_dir().join(format!("remora-completion-{}", std::process::id()));
+        let rc = dir.join("nested").join(".zshrc");
+        let (_, line) = enable_line("rmra", Shell::Zsh);
+        assert!(add_line(&rc, &line, "rmra").unwrap());
+        assert!(!add_line(&rc, &line, "rmra").unwrap());
+        let text = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(text.matches(line.as_str()).count(), 1);
+        assert!(text.starts_with("# rmra shell completion\n"), "{text}");
+
+        // After what is there, never glued to its last line.
+        let other = dir.join(".bashrc");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&other, "export A=1").unwrap();
+        let (_, line) = enable_line("remora-etcher", Shell::Bash);
+        assert!(add_line(&other, &line, "remora-etcher").unwrap());
+        let text = std::fs::read_to_string(&other).unwrap();
+        assert!(text.starts_with("export A=1\n\n# remora-etcher"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

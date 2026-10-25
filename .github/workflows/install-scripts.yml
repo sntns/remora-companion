@@ -1,0 +1,31 @@
+name: Install scripts
+
+# A global artifacts job of dist's release workflow (`global-artifacts-jobs`
+# in dist-workspace.toml): publishes installers/install.sh and install.ps1
+# with each release, pinned to it -- they run the release's own dist
+# installer, then enable the binary's shell completion. Its artifacts are
+# named artifacts-*, which the release job uploads with the rest.
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  install-scripts:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE: ${{ fromJson(inputs.plan).announcement_tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          mkdir -p out
+          for script in install.sh install.ps1; do
+            sed "s/@RELEASE@/${RELEASE}/" "installers/${script}" > "out/${script}"
+          done
+          grep -q "${RELEASE}" out/install.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-install-scripts
+          path: out/*
