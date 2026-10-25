@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// The production gateway a fresh `login` suggests.
-pub const DEFAULT_ADDRESS: &str = "api.eu2.sntns.io:50051";
+pub const DEFAULT_ADDRESS: &str = "api.eu2.sntns.io";
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -43,12 +43,12 @@ pub enum Command {
         #[arg(long, value_name = "CONTEXT", conflicts_with_all = ["address", "plaintext", "ca_files", "server_name"])]
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         from: Option<String>,
-        /// The gateway, `host:port` (default: api.eu2.sntns.io:50051).
+        /// The gateway, `host[:port]` or a URL (default: api.eu2.sntns.io).
         #[arg(long)]
         address: Option<String>,
         #[arg(long)]
         description: Option<String>,
-        /// Talk plaintext h2c (local development stacks only).
+        /// Talk plain HTTP (local development stacks only).
         #[arg(long)]
         plaintext: bool,
         /// A PEM certificate authority to trust for this gateway, on top of

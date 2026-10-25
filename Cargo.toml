@@ -52,7 +52,7 @@ members = [
     "components/batch-application",
     "components/batch-application-transport-cli",
     "components/factory",
-    "components/factory-adapter-grpc",
+    "components/factory-adapter-http",
     "components/factory-adapter-local",
     "components/factory-application",
     "components/factory-application-transport-cli",
@@ -67,17 +67,17 @@ members = [
     "components/claim",
     "components/claim-application",
     "components/claim-adapter-http",
-    "components/platform-grpc",
+    "components/platform-http",
     "components/tui",
     "components/completion",
     "components/context",
     "components/context-application",
     "components/context-adapter-file",
-    "components/context-adapter-grpc",
+    "components/context-adapter-http",
     "components/context-application-transport-cli",
     "components/channel",
     "components/channel-application",
-    "components/channel-adapter-grpc",
+    "components/channel-adapter-http",
     "components/channel-adapter-openssh",
     "components/channel-application-transport-cli",
     "components/console",
@@ -86,12 +86,12 @@ members = [
     "components/console-application-transport-cli",
     "components/ota",
     "components/ota-application",
-    "components/ota-adapter-grpc",
+    "components/ota-adapter-http",
     "components/ota-adapter-file",
     "components/ota-application-transport-cli",
     "components/device",
     "components/device-application",
-    "components/device-adapter-grpc",
+    "components/device-adapter-http",
     "components/device-application-transport-cli",
     "components/update",
     "components/update-application",
@@ -154,7 +154,8 @@ tokio-util = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# The provisioning station: its HTTP server (axum, already under tonic),
+# The provisioning station: its HTTP server (axum; the fake platform
+# gateway of the tests too),
 # station.yaml (the same YAML crate as remora-edge's configuration), and
 # its durations and journal timestamps.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
@@ -182,16 +183,15 @@ pem = "4.0"
 x509-cert = { version = "0.3", default-features = false, features = ["std"] }
 sha2 = "0.11"
 
-# rmra's gRPC client to sntns-platform's public gateways (remora channel,
-# iam). The .proto files are vendored under components/platform-grpc/proto
-# and compiled with protox, a pure-Rust protobuf compiler, so no protoc is
-# needed on any CI runner (Windows/macOS included).
-tonic = { version = "0.14", default-features = false, features = ["codegen", "transport", "tls-ring", "tls-native-roots", "tls-webpki-roots"] }
-tonic-prost = "0.14"
-prost-types = "0.14"
-prost = "0.14"
-tonic-prost-build = "0.14"
-protox = "0.9"
+# The client of sntns-platform's public gateways (iam, remora, remora
+# channel), over their REST API and WebSockets: reqwest for the calls and
+# the artifact transfers, tokio-tungstenite for a device channel, both over
+# one rustls configuration (webpki and native roots, plus a context's own).
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake", "__rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8"
+webpki-roots = "1"
+url = "2"
 # rmra's terminal output: clack-style prompts/spinners/log lines (all on
 # stderr, which keeps stdout clean for `channel open`'s tunnel) and tables.
 cliclack = "0.5"

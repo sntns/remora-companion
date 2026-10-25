@@ -3,14 +3,27 @@
 //! carries stdin to the device and the device's answer to stdout -- with
 //! the end of stdin arriving as a half-close the device still answers.
 
-use std::{pin::Pin, process::Stdio};
+use std::process::Stdio;
 
-use remora_platform_grpc::sntns::service::{
-    iam::v1 as iam, remorachannel::v1 as pb, v1::ResourceReference,
+use remora_platform_http::{
+    model::{self, channel, ResourceReference},
+    test_gateway::{
+        accept_channel,
+        axum::{
+            extract::{
+                ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
+                Path,
+            },
+            http::HeaderMap,
+            response::Response,
+            routing::{get, post},
+            Json, Router,
+        },
+        header, rpc_error, serve_router, text_error,
+    },
+    Code,
 };
-use tokio::{io::AsyncWriteExt, sync::mpsc};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tonic::{Request, Response, Status, Streaming};
+use tokio::io::AsyncWriteExt;
 
 const TOKEN: &str = "operator-token";
 
@@ -20,241 +33,165 @@ const OPS_ROLE: &str = "urn:sntns:iam:local:other:role:ops";
 /// Authenticates the call and says which tenant it acts in: the login's
 /// own ("acme"), or, with an assume-role header, the role's -- as the
 /// platform does, refusing a role the login may not assume.
-fn authorized<T>(request: &Request<T>) -> Result<&'static str, Status> {
-    match request.metadata().get("authentication-token") {
-        Some(token) if token == TOKEN => {}
-        _ => return Err(Status::unauthenticated("invalid access key")),
+fn authorized(headers: &HeaderMap) -> Result<&'static str, (Code, &'static str)> {
+    if header(headers, "authentication-token") != Some(TOKEN) {
+        return Err((Code::Unauthenticated, "invalid access key"));
     }
-    match request
-        .metadata()
-        .get("assume-role")
-        .map(|v| v.to_str().unwrap_or_default())
-    {
+    match header(headers, "assume-role") {
         None => Ok("acme"),
         Some(OPS_ROLE) => Ok("other"),
-        Some(_) => Err(Status::permission_denied("role permission denied")),
+        Some(_) => Err((Code::PermissionDenied, "role permission denied")),
     }
 }
 
-struct Iam;
+/// [`authorized`], answered the way the REST routes do.
+#[allow(clippy::result_large_err)]
+fn rest_authorized(headers: &HeaderMap) -> Result<&'static str, Response> {
+    authorized(headers).map_err(|(code, message)| rpc_error(code, message))
+}
 
-#[tonic::async_trait]
-impl iam::user_service_server::UserService for Iam {
-    async fn get_current_user(
-        &self,
-        request: Request<iam::UserServiceGetCurrentUserRequest>,
-    ) -> Result<Response<iam::UserServiceGetCurrentUserResponse>, Status> {
-        // An assumed role's principal is no user.
-        if authorized(&request)? != "acme" {
-            return Err(Status::not_found("user not found"));
-        }
-        Ok(Response::new(iam::UserServiceGetCurrentUserResponse {
-            user_descriptor: Some(iam::UserDescriptor {
-                resource: Some(ResourceReference {
-                    urn: "urn:sntns:iam:local:acme:user:ada".into(),
-                    name: "ada".into(),
-                    ..Default::default()
-                }),
+async fn current_user(headers: HeaderMap) -> Result<Json<model::GetCurrentUserResponse>, Response> {
+    // An assumed role's principal is no user.
+    if rest_authorized(&headers)? != "acme" {
+        return Err(rpc_error(Code::NotFound, "user not found"));
+    }
+    Ok(Json(model::GetCurrentUserResponse {
+        user_descriptor: Some(model::UserDescriptor {
+            resource: Some(ResourceReference {
+                urn: "urn:sntns:iam:local:acme:user:ada".into(),
+                name: "ada".into(),
                 ..Default::default()
             }),
-        }))
-    }
+            ..Default::default()
+        }),
+    }))
 }
 
-#[tonic::async_trait]
-impl iam::account_service_server::AccountService for Iam {
-    async fn get_current_account(
-        &self,
-        request: Request<iam::AccountServiceGetCurrentAccountRequest>,
-    ) -> Result<Response<iam::AccountServiceGetCurrentAccountResponse>, Status> {
-        let tenant = authorized(&request)?;
-        Ok(Response::new(
-            iam::AccountServiceGetCurrentAccountResponse {
-                account_descriptor: Some(iam::AccountDescriptor {
-                    resource: Some(ResourceReference {
-                        name: tenant.into(),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }),
-            },
-        ))
-    }
+async fn current_account(
+    headers: HeaderMap,
+) -> Result<Json<model::GetCurrentAccountResponse>, Response> {
+    let tenant = rest_authorized(&headers)?;
+    Ok(Json(model::GetCurrentAccountResponse {
+        account_descriptor: Some(model::AccountDescriptor {
+            resource: Some(ResourceReference {
+                name: tenant.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    }))
 }
 
 /// A device that reads everything until the client half-closes, then
 /// answers with what it read, reversed -- so the answer can only arrive if
 /// the half-close did not end the channel.
-struct Channels;
-
-type Responses =
-    Pin<Box<dyn Stream<Item = Result<pb::ChannelServiceOpenDeviceChannelResponse, Status>> + Send>>;
-
-fn message(
-    response: pb::channel_service_open_device_channel_response::Response,
-) -> Result<pb::ChannelServiceOpenDeviceChannelResponse, Status> {
-    Ok(pb::ChannelServiceOpenDeviceChannelResponse {
-        response: Some(response),
-    })
+async fn reverse(mut socket: WebSocket) {
+    let mut received = Vec::new();
+    while let Some(Ok(message)) = socket.recv().await {
+        match message {
+            Message::Binary(bytes) => received.extend_from_slice(&bytes),
+            Message::Text(_) | Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    received.reverse();
+    let _ = socket.send(Message::Binary(received.into())).await;
+    let _ = socket.send(Message::Text(channel::EOF.into())).await;
+    let _ = socket.send(close(1000, "")).await;
 }
 
-#[tonic::async_trait]
-impl pb::channel_service_server::ChannelService for Channels {
-    type OpenDeviceChannelStream = Responses;
+/// Opens, then goes away mid-channel, as a device rebooting does.
+async fn drop_after_first(mut socket: WebSocket) {
+    let _ = socket.recv().await;
+    let _ = socket.send(close(1011, "the device went away")).await;
+}
 
-    async fn open_device_channel(
-        &self,
-        request: Request<Streaming<pb::ChannelServiceOpenDeviceChannelRequest>>,
-    ) -> Result<Response<Responses>, Status> {
-        use pb::channel_service_open_device_channel_request::Request as In;
-        use pb::channel_service_open_device_channel_response::Response as Out;
-        let tenant = authorized(&request)?;
-        let mut incoming = request.into_inner();
-        let Some(Ok(pb::ChannelServiceOpenDeviceChannelRequest {
-            request: Some(In::InitialRequest(initial)),
-        })) = incoming.next().await
-        else {
-            return Err(Status::invalid_argument("no initial request"));
-        };
-        if initial.channel_profile != "ssh" {
-            return Err(Status::invalid_argument("unknown profile"));
-        }
-        if initial.channel_device_name == "DROP" {
-            // Opens, then goes away mid-channel, as a device rebooting does.
-            let (tx, rx) = mpsc::channel(4);
-            tokio::spawn(async move {
-                let _ = tx
-                    .send(message(Out::OpenedResponse(
-                        pb::ChannelServiceOpenDeviceChannelOpenedResponse {
-                            channel_device_reference: None,
-                            channel_kind: "stream".into(),
-                        },
-                    )))
-                    .await;
-                let _ = incoming.next().await;
-                let _ = tx
-                    .send(Err(Status::unavailable("the device went away")))
-                    .await;
-            });
-            return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
-        }
-        // A device of the other tenant: only reachable as its role.
-        if initial.channel_device_name == "OTHERDEV" && tenant != "other" {
-            return Err(Status::not_found("device not found"));
-        }
-        let (tx, rx) = mpsc::channel(4);
-        tokio::spawn(async move {
-            let _ = tx
-                .send(message(Out::OpenedResponse(
-                    pb::ChannelServiceOpenDeviceChannelOpenedResponse {
-                        channel_device_reference: Some(ResourceReference {
-                            urn: format!("urn:remora:device:{}", initial.channel_device_name),
-                            ..Default::default()
-                        }),
-                        channel_kind: "stream".into(),
-                    },
-                )))
-                .await;
-            let mut received = Vec::new();
-            while let Some(Ok(request)) = incoming.next().await {
-                if let Some(In::SubsequentRequest(chunk)) = request.request {
-                    received.extend(chunk.channel_chunk);
-                }
-            }
-            received.reverse();
-            let _ = tx
-                .send(message(Out::ChunkResponse(
-                    pb::ChannelServiceOpenDeviceChannelChunkResponse {
-                        channel_chunk: received,
-                    },
-                )))
-                .await;
-            let _ = tx
-                .send(message(Out::EofResponse(
-                    pb::ChannelServiceOpenDeviceChannelEofResponse {},
-                )))
-                .await;
-        });
-        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
-    }
+fn close(code: u16, reason: &str) -> Message {
+    Message::Close(Some(CloseFrame {
+        code,
+        reason: reason.into(),
+    }))
+}
 
-    async fn sign_device_ssh_certificate(
-        &self,
-        _: Request<pb::ChannelServiceSignDeviceSshCertificateRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceSshCertificateResponse>, Status> {
-        Err(Status::unimplemented("not in this test"))
+async fn open_channel(
+    headers: HeaderMap,
+    Path((device, profile)): Path<(String, String)>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let tenant = match authorized(&headers) {
+        Ok(tenant) => tenant,
+        Err((code, message)) => return text_error(code, message),
+    };
+    if profile != "ssh" {
+        return text_error(Code::InvalidArgument, "unknown profile");
     }
+    // A device of the other tenant: only reachable as its role.
+    if device == "OTHERDEV" && tenant != "other" {
+        return text_error(Code::NotFound, "device not found");
+    }
+    let urn = format!("urn:remora:device:{device}");
+    if device == "DROP" {
+        return accept_channel(upgrade, "stream", "", drop_after_first);
+    }
+    accept_channel(upgrade, "stream", &urn, reverse)
+}
 
-    async fn sign_device_local_ssh_certificate(
-        &self,
-        _: Request<pb::ChannelServiceSignDeviceLocalSshCertificateRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceLocalSshCertificateResponse>, Status> {
-        Err(Status::unimplemented("not in this test"))
+/// The code is the device, role and challenge -- normalised as the
+/// platform does -- for the test to recognise. The device maps no account
+/// to "admin".
+async fn login_code(
+    headers: HeaderMap,
+    Path(device): Path<String>,
+    Json(request): Json<model::SignDeviceLoginChallengeRequest>,
+) -> Result<Json<model::SignDeviceLoginChallengeResponse>, Response> {
+    rest_authorized(&headers)?;
+    if request.ssh_role == "admin" {
+        return Err(rpc_error(
+            Code::FailedPrecondition,
+            "the device maps no account to the role admin",
+        ));
     }
+    let challenge: String = request
+        .challenge
+        .chars()
+        .filter(|c| !matches!(c, '-' | ' '))
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    Ok(Json(model::SignDeviceLoginChallengeResponse {
+        login_code: format!("{device}/{}/{challenge}", request.ssh_role),
+    }))
+}
 
-    /// The code is the device, role and challenge -- normalised as the
-    /// platform does -- for the test to recognise. The device maps no
-    /// account to "admin".
-    async fn sign_device_login_challenge(
-        &self,
-        request: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status> {
-        authorized(&request)?;
-        let request = request.into_inner();
-        if request.ssh_role == "admin" {
-            return Err(Status::failed_precondition(
-                "the device maps no account to the role admin",
-            ));
-        }
-        let challenge: String = request
-            .challenge
-            .chars()
-            .filter(|c| !matches!(c, '-' | ' '))
-            .map(|c| c.to_ascii_uppercase())
-            .collect();
-        Ok(Response::new(
-            pb::ChannelServiceSignDeviceLoginChallengeResponse {
-                login_code: format!(
-                    "{}/{}/{challenge}",
-                    request.channel_device_name, request.ssh_role
-                ),
-            },
-        ))
-    }
-
-    /// `count` codes from index 7: some were issued before.
-    async fn issue_device_offline_login_codes(
-        &self,
-        request: Request<pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest>,
-    ) -> Result<Response<pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse>, Status> {
-        authorized(&request)?;
-        let request = request.into_inner();
-        Ok(Response::new(
-            pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse {
-                login_codes: (7..7 + request.count)
-                    .map(|index| pb::ChannelServiceDeviceOfflineLoginCode {
-                        index,
-                        login_code: format!("{}-{index:05}", request.ssh_role.to_uppercase()),
-                    })
-                    .collect(),
-            },
-        ))
-    }
+/// `count` codes from index 7: some were issued before.
+async fn offline_login_codes(
+    headers: HeaderMap,
+    Json(request): Json<model::IssueDeviceOfflineLoginCodesRequest>,
+) -> Result<Json<model::IssueDeviceOfflineLoginCodesResponse>, Response> {
+    rest_authorized(&headers)?;
+    Ok(Json(model::IssueDeviceOfflineLoginCodesResponse {
+        login_codes: (7..7 + request.count)
+            .map(|index| model::OfflineLoginCode {
+                index,
+                login_code: format!("{}-{index:05}", request.ssh_role.to_uppercase()),
+            })
+            .collect(),
+    }))
 }
 
 async fn serve() -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap().to_string();
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(iam::user_service_server::UserServiceServer::new(Iam))
-            .add_service(iam::account_service_server::AccountServiceServer::new(Iam))
-            .add_service(pb::channel_service_server::ChannelServiceServer::new(
-                Channels,
-            ))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
-    );
-    address
+    let device = "/remora/channel/v1/device/{device}";
+    serve_router(
+        Router::new()
+            .route("/iam/v1/current-user", get(current_user))
+            .route("/iam/v1/current-account", get(current_account))
+            .route(&format!("{device}/channel/{{profile}}"), get(open_channel))
+            .route(&format!("{device}/login-code"), post(login_code))
+            .route(
+                &format!("{device}/offline-login-codes"),
+                post(offline_login_codes),
+            ),
+    )
+    .await
 }
 
 struct Rmra {

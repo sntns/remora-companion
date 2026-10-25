@@ -11,7 +11,7 @@ use remora_context::{
     model::Context,
 };
 use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
-use remora_ota_adapter_grpc::test_gateway::TestGateway;
+use remora_platform_http::test_gateway::TestGateway;
 use serde::Deserialize;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},

@@ -20,7 +20,7 @@ pub const CONTEXT_ENV: &str = "RMRA_CONTEXT";
 
 /// A context defined whole by the environment, for an ephemeral container
 /// or a CI job: an access key's token, required, and the gateway, by
-/// default `DEFAULT_ADDRESS` (api.eu2.sntns.io:50051)...
+/// default `DEFAULT_ADDRESS` (api.eu2.sntns.io)...
 pub const ADDRESS_ENV: &str = "RMRA_ADDRESS";
 pub const TOKEN_ENV: &str = "RMRA_TOKEN";
 /// ...and, optionally, the role it acts as (a URN), plaintext for a local

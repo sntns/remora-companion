@@ -1,0 +1,17 @@
+[package]
+name = "remora-context-adapter-http"
+description = "PlatformSessionAdapter over sntns-platform's IAM gateway REST API (current user, current account)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+remora-platform-http = { path = "../platform-http" }
+async-trait.workspace = true
+error-stack.workspace = true
+
+[dev-dependencies]
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

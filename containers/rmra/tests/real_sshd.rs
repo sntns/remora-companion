@@ -13,17 +13,29 @@
 
 use std::{
     path::{Path, PathBuf},
-    pin::Pin,
     process::Stdio,
+    sync::Arc,
 };
 
-use remora_platform_grpc::sntns::service::{remorachannel::v1 as pb, v1::ResourceReference};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc,
+use futures_util::{SinkExt, StreamExt};
+use remora_platform_http::{
+    model::{self, channel},
+    test_gateway::{
+        accept_channel,
+        axum::{
+            extract::{
+                ws::{CloseFrame, Message, WebSocketUpgrade},
+                Path as Route, State,
+            },
+            response::Response,
+            routing::{get, post},
+            Json, Router,
+        },
+        rpc_error, serve_router, text_error,
+    },
+    Code,
 };
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tonic::{Request, Response, Status, Streaming};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const SERIAL: &str = "525400C0FFEE";
 const ALIAS: &str = "525400c0ffee";
@@ -44,173 +56,144 @@ struct Gateway {
     login: String,
 }
 
-type Responses =
-    Pin<Box<dyn Stream<Item = Result<pb::ChannelServiceOpenDeviceChannelResponse, Status>> + Send>>;
+type Shared = State<Arc<Gateway>>;
 
-fn message(
-    response: pb::channel_service_open_device_channel_response::Response,
-) -> Result<pb::ChannelServiceOpenDeviceChannelResponse, Status> {
-    Ok(pb::ChannelServiceOpenDeviceChannelResponse {
-        response: Some(response),
-    })
+/// Serves the gateway's channel routes on a free local port.
+async fn serve(gateway: Gateway) -> String {
+    let device = "/remora/channel/v1/device/{device}";
+    serve_router(
+        Router::new()
+            .route(&format!("{device}/channel/{{profile}}"), get(open_channel))
+            .route(&format!("{device}/ssh-certificate"), post(ssh_certificate))
+            .route(
+                "/remora/channel/v1/local-ssh-certificate",
+                post(local_ssh_certificate),
+            )
+            .with_state(Arc::new(gateway)),
+    )
+    .await
 }
 
-#[tonic::async_trait]
-impl pb::channel_service_server::ChannelService for Gateway {
-    type OpenDeviceChannelStream = Responses;
-
-    /// Bridges the channel to the device's sshd, half-closes included.
-    async fn open_device_channel(
-        &self,
-        request: Request<Streaming<pb::ChannelServiceOpenDeviceChannelRequest>>,
-    ) -> Result<Response<Responses>, Status> {
-        use pb::channel_service_open_device_channel_request::Request as In;
-        use pb::channel_service_open_device_channel_response::Response as Out;
-        let mut incoming = request.into_inner();
-        match incoming.next().await {
-            Some(Ok(pb::ChannelServiceOpenDeviceChannelRequest {
-                request: Some(In::InitialRequest(initial)),
-            })) if initial.channel_device_name == SERIAL && initial.channel_profile == "ssh" => {}
-            _ => return Err(Status::invalid_argument("unexpected opening")),
-        }
-        let socket = tokio::net::TcpStream::connect(("127.0.0.1", self.sshd_port))
-            .await
-            .map_err(|e| Status::unavailable(e.to_string()))?;
+/// Bridges the channel to the device's sshd, half-closes included, and
+/// ends it once both directions are done.
+async fn open_channel(
+    State(gateway): Shared,
+    Route((device, profile)): Route<(String, String)>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    if device != SERIAL || profile != "ssh" {
+        return text_error(Code::InvalidArgument, "unexpected opening");
+    }
+    let socket = match tokio::net::TcpStream::connect(("127.0.0.1", gateway.sshd_port)).await {
+        Ok(socket) => socket,
+        Err(error) => return text_error(Code::Unavailable, error.to_string()),
+    };
+    let urn = format!("urn:remora:device:{SERIAL}");
+    accept_channel(upgrade, "stream", &urn, |websocket| async move {
         let (mut device_read, mut device_write) = socket.into_split();
-
-        tokio::spawn(async move {
-            while let Some(Ok(request)) = incoming.next().await {
-                if let Some(In::SubsequentRequest(chunk)) = request.request {
-                    if device_write.write_all(&chunk.channel_chunk).await.is_err() {
-                        return;
+        let (mut outgoing, mut incoming) = websocket.split();
+        let to_device = tokio::spawn(async move {
+            while let Some(Ok(message)) = incoming.next().await {
+                match message {
+                    Message::Binary(bytes) => {
+                        if device_write.write_all(&bytes).await.is_err() {
+                            return;
+                        }
                     }
+                    Message::Text(_) | Message::Close(_) => break,
+                    _ => {}
                 }
             }
             let _ = device_write.shutdown().await;
         });
-
-        let (tx, rx) = mpsc::channel(4);
-        tokio::spawn(async move {
-            let _ = tx
-                .send(message(Out::OpenedResponse(
-                    pb::ChannelServiceOpenDeviceChannelOpenedResponse {
-                        channel_device_reference: Some(ResourceReference {
-                            urn: format!("urn:remora:device:{SERIAL}"),
-                            ..Default::default()
-                        }),
-                        channel_kind: "stream".into(),
-                    },
-                )))
-                .await;
-            let mut buffer = vec![0; 32 * 1024];
-            loop {
-                match device_read.read(&mut buffer).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let chunk = pb::ChannelServiceOpenDeviceChannelChunkResponse {
-                            channel_chunk: buffer[..n].to_vec(),
-                        };
-                        if tx.send(message(Out::ChunkResponse(chunk))).await.is_err() {
-                            return;
-                        }
+        let mut buffer = vec![0; 32 * 1024];
+        loop {
+            match device_read.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let bytes = buffer[..n].to_vec();
+                    if outgoing.send(Message::Binary(bytes.into())).await.is_err() {
+                        return;
                     }
                 }
             }
-            let _ = tx
-                .send(message(Out::EofResponse(
-                    pb::ChannelServiceOpenDeviceChannelEofResponse {},
-                )))
-                .await;
-        });
-        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
-    }
-
-    /// Certifies the key with the user CA for `<role>@<serial>`, 15 minutes.
-    async fn sign_device_ssh_certificate(
-        &self,
-        request: Request<pb::ChannelServiceSignDeviceSshCertificateRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceSshCertificateResponse>, Status> {
-        let request = request.into_inner();
-        let key = self.dir.join("operator.pub");
-        std::fs::write(&key, &request.ssh_public_key).unwrap();
-        let principal = format!("{}@{ALIAS}", request.ssh_role);
-        keygen(&[
-            "-s",
-            self.dir.join("user_ca").to_str().unwrap(),
-            "-I",
-            "operator",
-            "-n",
-            &principal,
-            "-V",
-            "+15m",
-            key.to_str().unwrap(),
-        ]);
-        let certificate = std::fs::read_to_string(self.dir.join("operator-cert.pub")).unwrap();
-        let host_ca = std::fs::read_to_string(self.dir.join("host_ca.pub")).unwrap();
-        Ok(Response::new(
-            pb::ChannelServiceSignDeviceSshCertificateResponse {
-                ssh_certificate: certificate,
-                ssh_user: self.login.clone(),
-                ssh_host_key_alias: ALIAS.into(),
-                ssh_known_hosts: format!("@cert-authority {ALIAS} {}", host_ca.trim()),
-            },
-        ))
-    }
-
-    /// Certifies the key with the user CA for `local-<role>@<serial>` on
-    /// each device -- here, the one.
-    async fn sign_device_local_ssh_certificate(
-        &self,
-        request: Request<pb::ChannelServiceSignDeviceLocalSshCertificateRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceLocalSshCertificateResponse>, Status> {
-        let request = request.into_inner();
-        if request.channel_device_names != [SERIAL] {
-            return Err(Status::not_found("unknown device"));
         }
-        let key = self.dir.join("operator.pub");
-        std::fs::write(&key, &request.ssh_public_key).unwrap();
-        let principal = format!("local-{}@{ALIAS}", request.ssh_role);
-        let validity = format!("+{}h", request.validity_hours.max(1));
-        keygen(&[
-            "-s",
-            self.dir.join("user_ca").to_str().unwrap(),
-            "-I",
-            "operator/role:local",
-            "-n",
-            &principal,
-            "-V",
-            &validity,
-            key.to_str().unwrap(),
-        ]);
-        let certificate = std::fs::read_to_string(self.dir.join("operator-cert.pub")).unwrap();
-        let host_ca = std::fs::read_to_string(self.dir.join("host_ca.pub")).unwrap();
-        Ok(Response::new(
-            pb::ChannelServiceSignDeviceLocalSshCertificateResponse {
-                ssh_certificate: certificate,
-                ssh_known_hosts: format!("@cert-authority {ALIAS} {}", host_ca.trim()),
-                ssh_devices: vec![pb::ChannelServiceSignDeviceLocalSshCertificateDevice {
-                    channel_device_name: SERIAL.into(),
-                    ssh_user: self.login.clone(),
-                    ssh_host_key_alias: ALIAS.into(),
-                }],
-                valid_before: None,
-            },
-        ))
-    }
+        let _ = outgoing.send(Message::Text(channel::EOF.into())).await;
+        let _ = to_device.await;
+        let _ = outgoing
+            .send(Message::Close(Some(CloseFrame {
+                code: 1000,
+                reason: "".into(),
+            })))
+            .await;
+    })
+}
 
-    async fn sign_device_login_challenge(
-        &self,
-        _: Request<pb::ChannelServiceSignDeviceLoginChallengeRequest>,
-    ) -> Result<Response<pb::ChannelServiceSignDeviceLoginChallengeResponse>, Status> {
-        Err(Status::unimplemented("not exercised here"))
-    }
+/// Certifies the key with the user CA for `<role>@<serial>`, 15 minutes.
+async fn ssh_certificate(
+    State(gateway): Shared,
+    Json(request): Json<model::SignDeviceSshCertificateRequest>,
+) -> Json<model::SignDeviceSshCertificateResponse> {
+    let key = gateway.dir.join("operator.pub");
+    std::fs::write(&key, &request.ssh_public_key).unwrap();
+    let principal = format!("{}@{ALIAS}", request.ssh_role);
+    keygen(&[
+        "-s",
+        gateway.dir.join("user_ca").to_str().unwrap(),
+        "-I",
+        "operator",
+        "-n",
+        &principal,
+        "-V",
+        "+15m",
+        key.to_str().unwrap(),
+    ]);
+    let certificate = std::fs::read_to_string(gateway.dir.join("operator-cert.pub")).unwrap();
+    let host_ca = std::fs::read_to_string(gateway.dir.join("host_ca.pub")).unwrap();
+    Json(model::SignDeviceSshCertificateResponse {
+        ssh_certificate: certificate,
+        ssh_user: gateway.login.clone(),
+        ssh_host_key_alias: ALIAS.into(),
+        ssh_known_hosts: format!("@cert-authority {ALIAS} {}", host_ca.trim()),
+    })
+}
 
-    async fn issue_device_offline_login_codes(
-        &self,
-        _: Request<pb::ChannelServiceIssueDeviceOfflineLoginCodesRequest>,
-    ) -> Result<Response<pb::ChannelServiceIssueDeviceOfflineLoginCodesResponse>, Status> {
-        Err(Status::unimplemented("not exercised here"))
+/// Certifies the key with the user CA for `local-<role>@<serial>` on each
+/// device -- here, the one.
+async fn local_ssh_certificate(
+    State(gateway): Shared,
+    Json(request): Json<model::SignDeviceLocalSshCertificateRequest>,
+) -> Result<Json<model::SignDeviceLocalSshCertificateResponse>, Response> {
+    if request.channel_device_names != [SERIAL] {
+        return Err(rpc_error(Code::NotFound, "unknown device"));
     }
+    let key = gateway.dir.join("operator.pub");
+    std::fs::write(&key, &request.ssh_public_key).unwrap();
+    let principal = format!("local-{}@{ALIAS}", request.ssh_role);
+    let validity = format!("+{}h", request.validity_hours.max(1));
+    keygen(&[
+        "-s",
+        gateway.dir.join("user_ca").to_str().unwrap(),
+        "-I",
+        "operator/role:local",
+        "-n",
+        &principal,
+        "-V",
+        &validity,
+        key.to_str().unwrap(),
+    ]);
+    let certificate = std::fs::read_to_string(gateway.dir.join("operator-cert.pub")).unwrap();
+    let host_ca = std::fs::read_to_string(gateway.dir.join("host_ca.pub")).unwrap();
+    Ok(Json(model::SignDeviceLocalSshCertificateResponse {
+        ssh_certificate: certificate,
+        ssh_known_hosts: format!("@cert-authority {ALIAS} {}", host_ca.trim()),
+        ssh_devices: vec![model::LocalSshDevice {
+            channel_device_name: SERIAL.into(),
+            ssh_user: gateway.login.clone(),
+            ssh_host_key_alias: ALIAS.into(),
+        }],
+        valid_before: None,
+    }))
 }
 
 /// A user-mode sshd that trusts the user CA for one principal, presenting
@@ -312,19 +295,12 @@ async fn rmra_ssh_runs_a_command_on_a_real_sshd() {
     }
 
     let login = std::env::var("USER").unwrap_or_else(|_| "root".into());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap().to_string();
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(pb::channel_service_server::ChannelServiceServer::new(
-                Gateway {
-                    dir: dir.path().to_path_buf(),
-                    sshd_port: port,
-                    login,
-                },
-            ))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
-    );
+    let address = serve(Gateway {
+        dir: dir.path().to_path_buf(),
+        sshd_port: port,
+        login,
+    })
+    .await;
 
     // Contexts and credentials straight on disk: login itself is covered
     // by fake_gateway.rs, and this gateway serves no IAM.
@@ -475,21 +451,14 @@ async fn local_ssh_reaches_a_real_sshd_without_the_channel() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     let login = std::env::var("USER").unwrap_or_else(|_| "root".into());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap().to_string();
     // No sshd port: a channel opened here could only fail, so a session
     // that works went around it.
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(pb::channel_service_server::ChannelServiceServer::new(
-                Gateway {
-                    dir: dir.path().to_path_buf(),
-                    sshd_port: 1,
-                    login: login.clone(),
-                },
-            ))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
-    );
+    let address = serve(Gateway {
+        dir: dir.path().to_path_buf(),
+        sshd_port: 1,
+        login: login.clone(),
+    })
+    .await;
     let config = dir.path().join("rmra");
     std::fs::create_dir_all(config.join("contexts/local")).unwrap();
     std::fs::write(
@@ -643,19 +612,12 @@ async fn rmra_install_uploads_resumes_installs_reboots_and_validates() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     let login = std::env::var("USER").unwrap_or_else(|_| "root".into());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap().to_string();
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(pb::channel_service_server::ChannelServiceServer::new(
-                Gateway {
-                    dir: dir.path().to_path_buf(),
-                    sshd_port: port,
-                    login,
-                },
-            ))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
-    );
+    let address = serve(Gateway {
+        dir: dir.path().to_path_buf(),
+        sshd_port: port,
+        login,
+    })
+    .await;
     let config = dir.path().join("rmra");
     std::fs::create_dir_all(config.join("contexts/local")).unwrap();
     std::fs::write(

@@ -28,7 +28,7 @@ use remora_context::{
     model::ResolvedContext,
 };
 use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
-use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
+use remora_context_adapter_http::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
 use remora_factory::{
     adapter::{
@@ -37,10 +37,10 @@ use remora_factory::{
     },
     application::FactoryService,
 };
-use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
+use remora_factory_adapter_http::FactoryGatewayAdapterImpl;
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
-use remora_ota_adapter_grpc::test_gateway::TestGateway;
+use remora_platform_http::test_gateway::TestGateway;
 use remora_station::{
     adapter::{
         hooks::{HookEvent, HookRunnerAdapterService},

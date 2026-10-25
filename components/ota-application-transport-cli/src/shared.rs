@@ -29,7 +29,7 @@ pub fn status_tone(status: &DeploymentStatus) -> Tone {
 }
 
 /// A failure in a table cell: the platform's own words when it gave any
-/// (the last printable attachment, its gRPC status), else the error. The
+/// (the last printable attachment, its status), else the error. The
 /// whole chain is still rendered with the command's error.
 pub fn reason<C: std::fmt::Display + Send + Sync + 'static>(report: &Report<C>) -> String {
     report

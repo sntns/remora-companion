@@ -1,0 +1,21 @@
+[package]
+name = "remora-channel-adapter-http"
+description = "ChannelGatewayAdapter over sntns-platform's remora-channel gateway: the device channel's WebSocket, ssh certificates (through the channel and local) and console login codes over REST"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-channel = { path = "../channel" }
+remora-context = { path = "../context" }
+remora-platform-http = { path = "../platform-http" }
+async-trait.workspace = true
+error-stack.workspace = true
+futures-util = { workspace = true, features = ["sink", "std"] }
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

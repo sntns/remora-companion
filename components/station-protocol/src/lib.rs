@@ -2,8 +2,8 @@
 //! binaries in standard base64 -- the bodies field for field, the error
 //! codes, and their conversions to and from the station's model. One
 //! place for both ends: the station's HTTP transport serves it, the claim
-//! vertical's HTTP adapter speaks it (like `remora-platform-grpc`'s
-//! protos for the platform). Nothing on it is secret -- a device checks
+//! vertical's HTTP adapter speaks it (like `remora-platform-http`'s
+//! model for the platform). Nothing on it is secret -- a device checks
 //! the identity it gets against anchors baked into its image -- so there
 //! is no TLS.
 

@@ -14,8 +14,8 @@ error-stack.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-remora-device-adapter-grpc = { path = "../device-adapter-grpc" }
-remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+remora-device-adapter-http = { path = "../device-adapter-http" }
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 tempfile.workspace = true

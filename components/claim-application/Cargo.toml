@@ -20,11 +20,11 @@ tokio.workspace = true
 # station is the one stub, being the network port.
 remora-factory-application = { path = "../factory-application" }
 remora-factory-adapter-local = { path = "../factory-adapter-local" }
-remora-factory-adapter-grpc = { path = "../factory-adapter-grpc" }
+remora-factory-adapter-http = { path = "../factory-adapter-http" }
 remora-context = { path = "../context" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
-remora-context-adapter-grpc = { path = "../context-adapter-grpc" }
+remora-context-adapter-http = { path = "../context-adapter-http" }
 tempfile.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true

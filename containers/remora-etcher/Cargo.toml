@@ -25,11 +25,11 @@ remora-flash-application-transport-cli = { path = "../../components/flash-applic
 remora-flash-adapter-release = { path = "../../components/flash-adapter-release" }
 remora-ota = { path = "../../components/ota" }
 remora-ota-application = { path = "../../components/ota-application" }
-remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc" }
+remora-ota-adapter-http = { path = "../../components/ota-adapter-http" }
 remora-ota-adapter-file = { path = "../../components/ota-adapter-file" }
 remora-device = { path = "../../components/device" }
 remora-device-application = { path = "../../components/device-application" }
-remora-device-adapter-grpc = { path = "../../components/device-adapter-grpc" }
+remora-device-adapter-http = { path = "../../components/device-adapter-http" }
 remora-image = { path = "../../components/image" }
 remora-image-application = { path = "../../components/image-application" }
 remora-image-adapter-partition-table = { path = "../../components/image-adapter-partition-table" }
@@ -64,12 +64,12 @@ remora-batch = { path = "../../components/batch" }
 remora-batch-application = { path = "../../components/batch-application" }
 remora-batch-application-transport-cli = { path = "../../components/batch-application-transport-cli" }
 remora-factory = { path = "../../components/factory" }
-remora-factory-adapter-grpc = { path = "../../components/factory-adapter-grpc" }
+remora-factory-adapter-http = { path = "../../components/factory-adapter-http" }
 remora-factory-adapter-local = { path = "../../components/factory-adapter-local" }
 remora-context = { path = "../../components/context" }
 remora-context-application = { path = "../../components/context-application" }
 remora-context-adapter-file = { path = "../../components/context-adapter-file" }
-remora-context-adapter-grpc = { path = "../../components/context-adapter-grpc" }
+remora-context-adapter-http = { path = "../../components/context-adapter-http" }
 remora-context-application-transport-cli = { path = "../../components/context-application-transport-cli" }
 remora-factory-application = { path = "../../components/factory-application" }
 remora-factory-application-transport-cli = { path = "../../components/factory-application-transport-cli" }
@@ -100,7 +100,7 @@ tracing = "0.1"
 # `station serve` and `station simulate` end to end, as shipped, against
 # the in-process fake gateway; the resulting remora-factory.yaml is read
 # the way remora-edge reads it.
-remora-ota-adapter-grpc = { path = "../../components/ota-adapter-grpc", features = ["test-gateway"] }
+remora-platform-http = { path = "../../components/platform-http", features = ["test-gateway"] }
 tokio = { workspace = true, features = ["net", "process", "io-util", "macros"] }
 tempfile.workspace = true
 serde.workspace = true

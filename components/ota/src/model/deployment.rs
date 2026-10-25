@@ -91,7 +91,7 @@ impl std::fmt::Display for DeploymentStatus {
 }
 
 /// One entry of what the device reported while updating.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogEntry {
     pub execution: String,
     pub result: String,
@@ -101,7 +101,7 @@ pub struct LogEntry {
     pub progress: Option<LogProgress>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogProgress {
     pub current: i64,
     pub max: i64,

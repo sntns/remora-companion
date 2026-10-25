@@ -2,7 +2,7 @@ use remora_channel::{
     adapter::{gateway::ChannelGatewayAdapterService, ssh::SshClientAdapterService},
     application::ChannelService,
 };
-use remora_channel_adapter_grpc::GatewayAdapterImpl;
+use remora_channel_adapter_http::GatewayAdapterImpl;
 use remora_channel_adapter_openssh::OpenSshClientImpl;
 use remora_channel_application::ChannelControllerImpl;
 use remora_console::{adapter::serial::SerialPortAdapterService, application::ConsoleService};
@@ -16,10 +16,10 @@ use remora_context::{
     application::ContextService,
 };
 use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCredentialStoreImpl};
-use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
+use remora_context_adapter_http::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
 use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
-use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
+use remora_device_adapter_http::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
 use remora_install::application::InstallService;
 use remora_install_application::InstallControllerImpl;
@@ -31,7 +31,7 @@ use remora_ota::{
     application::OtaService,
 };
 use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
-use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
+use remora_ota_adapter_http::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_update::{
     adapter::{feed::ReleaseFeedAdapterService, installer::InstallerAdapterService},

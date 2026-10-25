@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    path::Path,
+    time::Duration,
+};
 
 use error_stack::{FrameKind, Report, ResultExt};
 use remora_context::{
@@ -8,7 +12,10 @@ use remora_context::{
 use remora_device::application::DeviceService;
 use remora_ota::{
     adapter::{
-        gateway::{self, ArtifactChunks, ArtifactSink, InitialUpload, OtaGatewayAdapterService},
+        gateway::{
+            self, ArtifactChunks, ArtifactSink, DeploymentEvent, InitialUpload,
+            OtaGatewayAdapterService,
+        },
         source::{self, ArtifactSourceAdapterService},
         target::ArtifactTargetAdapterService,
     },
@@ -33,6 +40,14 @@ const UPLOAD_ATTEMPTS: usize = 4;
 /// How many times in a row a dropped download is picked up again before
 /// giving up (running it again resumes it still).
 const DOWNLOAD_ATTEMPTS: usize = 4;
+
+/// How many times in a row a deployment's feed, cut short, is opened again
+/// before giving up.
+const FEED_ATTEMPTS: usize = 4;
+
+/// Told where a followed deployment is, what it reported so far, and why
+/// its reports are missing (when they are).
+type OnChange<'a> = dyn FnMut(&Deployment, &[LogEntry], Option<&str>) + Send + 'a;
 
 /// The ota vertical's use case: the gateway port and where artifacts are
 /// read from, the context vertical's application port for which platform,
@@ -99,7 +114,7 @@ impl OtaControllerImpl {
             .map_err(Stop::Source)?;
         let mut sink = self
             .gateway
-            .begin_upload(context, initial.clone())
+            .begin_upload(context, initial.clone(), offset)
             .await
             .map_err(Stop::Gateway)?;
         let mut done = offset;
@@ -165,28 +180,145 @@ impl OtaControllerImpl {
         }
     }
 
-    /// One deployment's progress, now. A failure to read its reports
-    /// doesn't stop the watch (the status still says where it is) but is
-    /// shown rather than hidden.
-    async fn progress(&self, context: &ResolvedContext, name: &str) -> Result<DeploymentProgress> {
-        let deployment = self
-            .gateway
-            .get_deployment(context, name)
-            .await
-            .change_context_lazy(|| Error::GetDeployment(name.to_owned()))?;
-        let mut progress = match self.gateway.deployment_logs(context, name).await {
-            Ok(logs) => DeploymentProgress::of(&deployment, &logs),
-            Err(report) => DeploymentProgress {
-                detail: format!("reports unavailable: {}", reason(&report)),
-                ..DeploymentProgress::of(&deployment, &[])
-            },
-        };
-        if let DeploymentStatus::Other(status) = &deployment.status {
-            progress.detail =
-                format!("status {status} is unknown to this version: stopped following it");
+    /// A file's SHA-256 (hex), read through the artifact source; `None`
+    /// once `ctx` is cancelled.
+    async fn checksum(
+        &self,
+        path: &Path,
+        ctx: &OperationContext,
+    ) -> std::result::Result<Option<String>, Report<source::Error>> {
+        use sha2::Digest;
+        let mut reader = self.artifacts.open(path, 0).await?;
+        let mut hasher = sha2::Sha256::new();
+        loop {
+            if ctx.cancel.is_cancelled() {
+                return Ok(None);
+            }
+            let chunk = reader.read(CHUNK).await?;
+            if chunk.is_empty() {
+                break;
+            }
+            hasher.update(&chunk);
         }
-        Ok(progress)
+        Ok(Some(
+            hasher
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+        ))
     }
+
+    /// Follows one deployment live until it is settled, calling
+    /// `on_change` with where it is, everything it reported so far, and why
+    /// its reports are missing (when they are), each time either changes.
+    /// Returns its last status.
+    ///
+    /// The feed is opened before the deployment and its reports are read,
+    /// so nothing happening in between is missed; reports the feed then
+    /// repeats are skipped. A feed cut short is opened again, the reports
+    /// missed meanwhile read again the same way.
+    async fn follow_one(
+        &self,
+        context: &ResolvedContext,
+        name: &str,
+        on_change: &mut OnChange<'_>,
+    ) -> Result<DeploymentStatus> {
+        let failed = || Error::GetDeployment(name.to_owned());
+        let mut logs: Vec<LogEntry> = Vec::new();
+        let mut failures = 0;
+        loop {
+            let opened = async {
+                let feed = self.gateway.follow_deployment(context, name).await?;
+                let deployment = self.gateway.get_deployment(context, name).await?;
+                Ok::<_, Report<gateway::Error>>((feed, deployment))
+            }
+            .await;
+            let (mut feed, mut deployment) = match opened {
+                Ok(opened) => opened,
+                Err(report) if retryable(&report) && failures + 1 < FEED_ATTEMPTS => {
+                    failures += 1;
+                    tokio::time::sleep(Duration::from_millis(500 * failures as u64)).await;
+                    continue;
+                }
+                Err(report) => return Err(report.change_context(failed())),
+            };
+            // A failure to read the reports doesn't stop the watch (the
+            // status still says where it is) but is shown, not hidden.
+            let (mut repeated, unavailable) =
+                match self.gateway.deployment_logs(context, name).await {
+                    Ok(history) => {
+                        if history.len() > logs.len() {
+                            logs.extend_from_slice(&history[logs.len()..]);
+                        }
+                        (VecDeque::from(history), None)
+                    }
+                    Err(report) => (VecDeque::new(), Some(reason(&report))),
+                };
+            on_change(&deployment, &logs, unavailable.as_deref());
+            if deployment.status.is_settled() {
+                return Ok(deployment.status);
+            }
+            loop {
+                match feed.next().await {
+                    Ok(Some(DeploymentEvent::Status {
+                        status,
+                        details,
+                        updated_at,
+                    })) => {
+                        failures = 0;
+                        deployment.status = status;
+                        deployment.details = details;
+                        deployment.updated_at = updated_at;
+                        on_change(&deployment, &logs, unavailable.as_deref());
+                        if deployment.status.is_settled() {
+                            return Ok(deployment.status);
+                        }
+                    }
+                    Ok(Some(DeploymentEvent::Log(entry))) => {
+                        failures = 0;
+                        // Already read with the history: skip it, and
+                        // whatever the history held before it.
+                        if let Some(at) = repeated.iter().position(|seen| *seen == entry) {
+                            repeated.drain(..=at);
+                            continue;
+                        }
+                        repeated.clear();
+                        logs.push(entry);
+                        on_change(&deployment, &logs, unavailable.as_deref());
+                    }
+                    // Ended without settling: read where it is again.
+                    Ok(None) => break,
+                    Err(report) if retryable(&report) && failures + 1 < FEED_ATTEMPTS => {
+                        failures += 1;
+                        tokio::time::sleep(Duration::from_millis(500 * failures as u64)).await;
+                        break;
+                    }
+                    Err(report) => return Err(report.change_context(failed())),
+                }
+            }
+        }
+    }
+}
+
+/// A deployment's progress, from where it is and what it reported.
+fn progress_of(
+    deployment: &Deployment,
+    logs: &[LogEntry],
+    unavailable: Option<&str>,
+) -> DeploymentProgress {
+    let mut progress = match unavailable {
+        None => DeploymentProgress::of(deployment, logs),
+        Some(reason) => DeploymentProgress {
+            detail: format!("reports unavailable: {reason}"),
+            ..DeploymentProgress::of(deployment, logs)
+        },
+    };
+    if let DeploymentStatus::Other(status) = &deployment.status {
+        progress.detail =
+            format!("status {status} is unknown to this version: stopped following it");
+    }
+    progress
 }
 
 /// Aborts an upload that stopped short, passing on why.
@@ -214,7 +346,7 @@ fn retryable(report: &Report<gateway::Error>) -> bool {
 }
 
 /// The platform's own words for a failure, when it gave any: the last
-/// printable attachment (the gRPC status), else the error itself.
+/// printable attachment (the platform's status), else the error itself.
 fn reason<C: std::fmt::Display + Send + Sync + 'static>(report: &Report<C>) -> String {
     report
         .frames()
@@ -480,6 +612,23 @@ impl OtaServiceInterface for OtaControllerImpl {
                 .map(str::to_owned)
                 .ok_or_else(|| Report::new(unreadable()))?,
         };
+        let content_id = request
+            .resume
+            .clone()
+            .unwrap_or_else(|| self.gateway.new_content_id());
+        // The platform commits only an artifact of this length and hash:
+        // a file that changes while uploading is refused, not published.
+        let checksum_sha256 = match self.checksum(&request.path, ctx).await {
+            Ok(Some(checksum)) => checksum,
+            Ok(None) => {
+                return Err(Report::new(Error::Cancelled {
+                    file: file_name,
+                    release: request.release.clone(),
+                    content_id,
+                }))
+            }
+            Err(report) => return Err(report.change_context(unreadable())),
+        };
         let initial = InitialUpload {
             release: request.release.clone(),
             file_name: file_name.clone(),
@@ -488,10 +637,9 @@ impl OtaServiceInterface for OtaControllerImpl {
                 .clone()
                 .unwrap_or_else(|| content_type(&request.path).to_owned()),
             tag_condition: request.tag_condition.clone(),
-            content_id: request
-                .resume
-                .clone()
-                .unwrap_or_else(|| self.gateway.new_content_id()),
+            content_id,
+            content_length: total,
+            checksum_sha256,
         };
         let failed = || Error::Upload {
             file: file_name.clone(),
@@ -550,7 +698,10 @@ impl OtaServiceInterface for OtaControllerImpl {
                 Err(Stop::Gateway(report))
                     if retryable(&report) && attempt + 1 < UPLOAD_ATTEMPTS =>
                 {
-                    attempt += 1
+                    attempt += 1;
+                    // A request cut short may still be landing: give it
+                    // time before asking how far it got.
+                    tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
                 }
                 Err(Stop::Gateway(report)) => return Err(report.change_context(failed())),
             }
@@ -639,32 +790,51 @@ impl OtaServiceInterface for OtaControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         names: &[String],
-        interval: Duration,
         ctx: &OperationContext,
         on_progress: &mut (dyn FnMut(DeploymentProgress) + Send),
     ) -> Result<WatchOutcome> {
+        use futures_util::StreamExt;
+
         let context = self.resolve(over).await?;
         let mut outcome = WatchOutcome::default();
         let mut pending: BTreeSet<String> = names.iter().cloned().collect();
+        // Every deployment followed at once; their changes funnel here.
+        let (changes, mut changed) = tokio::sync::mpsc::unbounded_channel();
+        let mut followed: futures_util::stream::FuturesUnordered<_> = pending
+            .iter()
+            .cloned()
+            .map(|name| {
+                let changes = changes.clone();
+                let context = &context;
+                async move {
+                    let mut on_change =
+                        |deployment: &Deployment, logs: &[LogEntry], unavailable: Option<&str>| {
+                            let _ = changes.send(progress_of(deployment, logs, unavailable));
+                        };
+                    let status = self.follow_one(context, &name, &mut on_change).await;
+                    (name, status)
+                }
+            })
+            .collect();
+        drop(changes);
         loop {
-            for name in pending.clone() {
-                let progress = self.progress(&context, &name).await?;
-                let status = progress.status.clone();
-                on_progress(progress);
-                if status.is_settled() {
+            tokio::select! {
+                Some(progress) = changed.recv() => on_progress(progress),
+                Some((name, status)) = followed.next() => {
+                    // What it said before settling comes first.
+                    while let Ok(progress) = changed.try_recv() {
+                        on_progress(progress);
+                    }
                     pending.remove(&name);
-                    match status {
+                    match status? {
                         DeploymentStatus::Succeeded => outcome.succeeded.push(name),
                         DeploymentStatus::Other(_) => outcome.unknown.push(name),
                         _ => outcome.failed.push(name),
                     }
+                    if pending.is_empty() {
+                        return Ok(outcome);
+                    }
                 }
-            }
-            if pending.is_empty() {
-                return Ok(outcome);
-            }
-            tokio::select! {
-                () = tokio::time::sleep(interval) => {}
                 () = ctx.cancel.cancelled() => {
                     outcome.pending = pending.into_iter().collect();
                     return Ok(outcome);
@@ -677,38 +847,30 @@ impl OtaServiceInterface for OtaControllerImpl {
         &self,
         over: Option<&ContextOverride>,
         name: &str,
-        interval: Duration,
         ctx: &OperationContext,
         on_entry: &mut (dyn FnMut(LogEntry) + Send),
     ) -> Result<Option<DeploymentStatus>> {
         let context = self.resolve(over).await?;
-        let failed = || Error::GetDeployment(name.to_owned());
-        let mut seen = 0;
-        loop {
-            let deployment = self
-                .gateway
-                .get_deployment(&context, name)
-                .await
-                .change_context_lazy(failed)?;
-            // After the status, so that a settled deployment's last
-            // reports are in.
-            let logs = self
-                .gateway
-                .deployment_logs(&context, name)
-                .await
-                .change_context_lazy(failed)?;
-            logs.into_iter().skip(seen).for_each(|entry| {
-                seen += 1;
-                on_entry(entry);
-            });
-            if deployment.status.is_settled() {
-                return Ok(Some(deployment.status));
+        let mut emitted = 0;
+        let mut unavailable = None;
+        let mut on_change = |_: &Deployment, logs: &[LogEntry], missing: Option<&str>| {
+            if unavailable.is_none() {
+                unavailable = missing.map(str::to_owned);
             }
-            tokio::select! {
-                () = tokio::time::sleep(interval) => {}
-                () = ctx.cancel.cancelled() => return Ok(None),
+            for entry in &logs[emitted..] {
+                on_entry(entry.clone());
             }
+            emitted = logs.len();
+        };
+        let followed = tokio::select! {
+            status = self.follow_one(&context, name, &mut on_change) => status,
+            () = ctx.cancel.cancelled() => return Ok(None),
+        };
+        // Here the reports are the point: without them, it failed.
+        if let Some(reason) = unavailable {
+            return Err(Report::new(Error::GetDeployment(name.to_owned())).attach(reason));
         }
+        followed.map(Some)
     }
 
     async fn start_deployment(&self, over: Option<&ContextOverride>, name: &str) -> Result<()> {
@@ -749,14 +911,15 @@ mod tests {
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
     use remora_device::adapter::gateway::DeviceGatewayAdapterService;
-    use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
+    use remora_device_adapter_http::DeviceGatewayAdapterImpl;
     use remora_device_application::DeviceControllerImpl;
     use remora_ota::adapter::{
         gateway::OtaGatewayAdapter,
         source::{ArtifactReader, ArtifactSourceAdapter},
     };
     use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
-    use remora_ota_adapter_grpc::{test_gateway::TestGateway, OtaGatewayAdapterImpl};
+    use remora_ota_adapter_http::OtaGatewayAdapterImpl;
+    use remora_platform_http::test_gateway::TestGateway;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -836,7 +999,7 @@ mod tests {
         }
     }
 
-    /// The real gRPC adapter against the in-process fake gateway, logged in
+    /// The real HTTP adapter against the in-process fake gateway, logged in
     /// through the real context controller on a temporary store.
     async fn controller(root: &Path) -> (OtaControllerImpl, TestGateway) {
         controller_reading(
@@ -983,7 +1146,10 @@ mod tests {
                     content_type: "application/octet-stream".into(),
                     tag_condition: "board:rp5".into(),
                     content_id: "token-1".into(),
+                    content_length: bytes.len() as u64,
+                    checksum_sha256: sha256(&bytes),
                 },
+                0,
             )
             .await
             .unwrap();
@@ -1050,8 +1216,10 @@ mod tests {
         settle(&gateway).await;
         assert!(gateway.0.lock().unwrap().abandoned_uploads <= 1);
         assert!(gateway.artifact_bytes("r1", "update-rp5.raucb").is_none());
+        // At most what went out before the cancellation was seen: the
+        // chunk read then, and the one before it.
         let held = gateway.0.lock().unwrap().upload_offset(&token);
-        assert!(held <= CHUNK, "{held}");
+        assert!(held <= 2 * CHUNK, "{held}");
 
         let outcome = ota
             .upload(
@@ -1122,13 +1290,9 @@ mod tests {
         let mut seen = Vec::new();
         let names = ["r1-dev1".into(), "r1-broken".into(), "r1-dev2".into()];
         let outcome = ota
-            .watch(
-                None,
-                &names,
-                Duration::from_millis(1),
-                &OperationContext::noop(),
-                &mut |progress| seen.push(progress),
-            )
+            .watch(None, &names, &OperationContext::noop(), &mut |progress| {
+                seen.push(progress)
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -1140,12 +1304,13 @@ mod tests {
                 pending: vec![],
             }
         );
-        let dev1: Vec<_> = seen
+        let mut dev1: Vec<_> = seen
             .iter()
             .filter(|p| p.name == "r1-dev1")
             .map(|p| p.percent)
             .collect();
-        assert_eq!(dev1, [Some(50), Some(100), Some(100)]);
+        dev1.dedup();
+        assert_eq!(dev1, [Some(50), Some(100)]);
         let broken = seen.iter().rfind(|p| p.name == "r1-broken").unwrap();
         assert_eq!(broken.detail, "reason=bundle signature invalid");
         let odd = seen.iter().find(|p| p.name == "r1-dev2").unwrap();
@@ -1174,13 +1339,7 @@ mod tests {
         let ctx = OperationContext::noop();
         ctx.cancel.cancel();
         let outcome = ota
-            .watch(
-                None,
-                &["r1-dev1".into()],
-                Duration::from_secs(60),
-                &ctx,
-                &mut |_| {},
-            )
+            .watch(None, &["r1-dev1".into()], &ctx, &mut |_| {})
             .await
             .unwrap();
         assert_eq!(outcome.pending, ["r1-dev1"]);
@@ -1189,7 +1348,7 @@ mod tests {
     #[tokio::test]
     async fn follows_a_deployments_reports_to_the_end() {
         let dir = tempfile::tempdir().unwrap();
-        let (ota, _) = controller(dir.path()).await;
+        let (ota, gateway) = controller(dir.path()).await;
         ota.create_release(None, "R1", "1.0.0", &Labels::new())
             .await
             .unwrap();
@@ -1205,15 +1364,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // The gateway loses the feed early on: it is opened again, and
+        // every report still comes once, in order.
+        gateway.0.lock().unwrap().fail_next_log_stream_after = Some(1);
         let mut entries = Vec::new();
         let status = ota
-            .follow_logs(
-                None,
-                "r1-dev1",
-                Duration::from_millis(1),
-                &OperationContext::noop(),
-                &mut |entry| entries.push(entry),
-            )
+            .follow_logs(None, "r1-dev1", &OperationContext::noop(), &mut |entry| {
+                entries.push(entry)
+            })
             .await
             .unwrap();
         assert_eq!(status, Some(DeploymentStatus::Succeeded));
@@ -1223,6 +1381,7 @@ mod tests {
             .collect();
         assert_eq!(progress, [Some(50), Some(100), None]);
         assert_eq!(entries.last().unwrap().result, "success");
+        assert_eq!(gateway.0.lock().unwrap().log_streams.len(), 2);
     }
 
     #[tokio::test]
@@ -1388,7 +1547,14 @@ mod tests {
             .iter()
             .map(|(_, offset)| *offset)
             .collect();
-        assert_eq!(offsets, [0, CHUNK as u64 + 5]);
+        // Resumed from what arrived: at most what the gateway sent before
+        // the cut, less whatever the reset lost in flight.
+        assert_eq!(offsets.len(), 2, "{offsets:?}");
+        assert_eq!(offsets[0], 0);
+        assert!(
+            offsets[1] > 0 && offsets[1] <= CHUNK as u64 + 5,
+            "{offsets:?}"
+        );
     }
 
     #[tokio::test]
@@ -1431,8 +1597,10 @@ mod tests {
     #[tokio::test]
     async fn a_download_never_replaces_a_file_unasked() {
         let dir = tempfile::tempdir().unwrap();
-        let (ota, _gateway) = controller(dir.path()).await;
+        let (ota, gateway) = controller(dir.path()).await;
         let bytes = published(&ota, dir.path(), 1_000).await;
+        // A release from before checksums: downloaded, said unverified.
+        checksum(&gateway, "");
         let out = dir.path().join("out.raucb");
         std::fs::write(&out, b"mine").unwrap();
 

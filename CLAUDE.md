@@ -87,7 +87,8 @@ so Ctrl-C stops it between steps), `remora-format`,
 `remora-unpack` (reading an image file -- a `.bmaptar` in place, bzip2/
 gzip/zstd on the fly -- and writing a sparse raw: shared by flash's and
 convert's adapters, each behind its own port),
-`remora-platform-grpc` (the vendored protos and the gateway connection), and
+`remora-platform-http` (the platform gateways' REST/WebSocket client, its
+JSON model and statuses), and
 `remora-station-protocol` (the provisioning station's HTTP wire types and
 error codes: one definition, used by the station's HTTP transport and by
 `claim-adapter-http`).
@@ -168,7 +169,7 @@ it streams a whole bundle alongside an upload.
   byte on its stdout corrupts the session. Transports never `println!`
   decoration and never draw with cliclack directly — add what's missing to
   `remora-tui` so every command looks alike.
-- **Secrets never reach a `Debug`.** `Credentials`, `remora-platform-grpc`'s
+- **Secrets never reach a `Debug`.** `Credentials`, `remora-platform-http`'s
   connection types, the channel's `SshKeys` and factory's `PrivateKey`
   redact or don't implement `Debug`, because error-stack reports print with
   `{:?}`. Keep it that way for any new type holding a token, a password or
@@ -186,14 +187,20 @@ it streams a whole bundle alongside an upload.
 
 ## rmra specifics
 
-- **Vendored protos.** `components/platform-grpc/proto` holds client-side
-  subsets of sntns-platform's gateway APIs (see its README for what was
-  stripped and why it's wire-safe: each upstream `*_service`/`*_model` pair
-  is merged into one file, and the README records the upstream commit of
-  each RPC kept). Re-copy from upstream rather than editing; package,
-  service, message names and field numbers must stay upstream's.
+- **The platform's REST API, never gRPC.** Every call goes through
+  `remora-platform-http`'s `Gateway`: grpc-gateway's JSON for the
+  generated routes (`model` holds the request and response shapes used, in
+  upstream's names -- sntns-platform's `*-gateway-api-proto`), the
+  hand-written ones for what gRPC streamed: the artifact upload in short
+  `PUT`s (each at most 16 MiB or 30 s, under the ingress's 60 s, from the
+  offset the platform holds) then a commit checked against the file's
+  length and SHA-256; the ranged download; the device channel's and a
+  deployment's live feed WebSockets -- following a deployment never polls. A refusal is a
+  `Status` (code and message), classified per adapter. A context's address
+  is the REST host; one from the gRPC days (`:50051`) is read as the same
+  host on 443.
 - **The platform contract is upstream's.** The remora channel's behavior
-  (half-close as `eof_response`, the 5 s hangup grace, refused ssh options,
+  (half-close as a text `{"type":"eof"}`, the 5 s hangup grace, refused ssh options,
   the ssh pinning options) mirrors sntns-platform's Go client
   (`sntns-service-remora-channel-go`, `sntns-service-remora-go`) on
   purpose; change it there first, then here.
@@ -228,23 +235,27 @@ larger integration tests ported from the pre-DDD codebase (real `sgdisk`/
 shipped binary — only by tests exercising it.
 
 The one network port is the exception to "real adapters": the platform.
-gRPC adapters are tested against an in-process fake gateway built from the
-generated tonic servers (`remora-platform-grpc` generates them for exactly
-this), and `containers/rmra/tests/` runs the shipped `rmra` binary against
-one — `fake_gateway.rs` for login/whoami/`channel open` over stdio,
+Its adapters are tested over real HTTP against an in-process fake gateway
+(axum, speaking `remora-platform-http`'s model), and
+`containers/rmra/tests/` runs the shipped `rmra` binary against one — `fake_gateway.rs` for login/whoami/`channel open` over stdio,
 `real_sshd.rs` for `rmra ssh` end to end against a real user-mode `sshd`
 with real host and user CAs (Linux only), `ota.rs` for a release published
-(its upload dropped and resumed), rolled out and followed. The OTA fake
-lives in `remora-ota-adapter-grpc`'s `test_gateway` module behind the
+(its upload dropped and resumed), rolled out and followed. The shared fake
+is `remora-platform-http`'s `test_gateway::TestGateway`, behind the
 `test-gateway` feature, enabled from `[dev-dependencies]` only, so the
-adapter's, the use case's and the binary's tests share one fake (`cargo run
--p remora-ota-adapter-grpc --features test-gateway --example fake-gateway`
-serves it for trying the commands by hand). The same fake backs
-`device-adapter-grpc`'s and `factory-adapter-grpc`'s tests; it also serves
-IAM `whoami` and can revoke credentials (the station checks its login at
-start and answers 503 once it's revoked). Like the
-platform, it commits an upload only when its stream ends cleanly; tonic
-hands a client reset to a handler as a clean end, so the fake yields once
-to let hyper drop the handler first. An application crate that needs
+adapters', the use cases' and the binaries' tests share one fake (`cargo
+run -p remora-platform-http --features test-gateway --example
+fake-gateway` serves it for trying the commands by hand): releases and
+uploads, devices, factory devices, deployments, IAM `whoami`, and revoked
+credentials (the station checks its login at start and answers 503 once
+it's revoked). Like the platform, it stores an upload request's bytes as
+they arrive -- one request at a time per content id, from the offset the
+client says (409 otherwise, 423 while another writes) -- and commits on
+request only an artifact of the announced length and checksum. A deployment's log WebSocket moves it on by itself
+(polls then don't), and can be cut (`fail_next_log_stream_after`) to
+exercise reopening it. A test
+that needs other answers (a channel's device, an IAM that knows roles)
+serves its own small router with the module's helpers (`rpc_error`,
+`text_error`, `accept_channel`, `serve_router`). An application crate that needs
 the platform port but isn't about it may use a small hand-written stub of
 that one trait (see `context-application`'s tests).

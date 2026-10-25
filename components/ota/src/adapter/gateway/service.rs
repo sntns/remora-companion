@@ -1,8 +1,11 @@
+use std::time::SystemTime;
+
 use remora_context::model::ResolvedContext;
 
 use super::error::Result;
 use crate::model::{
-    Deployment, DeploymentFilter, DeploymentSummary, Labels, LogEntry, Release, ReleaseSummary,
+    Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary, Labels, LogEntry, Release,
+    ReleaseSummary,
 };
 
 /// The opening of an artifact upload.
@@ -13,21 +16,26 @@ pub struct InitialUpload {
     pub content_type: String,
     pub tag_condition: String,
     pub content_id: String,
+    /// The whole artifact's length and SHA-256 (hex): the platform commits
+    /// only what matches them.
+    pub content_length: u64,
+    pub checksum_sha256: String,
 }
 
-/// An artifact upload in flight: chunks go in order, `finish` commits it.
+/// An artifact upload in flight: chunks go in order, from wherever the
+/// platform got to (`upload_offset`); `finish` commits it.
 ///
-/// The upload protocol carries no total length: the platform takes whatever
-/// it received when the stream ends cleanly as the whole artifact. So an
-/// upload that stops short must end with [`ArtifactSink::abort`] (or by
-/// dropping the sink, which does the same without waiting), never by
-/// simply going away -- that would commit a truncated bundle.
+/// Whatever reaches the platform is kept for a resume with the same content
+/// id; only `finish` commits, and only an artifact of the announced length
+/// and checksum. An upload that stops short ends with
+/// [`ArtifactSink::abort`] (or by dropping the sink, which does the same
+/// without waiting).
 #[async_trait::async_trait]
 pub trait ArtifactSink: Send {
     async fn send(&mut self, chunk: Vec<u8>) -> Result<()>;
-    /// Ends the stream cleanly: the platform commits what it received.
+    /// Delivers what is left, then commits the artifact.
     async fn finish(self: Box<Self>) -> Result<()>;
-    /// Cancels the call: the platform keeps what it received for a resume
+    /// Stops sending: the platform keeps what it received for a resume
     /// with the same content id, and commits nothing.
     async fn abort(self: Box<Self>);
 }
@@ -38,6 +46,28 @@ pub trait ArtifactSink: Send {
 pub trait ArtifactChunks: Send {
     /// The next chunk; `None` once the requested bytes are all in.
     async fn next(&mut self) -> Result<Option<Vec<u8>>>;
+}
+
+/// What a deployment's live feed says.
+#[derive(Debug, Clone)]
+pub enum DeploymentEvent {
+    /// Where it is now: the first event, then each change.
+    Status {
+        status: DeploymentStatus,
+        details: Labels,
+        updated_at: Option<SystemTime>,
+    },
+    /// A report of the device's, new since the feed opened.
+    Log(LogEntry),
+}
+
+/// A deployment's live feed: its events as they happen, `None` once it is
+/// settled and the platform ended the feed. A deployment deleted meanwhile
+/// is a [`super::Error::NotFound`]; a feed cut short, an
+/// [`super::Error::Unreachable`] -- open another.
+#[async_trait::async_trait]
+pub trait DeploymentFeed: Send {
+    async fn next(&mut self) -> Result<Option<DeploymentEvent>>;
 }
 
 /// sntns-platform's remora gateway, as far as over-the-air updates need it:
@@ -74,10 +104,13 @@ pub trait OtaGatewayAdapter: Send + Sync {
     fn new_content_id(&self) -> String;
     /// How many bytes the platform already holds for an upload's resume token.
     async fn upload_offset(&self, context: &ResolvedContext, content_id: &str) -> Result<u64>;
+    /// Starts sending an artifact's bytes from `offset`: what the platform
+    /// holds for its content id (see `upload_offset`).
     async fn begin_upload(
         &self,
         context: &ResolvedContext,
         upload: InitialUpload,
+        offset: u64,
     ) -> Result<Box<dyn ArtifactSink>>;
     /// Streams `file_name` of `release`, from byte `offset` to its end.
     async fn download(
@@ -108,6 +141,13 @@ pub trait OtaGatewayAdapter: Send + Sync {
     /// What the device reported, oldest first.
     async fn deployment_logs(&self, context: &ResolvedContext, name: &str)
         -> Result<Vec<LogEntry>>;
+    /// Opens a deployment's live feed. Reports from before it opened are
+    /// not in it: read them with `deployment_logs`.
+    async fn follow_deployment(
+        &self,
+        context: &ResolvedContext,
+        name: &str,
+    ) -> Result<Box<dyn DeploymentFeed>>;
 }
 
 #[derive(Clone)]

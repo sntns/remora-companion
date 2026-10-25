@@ -1,0 +1,18 @@
+[package]
+name = "remora-factory-adapter-http"
+description = "FactoryProvisioningAdapter over sntns-platform's remora gateway REST API (create and assign a factory device), authenticated as the selected context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-factory = { path = "../factory" }
+remora-context = { path = "../context" }
+remora-platform-http = { path = "../platform-http" }
+async-trait.workspace = true
+error-stack.workspace = true
+
+[dev-dependencies]
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

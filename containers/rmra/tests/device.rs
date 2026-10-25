@@ -2,7 +2,7 @@
 
 use std::process::Stdio;
 
-use remora_ota_adapter_grpc::test_gateway::TestGateway;
+use remora_platform_http::test_gateway::TestGateway;
 
 #[tokio::test]
 async fn lists_devices_with_their_labels() {

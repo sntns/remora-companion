@@ -40,7 +40,9 @@ impl Context {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Endpoint {
-    /// The public gateway, `host:port` (e.g. `api.eu2.sntns.io:50051`).
+    /// The public gateway, `host[:port]` (e.g. `api.eu2.sntns.io`) or a
+    /// base URL. A context from the gRPC days still says `:50051`: the
+    /// same host serves the REST API on 443, which is what it reaches.
     pub address: String,
     #[serde(default, skip_serializing_if = "Tls::is_default")]
     pub tls: Tls,

@@ -24,13 +24,13 @@ remora-factory = { path = "../factory" }
 remora-station-adapter-jsonl = { path = "../station-adapter-jsonl" }
 remora-station-adapter-hooks-process = { path = "../station-adapter-hooks-process" }
 remora-factory-application = { path = "../factory-application" }
-remora-factory-adapter-grpc = { path = "../factory-adapter-grpc" }
+remora-factory-adapter-http = { path = "../factory-adapter-http" }
 remora-factory-adapter-local = { path = "../factory-adapter-local" }
 remora-context = { path = "../context" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
-remora-context-adapter-grpc = { path = "../context-adapter-grpc" }
-remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+remora-context-adapter-http = { path = "../context-adapter-http" }
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
 # The devices' side, raw: tests send bodies no well-behaved client would.
 reqwest.workspace = true
 base64.workspace = true

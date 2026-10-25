@@ -120,7 +120,7 @@ rmra login
 ```
 
 Guided on a terminal: on a first run it creates a context (a named gateway
-endpoint, `api.eu2.sntns.io:50051` by default), then asks how to log in —
+endpoint, `api.eu2.sntns.io` by default), then asks how to log in —
 an access key's token, or a login profile (user URN and password). The
 credentials are checked against the platform before anything is stored.
 For scripts: `rmra login --token-stdin`, or `--identity <urn>
@@ -133,7 +133,7 @@ Like `docker context`: one context per platform account or environment,
 each with its own login.
 
 ```
-rmra context create staging --address api.staging.example:50051
+rmra context create staging --address api.staging.example
 rmra context ls
 rmra context use staging
 rmra --context eu2 whoami          # just this once; or RMRA_CONTEXT=eu2
@@ -160,14 +160,14 @@ disk:
 | Variable | |
 |---|---|
 | `RMRA_TOKEN` | an access key's token — required |
-| `RMRA_ADDRESS` | the gateway, `host:port` (or with `http://`/`https://`) — `api.eu2.sntns.io:50051` by default |
+| `RMRA_ADDRESS` | the gateway, `host[:port]` (or with `http://`/`https://`) — `api.eu2.sntns.io` by default |
 | `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN (there are no aliases) |
-| `RMRA_PLAINTEXT` | `true` for plaintext h2c (local development stacks only) |
+| `RMRA_PLAINTEXT` | `true` for plain HTTP (local development stacks only) |
 | `RMRA_CA_FILE` | a PEM certificate authority to trust, on top of the system's |
 | `RMRA_SERVER_NAME` | the name to verify the gateway's certificate against |
 
 ```
-export RMRA_TOKEN=…   # from the CI's secrets; the gateway: api.eu2.sntns.io:50051
+export RMRA_TOKEN=…   # from the CI's secrets; the gateway: api.eu2.sntns.io
 rmra whoami      # context env (from RMRA_TOKEN)
 rmra device ls
 ```
@@ -367,8 +367,9 @@ deployment watch <names...>`) draws one live line per deployment — status,
 progress, the device's latest report — and exits non-zero if any of them
 doesn't succeed; Ctrl-C stops watching, not the deployments. A status rmra
 doesn't know yet stops the watch for that deployment with a warning and
-counts as not succeeded. `--interval` sets the polling period of `--watch`
-and `deployment logs --follow`. With `--selector`, what is deployed is
+counts as not succeeded. `--watch` and `deployment logs --follow` follow
+the platform's live feed: a status or a report shows as soon as the device
+sends it. With `--selector`, what is deployed is
 exactly the device list shown and confirmed. Every listing — and
 `deployment logs` (one object per line with `--follow`) and `deploy`'s
 result — takes `--format json` for scripts.
@@ -391,7 +392,7 @@ written. E.g. a CI job manufacturing devices from a batch recipe with a
 
 ```
 docker run --rm -v "$PWD:/work" -w /work \
-  -e RMRA_ADDRESS=api.eu2.sntns.io:50051 -e RMRA_TOKEN \
+  -e RMRA_ADDRESS=api.eu2.sntns.io -e RMRA_TOKEN \
   -e RMRA_ASSUME_ROLE=urn:sntns:iam:eu2:<tenant>:role:factory \
   <image-with-remora-etcher> remora-etcher batch run recipe.json
 ```
@@ -768,9 +769,9 @@ selector names.
 Small shared utility crates with no vertical prefix (`remora-fs-walk`,
 `remora-scratch`, `remora-unpack` — reading a `.bmaptar` or compressed
 image, for `flash` and `convert` — `remora-format`, `remora-progress`, `remora-tui`,
-`remora-completion`, and `remora-platform-grpc` — the vendored
-sntns-platform protos, compiled with the pure-Rust
-[protox](https://docs.rs/protox) so no `protoc` is needed) mirror
+`remora-completion`, and `remora-platform-http` — the client of
+sntns-platform's REST API and WebSockets, its JSON model and an in-process
+fake gateway for tests) mirror
 remora-edge's own `components/store`/`config` convention. Each binary in `containers/` (`remora-etcher`, `rmra`) is a
 composition root that wires its adapters and use cases together via
 [`busybody`](https://docs.rs/busybody) (the same DI crate remora-edge uses),

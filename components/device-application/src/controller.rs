@@ -104,8 +104,8 @@ mod tests {
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
     use remora_device::adapter::gateway::DeviceGatewayAdapter;
-    use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
-    use remora_ota_adapter_grpc::test_gateway::TestGateway;
+    use remora_device_adapter_http::DeviceGatewayAdapterImpl;
+    use remora_platform_http::test_gateway::TestGateway;
 
     use super::*;
 

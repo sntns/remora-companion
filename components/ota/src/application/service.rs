@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use remora_context::model::ContextOverride;
 use remora_progress::OperationContext;
 
@@ -102,26 +100,24 @@ pub trait OtaServiceInterface: Send + Sync {
         over: Option<&ContextOverride>,
         name: &str,
     ) -> Result<Vec<LogEntry>>;
-    /// Polls deployments every `interval` until each is settled (see
+    /// Follows deployments live until each is settled (see
     /// [`DeploymentStatus::is_settled`]), calling `on_progress` whenever one
-    /// is polled. Cancelling `ctx` stops watching (not the deployments):
-    /// those still going are returned as pending.
+    /// moves. Cancelling `ctx` stops watching (not the deployments): those
+    /// still going are returned as pending.
     async fn watch(
         &self,
         over: Option<&ContextOverride>,
         names: &[String],
-        interval: Duration,
         ctx: &OperationContext,
         on_progress: &mut (dyn FnMut(DeploymentProgress) + Send),
     ) -> Result<WatchOutcome>;
-    /// Calls `on_entry` with each report of the device, oldest first, as
-    /// they arrive, polling every `interval` until the deployment is
-    /// settled; returns its status then, or `None` once `ctx` is cancelled.
+    /// Calls `on_entry` with each report of the device, oldest first, then
+    /// live as they arrive until the deployment is settled; returns its
+    /// status then, or `None` once `ctx` is cancelled.
     async fn follow_logs(
         &self,
         over: Option<&ContextOverride>,
         name: &str,
-        interval: Duration,
         ctx: &OperationContext,
         on_entry: &mut (dyn FnMut(LogEntry) + Send),
     ) -> Result<Option<DeploymentStatus>>;

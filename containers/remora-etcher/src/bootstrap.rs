@@ -15,7 +15,7 @@ use remora_context::{
     application::ContextService,
 };
 use remora_context_adapter_file::{default_root, FileContextStoreImpl, FileCredentialStoreImpl};
-use remora_context_adapter_grpc::PlatformSessionAdapterImpl;
+use remora_context_adapter_http::PlatformSessionAdapterImpl;
 use remora_context_application::ContextControllerImpl;
 use remora_convert::application::ConvertService;
 use remora_convert_adapter_bmaptar::BmaptarAdapterImpl;
@@ -25,7 +25,7 @@ use remora_convert_adapter_qcow2::Qcow2AdapterImpl;
 use remora_convert_adapter_zstd::ZstdAdapterImpl;
 use remora_convert_application::{ContainerFormats, ConvertControllerImpl};
 use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::DeviceService};
-use remora_device_adapter_grpc::DeviceGatewayAdapterImpl;
+use remora_device_adapter_http::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
 use remora_disk::{adapter::DiskAdapterService, application::DiskService};
 use remora_disk_adapter_native::DiskAdapterImpl;
@@ -37,7 +37,7 @@ use remora_factory::{
     },
     application::FactoryService,
 };
-use remora_factory_adapter_grpc::FactoryGatewayAdapterImpl;
+use remora_factory_adapter_http::FactoryGatewayAdapterImpl;
 use remora_factory_adapter_local::{CredentialWriterAdapterImpl, DeviceKeyAdapterImpl};
 use remora_factory_application::FactoryControllerImpl;
 use remora_flash::{
@@ -72,7 +72,7 @@ use remora_ota::{
     application::OtaService,
 };
 use remora_ota_adapter_file::{FileArtifactSourceImpl, FileArtifactTargetImpl};
-use remora_ota_adapter_grpc::OtaGatewayAdapterImpl;
+use remora_ota_adapter_http::OtaGatewayAdapterImpl;
 use remora_ota_application::OtaControllerImpl;
 use remora_squashfs::{adapter::SquashfsAdapterService, application::SquashfsService};
 use remora_squashfs_adapter_backhand::SquashfsAdapterImpl;
@@ -430,7 +430,7 @@ pub async fn wire() -> Services {
         .await
         .expect("FlashService was just registered");
 
-    // Manufactures as the selected context, over the gateway's gRPC API;
+    // Manufactures as the selected context, over the gateway's REST API;
     // the device key and remora-factory.yaml stay local.
     container
         .set_type(DeviceKeyAdapterService::new(DeviceKeyAdapterImpl))

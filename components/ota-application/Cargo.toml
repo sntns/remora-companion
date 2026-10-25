@@ -14,14 +14,16 @@ remora-progress = { path = "../progress" }
 async-trait.workspace = true
 error-stack.workspace = true
 tokio.workspace = true
+futures-util = { workspace = true, features = ["std"] }
+sha2.workspace = true
 
 [dev-dependencies]
-remora-ota-adapter-grpc = { path = "../ota-adapter-grpc", features = ["test-gateway"] }
+remora-ota-adapter-http = { path = "../ota-adapter-http" }
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
 remora-ota-adapter-file = { path = "../ota-adapter-file" }
 remora-device-application = { path = "../device-application" }
-remora-device-adapter-grpc = { path = "../device-adapter-grpc" }
+remora-device-adapter-http = { path = "../device-adapter-http" }
 remora-context-application = { path = "../context-application" }
 remora-context-adapter-file = { path = "../context-adapter-file" }
 tempfile.workspace = true
 tokio-util.workspace = true
-sha2.workspace = true

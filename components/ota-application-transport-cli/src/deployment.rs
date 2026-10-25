@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use error_stack::Report;
 use remora_context::model::ContextOverride;
 use remora_ota::{
@@ -60,9 +58,10 @@ pub enum Command {
         /// Follow them until they finish.
         #[arg(short, long)]
         watch: bool,
-        /// Seconds between polls while following.
-        #[arg(long, default_value_t = 2, requires = "watch")]
-        interval: u64,
+        /// Ignored: updates arrive live (kept so that scripts using it
+        /// still run).
+        #[arg(long, hide = true)]
+        interval: Option<u64>,
     },
 
     /// Cancel deployments that are still pending or running.
@@ -90,9 +89,10 @@ pub enum Command {
         /// Keep printing new reports until the deployment finishes.
         #[arg(short, long)]
         follow: bool,
-        /// Seconds between polls while following.
-        #[arg(long, default_value_t = 2, requires = "follow")]
-        interval: u64,
+        /// Ignored: updates arrive live (kept so that scripts using it
+        /// still run).
+        #[arg(long, hide = true)]
+        interval: Option<u64>,
         /// `json`: an array, or one object per line with --follow.
         #[arg(long, default_value = "table")]
         format: Format,
@@ -104,9 +104,10 @@ pub enum Command {
         #[arg(required = true)]
         #[arg(add = remora_completion::values(remora_completion::Kind::Deployment))]
         names: Vec<String>,
-        /// Seconds between polls.
-        #[arg(long, default_value_t = 2)]
-        interval: u64,
+        /// Ignored: updates arrive live (kept so that scripts using it
+        /// still run).
+        #[arg(long, hide = true)]
+        interval: Option<u64>,
     },
 }
 
@@ -135,9 +136,10 @@ pub struct DeployArgs {
     /// Follow the deployments until they finish.
     #[arg(short, long)]
     watch: bool,
-    /// Seconds between polls while following.
-    #[arg(long, default_value_t = 2, requires = "watch")]
-    interval: u64,
+    /// Ignored: updates arrive live (kept so that scripts using it still
+    /// run).
+    #[arg(long, hide = true)]
+    interval: Option<u64>,
     /// Don't ask before deploying to devices picked by --selector.
     #[arg(short, long)]
     yes: bool,
@@ -219,11 +221,7 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Start {
-            names,
-            watch,
-            interval,
-        } => {
+        Command::Start { names, watch, .. } => {
             for name in &names {
                 service
                     .start_deployment(over, name)
@@ -232,7 +230,7 @@ pub async fn run(
                 tui::success(format!("Started {}", tui::accent(name)));
             }
             if watch {
-                follow(service, over, &names, seconds(interval)).await?;
+                follow(service, over, &names).await?;
             }
             Ok(())
         }
@@ -270,22 +268,11 @@ pub async fn run(
         Command::Logs {
             name,
             follow,
-            interval,
             format,
-        } => {
-            let interval = follow.then(|| seconds(interval));
-            logs(service, over, &name, interval, format).await
-        }
-        Command::Watch { names, interval } => {
-            self::follow(service, over, &names, seconds(interval)).await
-        }
+            ..
+        } => logs(service, over, &name, follow, format).await,
+        Command::Watch { names, .. } => self::follow(service, over, &names).await,
     }
-}
-
-/// A polling interval from `--interval`: at least a second, so that a
-/// typo doesn't hammer the platform.
-fn seconds(interval: u64) -> Duration {
-    Duration::from_secs(interval.max(1))
 }
 
 /// Watching and following stop on Ctrl-C: the deployments carry on.
@@ -386,7 +373,7 @@ pub async fn run_deploy(
         .map(|p| p.deployment.clone())
         .collect();
     if args.watch && !started.is_empty() {
-        follow(service, over, &started, seconds(args.interval)).await?;
+        follow(service, over, &started).await?;
     } else if !started.is_empty() {
         tui::step(format!(
             "Follow with {}",
@@ -453,7 +440,6 @@ async fn follow(
     service: &OtaService,
     over: Option<&ContextOverride>,
     names: &[String],
-    interval: Duration,
 ) -> Result<()> {
     let total = names.len();
     let mut watch = tui::Watch::new(format!(
@@ -461,7 +447,7 @@ async fn follow(
         if total == 1 { "" } else { "s" }
     ));
     let outcome = service
-        .watch(over, names, interval, &interruptible(), &mut |progress| {
+        .watch(over, names, &interruptible(), &mut |progress| {
             watch.update(&progress.name, watch_line(&progress))
         })
         .await;
@@ -509,16 +495,16 @@ fn watch_line(progress: &DeploymentProgress) -> WatchLine {
     }
 }
 
-/// Prints a deployment's reports; with `follow` (an interval), new ones as
-/// they come until it is settled.
+/// Prints a deployment's reports; with `follow`, new ones as they come
+/// until it is settled.
 async fn logs(
     service: &OtaService,
     over: Option<&ContextOverride>,
     name: &str,
-    follow: Option<Duration>,
+    follow: bool,
     format: Format,
 ) -> Result<()> {
-    let Some(interval) = follow else {
+    if !follow {
         let logs = service
             .deployment_logs(over, name)
             .await
@@ -530,9 +516,9 @@ async fn logs(
                 .for_each(|entry| println!("{}", log_line(entry))),
         }
         return Ok(());
-    };
+    }
     let status = service
-        .follow_logs(over, name, interval, &interruptible(), &mut |entry| {
+        .follow_logs(over, name, &interruptible(), &mut |entry| {
             match format {
                 // One object per line: a stream a script can read as it comes.
                 Format::Json => println!("{}", log_json(&entry)),
