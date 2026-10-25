@@ -28,7 +28,7 @@ use remora_device::{adapter::gateway::DeviceGatewayAdapterService, application::
 use remora_device_adapter_http::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
 use remora_disk::{adapter::DiskAdapterService, application::DiskService};
-use remora_disk_adapter_native::DiskAdapterImpl;
+use remora_disk_adapter_native::ElevatingDiskAdapterImpl;
 use remora_disk_application::DiskControllerImpl;
 use remora_factory::{
     adapter::{
@@ -134,7 +134,11 @@ pub async fn wire() -> Services {
     let container = busybody::ServiceContainerBuilder::new().build();
 
     container
-        .set_type(DiskAdapterService::new(DiskAdapterImpl))
+        // A disk only an administrator may write: opened and written by
+        // this program's own `disk-helper`, run elevated -- nothing else is.
+        .set_type(DiskAdapterService::new(ElevatingDiskAdapterImpl::new(
+            vec!["disk-helper".into()],
+        )))
         .await;
     let disk_adapter = container
         .get_type::<DiskAdapterService>()

@@ -105,6 +105,22 @@ enum Commands {
 
     /// Enable shell completion (contexts, roles, disks and paths with Tab).
     Completion(remora_completion::Args),
+
+    /// The helper that opens and writes a disk only an administrator may,
+    /// for an unprivileged `flash`: started by it, with administrator
+    /// rights asked for the platform's way -- never by hand.
+    #[command(name = "disk-helper", hide = true)]
+    DiskHelper(DiskHelperArgs),
+}
+
+#[derive(clap::Args)]
+struct DiskHelperArgs {
+    /// Where the unprivileged program listens.
+    #[arg(long)]
+    channel: String,
+    /// The disk to open: the one the administrator prompt was about.
+    #[arg(long)]
+    disk: std::path::PathBuf,
 }
 
 fn main() {
@@ -116,6 +132,15 @@ fn main() {
 
     let matches = Options::command().get_matches();
     let options = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    // The elevated helper: nothing else of the program runs with its
+    // rights -- no runtime, no services, no context.
+    if let Commands::DiskHelper(args) = &options.command {
+        let code = match remora_disk_adapter_native::serve_helper(&args.channel, &args.disk) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        };
+        std::process::exit(code);
+    }
     // A usage error, like clap's own: the environment defines a context
     // partly, or both defines and names one.
     let over = options.context.over(&matches).unwrap_or_else(|report| {
@@ -236,6 +261,7 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
             .await,
             verbose,
         ),
+        Commands::DiskHelper(_) => unreachable!("the helper runs before the runtime"),
         Commands::Completion(args) => remora_completion::instructions(
             "remora-etcher",
             args,

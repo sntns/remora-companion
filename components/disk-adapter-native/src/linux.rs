@@ -67,12 +67,59 @@ pub fn open(disk: &DiskInfo) -> Result<DiskTarget> {
     let meta = fs::metadata(&disk.path).change_context_lazy(|| Error::Open(disk.path.clone()))?;
     let name = whole_disk_named(Path::new(SYS_BLOCK), &majmin(meta.rdev()))?
         .ok_or_else(|| Report::new(Error::NotWholeDisk(disk.path.clone())))?;
+    check_access(&name, &disk.path)?;
     unmount_disk(&name, &disk.path)?;
     OpenOptions::new()
         .write(true)
         .open(&disk.path)
         .map(DiskTarget::new)
-        .change_context_lazy(|| Error::Open(disk.path.clone()))
+        .map_err(|error| denied_or(error, &disk.path, Error::Open(disk.path.clone())))
+}
+
+/// See [`DiskAdapter::check_writable`](remora_disk::adapter::DiskAdapter::check_writable).
+pub fn check_writable(disk: &DiskInfo) -> Result<()> {
+    let meta = fs::metadata(&disk.path).change_context_lazy(|| Error::Open(disk.path.clone()))?;
+    let name = whole_disk_named(Path::new(SYS_BLOCK), &majmin(meta.rdev()))?
+        .ok_or_else(|| Report::new(Error::NotWholeDisk(disk.path.clone())))?;
+    check_access(&name, &disk.path)
+}
+
+/// Refuses, before any volume is unmounted for nothing, a disk this process
+/// may not overwrite: its node not writable (not root, nor in its group),
+/// or a volume of it mounted while only root may unmount one.
+fn check_access(name: &str, path: &Path) -> Result<()> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .change_context_lazy(|| Error::Open(path.to_path_buf()))?;
+    // SAFETY: a NUL-terminated path.
+    if unsafe { libc::access(c_path.as_ptr(), libc::W_OK) } != 0 {
+        let error = io::Error::last_os_error();
+        return Err(denied_or(error, path, Error::Open(path.to_path_buf())));
+    }
+    // SAFETY: no arguments, no failure.
+    if unsafe { libc::geteuid() } != 0 {
+        let devs = disk_majmins(&Path::new(SYS_BLOCK).join(name), name);
+        let mountinfo = fs::read_to_string("/proc/self/mountinfo").change_context(Error::Io)?;
+        if let Some(mount_point) = mount_points_on(&mountinfo, &devs).into_iter().next() {
+            return Err(
+                Report::new(Error::PermissionDenied(path.to_path_buf())).attach(format!(
+                    "{} is mounted, and only root unmounts it",
+                    mount_point.display()
+                )),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `error` as the port's: [`Error::PermissionDenied`] when the OS refused
+/// it to this user (EACCES, EPERM), `otherwise` for anything else.
+fn denied_or(error: io::Error, path: &Path, otherwise: Error) -> Report<Error> {
+    let context = if error.kind() == io::ErrorKind::PermissionDenied {
+        Error::PermissionDenied(path.to_path_buf())
+    } else {
+        otherwise
+    };
+    Report::new(error).change_context(context)
 }
 
 /// The whole disk behind `path`, a disk or one of its partitions, its
@@ -97,6 +144,7 @@ pub fn hold(path: &Path) -> Result<Option<DiskHold>> {
     ) {
         return Err(Report::new(Error::SystemDisk(path.to_path_buf())));
     }
+    check_access(&name, path)?;
     unmount_disk(&name, path)?;
     Ok(Some(DiskHold::new(())))
 }
@@ -114,11 +162,10 @@ fn unmount_disk(name: &str, path: &Path) -> Result<()> {
             let error = io::Error::last_os_error();
             let hint = match error.raw_os_error() {
                 Some(libc::EBUSY) => "it is in use".to_owned(),
-                Some(libc::EPERM) => "unmounting takes root: run it with sudo".to_owned(),
+                Some(libc::EPERM) => "only root unmounts it".to_owned(),
                 _ => error.to_string(),
             };
-            return Err(Report::new(error)
-                .change_context(Error::Unmount(path.to_path_buf()))
+            return Err(denied_or(error, path, Error::Unmount(path.to_path_buf()))
                 .attach(format!("{}: {hint}", mount_point.display())));
         }
     }

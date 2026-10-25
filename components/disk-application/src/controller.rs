@@ -50,6 +50,25 @@ impl DiskServiceInterface for DiskControllerImpl {
             .change_context(Error::Open)
     }
 
+    // Waits on the administrator prompt, then the helper's unmounting.
+    async fn open_elevated(&self, disk: &DiskInfo) -> Result<DiskTarget> {
+        let adapter = self.adapter.clone();
+        let disk = disk.clone();
+        tokio::task::spawn_blocking(move || adapter.open_elevated(&disk))
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Open)
+    }
+
+    async fn check_writable(&self, disk: &DiskInfo) -> Result<()> {
+        let adapter = self.adapter.clone();
+        let disk = disk.clone();
+        tokio::task::spawn_blocking(move || adapter.check_writable(&disk))
+            .await
+            .expect("disk worker panicked")
+            .change_context(Error::Access)
+    }
+
     async fn hold(&self, path: &Path) -> Result<Option<DiskHold>> {
         let adapter = self.adapter.clone();
         let path = path.to_path_buf();

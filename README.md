@@ -473,14 +473,24 @@ Linux, macOS and Windows.
   container's synthesized disk is a view of a partition, not a target. The
   system disk is the one behind `/` and `/System/Volumes/*`, through its
   APFS container. Writing a disk keeps macOS from mounting its volumes
-  again while it writes; flashing writes through the raw node. Run it with
-  `sudo`.
+  again while it writes; flashing writes through the raw node.
 - **Windows:** a disk is `\\.\PhysicalDriveN` (Disk Management's "Disk N");
   a drive letter (`E:`) is refused as a volume, the error naming its disk.
   Removable means removable media or a USB/SD bus. The system disk is the
   one holding the Windows directory's volume. Writing a disk locks and
   dismounts its volumes for as long as it's written, which keeps Windows
-  from mounting them again. Run it from an Administrator prompt.
+  from mounting them again.
+
+`flash` needs no `sudo`: when the OS lets only an administrator write the
+disk (macOS always, Windows unless elevated, Linux unless root or in the
+disk's group), it asks for the rights the platform's way -- `sudo`'s
+password on the terminal, polkit's dialog on a Linux desktop without one,
+macOS's administrator dialog, UAC on Windows -- before anything is
+downloaded or drawn. Only a small helper then runs with them, opening and
+writing that one disk (never the system disk); reading and downloading the
+image and everything else stay yours. The `image`, `config` and `identity`
+commands writing into a disk in place still need to be run as an
+administrator.
 
 Wherever a disk's volumes are unmounted, one in use refuses, and the
 operation with it. `image` commands given a disk read its capacity from

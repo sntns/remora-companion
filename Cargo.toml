@@ -97,6 +97,7 @@ members = [
     "components/update-application",
     "components/update-adapter-github",
     "components/update-adapter-file",
+    "components/elevate",
     "components/update-application-transport-cli",
     "containers/remora-etcher",
     "containers/rmra",

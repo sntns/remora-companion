@@ -16,6 +16,10 @@ pub trait DiskServiceInterface: Send + Sync {
     /// The disk `disk` describes (as `info` returned it), opened to be
     /// overwritten whole.
     async fn open(&self, disk: &DiskInfo) -> Result<DiskTarget>;
+    /// See [`DiskAdapter::check_writable`](crate::adapter::DiskAdapter::check_writable).
+    async fn check_writable(&self, disk: &DiskInfo) -> Result<()>;
+    /// See [`DiskAdapter::open_elevated`](crate::adapter::DiskAdapter::open_elevated).
+    async fn open_elevated(&self, disk: &DiskInfo) -> Result<DiskTarget>;
     /// See [`DiskAdapter::hold`](crate::adapter::DiskAdapter::hold).
     async fn hold(&self, path: &Path) -> Result<Option<DiskHold>>;
 }

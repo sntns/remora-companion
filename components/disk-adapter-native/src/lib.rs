@@ -12,6 +12,8 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(any(unix, windows))]
+mod elevated;
 mod service;
 
-pub use service::DiskAdapterImpl;
+pub use service::{serve_helper, DiskAdapterImpl, ElevatingDiskAdapterImpl};

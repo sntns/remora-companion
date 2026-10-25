@@ -75,7 +75,13 @@ that isn't itself a bounded context:
   helper, ask which case it is before defaulting to a port.
 
 The other unseamed utility crates, same reasoning: `remora-tui` (all
-terminal presentation, see below), `remora-completion` (dynamic shell
+terminal presentation, see below), `remora-elevate` (a process started
+with administrator rights, asked for with the platform's tool: sudo,
+pkexec, the macOS dialog, UAC -- what the disk adapter's elevated helper
+runs under; see `disk-adapter-native`'s `elevated` module and
+`remora-etcher disk-helper`: only that helper is ever elevated, opening
+and writing one disk over a socket/named pipe, never the whole command),
+`remora-completion` (dynamic shell
 completion: value kinds, the provider registry, the `completion` command,
 the remote-values `Cache` and `command_line()` for providers),
 `remora-block-io` (a file, or a disk device in its place: its length --

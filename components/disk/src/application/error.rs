@@ -8,6 +8,8 @@ pub enum Error {
     Open,
     #[error("failed to unmount disk")]
     Hold,
+    #[error("failed to check the disk can be written")]
+    Access,
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

@@ -242,17 +242,31 @@ fn disk_node_name(meta: &fs::Metadata) -> Option<String> {
 }
 
 /// Refuses a node this user can't write, before any of its volumes is
-/// unmounted for nothing.
+/// unmounted for nothing: [`Error::PermissionDenied`] when only root may
+/// (macOS lets no one else write a disk's node).
 fn check_writable(node: &Path) -> Result<()> {
     let c_node = CString::new(node.as_os_str().as_bytes())
         .change_context_lazy(|| Error::Open(node.into()))?;
     // SAFETY: a NUL-terminated path.
     if unsafe { libc::access(c_node.as_ptr(), libc::R_OK | libc::W_OK) } != 0 {
-        return Err(Report::new(io::Error::last_os_error())
-            .change_context(Error::Open(node.into()))
-            .attach("writing a disk takes root: run it with sudo"));
+        let error = io::Error::last_os_error();
+        let context = if error.kind() == io::ErrorKind::PermissionDenied {
+            Error::PermissionDenied(node.into())
+        } else {
+            Error::Open(node.into())
+        };
+        return Err(Report::new(error).change_context(context));
     }
     Ok(())
+}
+
+/// See [`DiskAdapter::check_writable`](remora_disk::adapter::DiskAdapter::check_writable):
+/// the raw node `open` writes.
+pub fn check_disk_writable(disk: &DiskInfo) -> Result<()> {
+    let path = &disk.path;
+    let canonical = fs::canonicalize(path).change_context_lazy(|| Error::Open(path.clone()))?;
+    let name = whole_disk_of(path, &canonical)?;
+    check_writable(&PathBuf::from(format!("/dev/r{name}")))
 }
 
 /// The BSD disk name a `/dev` node is called: `disk4s1` for `disk4s1`, or

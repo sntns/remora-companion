@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use remora_block_io::BlockFile;
 use remora_disk::{
     adapter::{DiskHold, DiskTarget, DiskWrite, Error, Result},
@@ -69,15 +69,30 @@ pub fn open(disk: &DiskInfo) -> Result<DiskTarget> {
         Some(Target::Disk(number)) => number,
         _ => return Err(Report::new(Error::NotWholeDisk(disk.path.clone()))),
     };
+    check_writable(disk)?;
     let locks = lock(number, &disk.path)?;
-    let file = BlockFile::open_rw(&disk_path(number))
-        .map_err(Report::new)
-        .change_context_lazy(|| Error::Open(disk.path.clone()))
-        .attach("writing a disk takes an Administrator")?;
+    let file = BlockFile::open_rw(&disk_path(number)).map_err(|error| {
+        let context = if error.kind() == io::ErrorKind::PermissionDenied {
+            Error::PermissionDenied(disk.path.clone())
+        } else {
+            Error::Open(disk.path.clone())
+        };
+        Report::new(error).change_context(context)
+    })?;
     Ok(DiskTarget::new(PhysicalDrive {
         file: Some(file),
         _locks: locks,
     }))
+}
+
+/// See [`DiskAdapter::check_writable`](remora_disk::adapter::DiskAdapter::check_writable):
+/// Windows lets only an elevated Administrator write a physical drive or
+/// lock its volumes.
+pub fn check_writable(disk: &DiskInfo) -> Result<()> {
+    if remora_elevate::is_elevated() {
+        return Ok(());
+    }
+    Err(Report::new(Error::PermissionDenied(disk.path.clone())))
 }
 
 /// The whole disk behind `path` -- a `\\.\PhysicalDriveN`, or one of its
@@ -92,6 +107,9 @@ pub fn hold(path: &Path) -> Result<Option<DiskHold>> {
     };
     if system_disks().contains(&number) {
         return Err(Report::new(Error::SystemDisk(path.to_path_buf())));
+    }
+    if !remora_elevate::is_elevated() {
+        return Err(Report::new(Error::PermissionDenied(path.to_path_buf())));
     }
     Ok(Some(DiskHold::new(lock(number, path)?)))
 }

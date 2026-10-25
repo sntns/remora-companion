@@ -141,6 +141,25 @@ impl FlashServiceInterface for FlashControllerImpl {
 
     async fn flash(&self, request: &FlashRequest, ctx: &OperationContext) -> Result<FlashOutcome> {
         let info = self.guard_disk(&request.device, request.force).await?;
+        // Before the image is opened (a release's starts downloading) and
+        // the progress is drawn: a disk only an administrator may write is
+        // opened now by an elevated helper, its prompt in nobody's way.
+        let elevated = match self.disk.check_writable(&info).await {
+            Ok(()) => None,
+            Err(report) if needs_administrator(&report) => {
+                ctx.sink.log(format!(
+                    "writing {} takes administrator rights: asking for them",
+                    info.path.display()
+                ));
+                Some(
+                    self.disk
+                        .open_elevated(&info)
+                        .await
+                        .change_context_lazy(|| Error::OpenDevice(info.path.clone()))?,
+                )
+            }
+            Err(report) => return Err(report.change_context(Error::OpenDevice(info.path.clone()))),
+        };
 
         if ctx.cancel.is_cancelled() {
             return Err(Report::new(Error::Cancelled));
@@ -164,7 +183,11 @@ impl FlashServiceInterface for FlashControllerImpl {
             let readers = self.readers.clone();
             let request = request.clone();
             let progress = progress.clone();
-            move || run_flash(&disk, &readers, &request, &info, &progress, &fetch)
+            move || {
+                run_flash(
+                    &disk, &readers, &request, &info, elevated, &progress, &fetch,
+                )
+            }
         });
         let mut tick = tokio::time::interval(PROGRESS_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -336,6 +359,7 @@ fn run_flash(
     readers: &Readers,
     request: &FlashRequest,
     checked: &DiskInfo,
+    elevated: Option<DiskTarget>,
     progress: &Progress,
     fetch: &Fetch,
 ) -> Result<(FlashOutcome, DiskTarget)> {
@@ -347,7 +371,7 @@ fn run_flash(
     let bmap = &readers.bmap;
     check_fits(&summary, checked)?;
 
-    let mut device = open_checked_device(disk, &fetch.runtime, &request.device, checked)?;
+    let mut device = open_checked_device(disk, &fetch.runtime, &request.device, checked, elevated)?;
 
     progress
         .total
@@ -406,12 +430,14 @@ fn sibling_bmap(image: &Path) -> Option<PathBuf> {
 /// it: the disk vertical is asked again which disk `device` is, and a
 /// `device` resolving anywhere else than `checked.path` by now (a symlink
 /// retargeted since, a disk swapped behind the same number) is refused
-/// rather than written. The disk vertical opens it, its volumes unmounted.
+/// rather than written. The disk vertical opens it, its volumes unmounted
+/// -- unless an elevated helper already did: the same check holds.
 fn open_checked_device(
     disk: &DiskService,
     runtime: &Handle,
     device: &Path,
     checked: &DiskInfo,
+    elevated: Option<DiskTarget>,
 ) -> Result<DiskTarget> {
     let resolved = runtime
         .block_on(disk.info(device))
@@ -424,9 +450,23 @@ fn open_checked_device(
             checked: checked.path.clone(),
         }));
     }
+    if let Some(target) = elevated {
+        return Ok(target);
+    }
     runtime
         .block_on(disk.open(checked))
         .change_context_lazy(|| Error::OpenDevice(checked.path.clone()))
+}
+
+/// Whether the disk vertical refused because only an administrator may
+/// write the disk -- something an elevated helper does.
+fn needs_administrator<C>(report: &Report<C>) -> bool {
+    report.frames().any(|frame| {
+        matches!(
+            frame.downcast_ref::<remora_disk::adapter::Error>(),
+            Some(remora_disk::adapter::Error::PermissionDenied(_))
+        )
+    })
 }
 
 #[cfg(test)]

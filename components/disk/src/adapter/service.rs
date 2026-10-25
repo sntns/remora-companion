@@ -22,6 +22,24 @@ pub trait DiskAdapter: Send + Sync {
     /// the OS needs first (its volumes unmounted, and on macOS kept from
     /// mounting again until the target is dropped) is done here.
     fn open(&self, disk: &DiskInfo) -> Result<DiskTarget>;
+    /// Whether this process may overwrite `disk` -- open it for writing,
+    /// unmount its volumes -- told before anything is done to it:
+    /// [`Error::PermissionDenied`](super::Error::PermissionDenied) when the
+    /// OS would refuse. `open` and `hold` refuse the same way.
+    fn check_writable(&self, disk: &DiskInfo) -> Result<()> {
+        let _ = disk;
+        Ok(())
+    }
+    /// As `open`, by a helper given administrator rights -- asked for now,
+    /// with the platform's prompt -- for a disk `check_writable` said only
+    /// an administrator may write. Only that helper is elevated: it opens
+    /// and writes the disk, nothing else. Without one,
+    /// [`Error::PermissionDenied`](super::Error::PermissionDenied).
+    fn open_elevated(&self, disk: &DiskInfo) -> Result<DiskTarget> {
+        Err(error_stack::Report::new(super::Error::PermissionDenied(
+            disk.path.clone(),
+        )))
+    }
     /// When `path` is a disk device (the whole disk or one of its
     /// partitions), that whole disk's volumes unmounted, for something to
     /// write into it from under no filesystem; on macOS, kept from mounting

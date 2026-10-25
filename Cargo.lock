@@ -3154,6 +3154,8 @@ dependencies = [
  "libc",
  "remora-block-io",
  "remora-disk",
+ "remora-elevate",
+ "tempfile",
  "thiserror 1.0.69",
  "windows-sys 0.61.2",
 ]
@@ -3179,6 +3181,17 @@ dependencies = [
  "remora-format",
  "remora-tui",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "remora-elevate"
+version = "0.20.1"
+dependencies = [
+ "libc",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

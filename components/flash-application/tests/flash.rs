@@ -66,10 +66,15 @@ const BMAP_XML: &str = r#"<?xml version="1.0" ?>
 /// Describes every path as `disk`, the way a disk service would describe
 /// the node it resolved a path to -- or, once `retarget` is set, as that
 /// disk from its second lookup on: the path pointed elsewhere meanwhile.
+#[derive(Default)]
 struct StubDisk {
     disk: Option<DiskInfo>,
     retarget: Option<DiskInfo>,
     lookups: std::sync::atomic::AtomicUsize,
+    /// Only an administrator may write it: `open` refuses, `open_elevated`
+    /// (counted) opens it.
+    administrator_only: bool,
+    elevated_opens: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
@@ -90,6 +95,36 @@ impl DiskServiceInterface for StubDisk {
     }
 
     async fn open(&self, disk: &DiskInfo) -> DiskResult<DiskTarget> {
+        if self.administrator_only {
+            return Err(
+                error_stack::Report::new(remora_disk::adapter::Error::PermissionDenied(
+                    disk.path.clone(),
+                ))
+                .change_context(DiskError::Open),
+            );
+        }
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&disk.path)
+            .map(DiskTarget::new)
+            .map_err(|e| error_stack::Report::new(e).change_context(DiskError::Open))
+    }
+
+    async fn check_writable(&self, disk: &DiskInfo) -> DiskResult<()> {
+        if self.administrator_only {
+            return Err(
+                error_stack::Report::new(remora_disk::adapter::Error::PermissionDenied(
+                    disk.path.clone(),
+                ))
+                .change_context(DiskError::Access),
+            );
+        }
+        Ok(())
+    }
+
+    async fn open_elevated(&self, disk: &DiskInfo) -> DiskResult<DiskTarget> {
+        self.elevated_opens
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         fs::OpenOptions::new()
             .write(true)
             .open(&disk.path)
@@ -110,8 +145,7 @@ fn controller_with(disk: DiskInfo, release: StubRelease) -> FlashControllerImpl 
     FlashControllerImpl::new(
         DiskService::new(StubDisk {
             disk: Some(disk),
-            retarget: None,
-            lookups: Default::default(),
+            ..Default::default()
         }),
         ImageSourceAdapterService::new(ImageSourceAdapterImpl),
         BmapAdapterService::new(BmapAdapterImpl),
@@ -532,7 +566,7 @@ async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
         DiskService::new(StubDisk {
             disk: Some(removable_non_system_disk(&device_path)),
             retarget: Some(removable_non_system_disk(&elsewhere)),
-            lookups: Default::default(),
+            ..Default::default()
         }),
         ImageSourceAdapterService::new(ImageSourceAdapterImpl),
         BmapAdapterService::new(BmapAdapterImpl),
@@ -549,6 +583,76 @@ async fn flash_refuses_a_device_that_is_not_the_checked_disk() {
     ));
     assert!(untouched(&device_path));
     assert!(fs::read(&elsewhere).unwrap().is_empty());
+}
+
+/// A disk only an administrator may write is opened by the elevated
+/// helper -- before the copy starts -- and written like any other.
+#[tokio::test]
+async fn a_disk_only_an_administrator_writes_is_opened_elevated() {
+    let dir = tempdir("elevated");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+    let elevated_opens = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let controller = FlashControllerImpl::new(
+        DiskService::new(StubDisk {
+            disk: Some(removable_non_system_disk(&device_path)),
+            administrator_only: true,
+            elevated_opens: elevated_opens.clone(),
+            ..Default::default()
+        }),
+        ImageSourceAdapterService::new(ImageSourceAdapterImpl),
+        BmapAdapterService::new(BmapAdapterImpl),
+        ReleaseArtifactAdapterService::new(StubRelease::default()),
+    );
+    let request = FlashRequest {
+        image: image_path.into(),
+        bmap: BmapSource::File(bmap_path),
+        device: device_path.clone(),
+        force: false,
+        eject: true,
+    };
+    controller
+        .flash(&request, &OperationContext::noop())
+        .await
+        .expect("flash should succeed");
+    assert_eq!(elevated_opens.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert!(only_mapped_ranges_written(&device_path));
+}
+
+/// Opened elevated or not, a path pointed elsewhere since the check is
+/// refused before anything is written.
+#[tokio::test]
+async fn an_elevated_disk_is_checked_again_before_it_is_written() {
+    let dir = tempdir("elevated-mismatch");
+    let (image_path, bmap_path, device_path) = fixture(&dir, &build_source_image());
+    let elsewhere = dir.join("other.img");
+    fs::write(&elsewhere, b"").unwrap();
+    let controller = FlashControllerImpl::new(
+        DiskService::new(StubDisk {
+            disk: Some(removable_non_system_disk(&device_path)),
+            retarget: Some(removable_non_system_disk(&elsewhere)),
+            administrator_only: true,
+            ..Default::default()
+        }),
+        ImageSourceAdapterService::new(ImageSourceAdapterImpl),
+        BmapAdapterService::new(BmapAdapterImpl),
+        ReleaseArtifactAdapterService::new(StubRelease::default()),
+    );
+    let request = FlashRequest {
+        image: image_path.into(),
+        bmap: BmapSource::File(bmap_path),
+        device: device_path.clone(),
+        force: false,
+        eject: true,
+    };
+    let err = controller
+        .flash(&request, &OperationContext::noop())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err.current_context(),
+        Error::TargetMismatch { .. }
+    ));
+    assert!(untouched(&device_path));
 }
 
 #[tokio::test]

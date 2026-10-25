@@ -16,6 +16,10 @@ pub enum Error {
     Unmount(PathBuf),
     #[error("failed to open {0} for writing")]
     Open(PathBuf),
+    /// The OS lets only an administrator (root) write the disk, or unmount
+    /// its volumes: worth asking for the rights and running again.
+    #[error("writing {0} takes administrator rights")]
+    PermissionDenied(PathBuf),
     #[error("disk access is not yet implemented on this OS")]
     Unsupported,
 }
