@@ -10,6 +10,9 @@
 //! runners), and skipped (passes trivially) where `/usr/sbin/sshd` or `ssh`
 //! is missing.
 #![cfg(target_os = "linux")]
+// The fake gateway's handlers answer `Result<_, Response>`, axum's own
+// idiom for a refusal.
+#![allow(clippy::result_large_err)]
 
 use std::{
     path::{Path, PathBuf},

@@ -202,8 +202,12 @@ mod tests {
         let mut buf = [0; 7];
         disk.read_exact(&mut buf).unwrap();
         // A device node refuses the filesystem's sync (macOS: `F_FULLFSYNC`,
-        // `ENOTTY`); a device's own one goes through.
-        disk.sync_all().unwrap();
-        disk.sync_data().unwrap();
+        // `ENOTTY`); a device's own one goes through. Not on Windows, where
+        // flushing needs the write access this read-only handle lacks.
+        #[cfg(not(windows))]
+        {
+            disk.sync_all().unwrap();
+            disk.sync_data().unwrap();
+        }
     }
 }

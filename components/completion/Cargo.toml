@@ -10,3 +10,6 @@ publish.workspace = true
 remora-tui = { path = "../tui" }
 clap.workspace = true
 clap_complete.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

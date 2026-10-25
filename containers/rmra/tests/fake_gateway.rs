@@ -2,6 +2,9 @@
 //! login is verified and stored, whoami reads it back, and `channel open`
 //! carries stdin to the device and the device's answer to stdout -- with
 //! the end of stdin arriving as a half-close the device still answers.
+// The fake gateway's handlers answer `Result<_, Response>`, axum's own
+// idiom for a refusal.
+#![allow(clippy::result_large_err)]
 
 use std::process::Stdio;
 
@@ -45,7 +48,6 @@ fn authorized(headers: &HeaderMap) -> Result<&'static str, (Code, &'static str)>
 }
 
 /// [`authorized`], answered the way the REST routes do.
-#[allow(clippy::result_large_err)]
 fn rest_authorized(headers: &HeaderMap) -> Result<&'static str, Response> {
     authorized(headers).map_err(|(code, message)| rpc_error(code, message))
 }

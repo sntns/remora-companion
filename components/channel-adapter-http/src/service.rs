@@ -344,6 +344,9 @@ fn classify(status: Status) -> Report<Error> {
 }
 
 #[cfg(test)]
+// The fake gateway's handlers answer `Result<_, Response>`, axum's own
+// idiom for a refusal.
+#[allow(clippy::result_large_err)]
 mod tests {
     use std::time::{Duration, SystemTime};
 

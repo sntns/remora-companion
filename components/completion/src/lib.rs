@@ -352,8 +352,8 @@ mod tests {
 
     #[test]
     fn installing_adds_the_line_once() {
-        let dir = std::env::temp_dir().join(format!("remora-completion-{}", std::process::id()));
-        let rc = dir.join("nested").join(".zshrc");
+        let dir = tempfile::tempdir().unwrap();
+        let rc = dir.path().join("nested").join(".zshrc");
         let (_, line) = enable_line("rmra", Shell::Zsh);
         assert!(add_line(&rc, &line, "rmra").unwrap());
         assert!(!add_line(&rc, &line, "rmra").unwrap());
@@ -362,13 +362,11 @@ mod tests {
         assert!(text.starts_with("# rmra shell completion\n"), "{text}");
 
         // After what is there, never glued to its last line.
-        let other = dir.join(".bashrc");
-        std::fs::create_dir_all(&dir).unwrap();
+        let other = dir.path().join(".bashrc");
         std::fs::write(&other, "export A=1").unwrap();
         let (_, line) = enable_line("remora-etcher", Shell::Bash);
         assert!(add_line(&other, &line, "remora-etcher").unwrap());
         let text = std::fs::read_to_string(&other).unwrap();
         assert!(text.starts_with("export A=1\n\n# remora-etcher"), "{text}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

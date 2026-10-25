@@ -94,6 +94,9 @@ fn classify(status: Status) -> Report<Error> {
 }
 
 #[cfg(test)]
+// The fake gateway's handlers answer `Result<_, Response>`, axum's own
+// idiom for a refusal.
+#[allow(clippy::result_large_err)]
 mod tests {
     use remora_context::model::{Endpoint, Secret, Tls};
     use remora_platform_http::{
@@ -107,7 +110,6 @@ mod tests {
     use super::*;
 
     /// An in-process IAM gateway that knows one access key.
-    #[allow(clippy::result_large_err)]
     fn authenticated(headers: &HeaderMap) -> std::result::Result<(), Response> {
         match header(headers, "authentication-token") {
             Some("good") => Ok(()),
