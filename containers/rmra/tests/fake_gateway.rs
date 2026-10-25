@@ -106,6 +106,16 @@ async fn reverse(mut socket: WebSocket) {
 async fn drop_after_first(mut socket: WebSocket) {
     let _ = socket.recv().await;
     let _ = socket.send(close(1011, "the device went away")).await;
+    closing(socket).await;
+}
+
+/// Ends the closing handshake: reads until the client's own close, so that
+/// the connection isn't dropped with its data unread -- the reset that
+/// would cause loses the close frame on Windows, which discards what was
+/// received but not yet read.
+async fn closing(mut socket: WebSocket) {
+    let drain = async { while let Some(Ok(_)) = socket.recv().await {} };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), drain).await;
 }
 
 fn close(code: u16, reason: &str) -> Message {

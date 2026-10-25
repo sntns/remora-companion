@@ -404,6 +404,11 @@ mod tests {
                 reason: "the device went away".into(),
             })))
             .await;
+        // The closing handshake, ended: dropped with the client's data
+        // unread, the connection would be reset, and Windows discards the
+        // close frame with what it received but not yet read.
+        let drain = async { while let Some(Ok(_)) = socket.recv().await {} };
+        let _ = tokio::time::timeout(Duration::from_secs(5), drain).await;
     }
 
     async fn open(
