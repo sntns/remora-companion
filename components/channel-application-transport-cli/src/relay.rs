@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 
 /// How long a channel still gets to finish after a hangup: its last bytes
 /// forwarded, its end of input said, the device's end read back.
-const HANGUP_GRACE: Duration = Duration::from_secs(5);
+const HANGUP_GRACE: Duration = Duration::from_secs(15);
 
 const BUFFER: usize = 32 * 1024;
 
@@ -59,6 +59,10 @@ pub(crate) async fn stdio(channel: Channel, device: &str) -> Result<()> {
             }
         }
         release_stdout();
+        // The device's end is not yet the channel's: a cut announced as
+        // a close, or a gateway gone, must not exit 0. Reading on also
+        // answers the gateway's pings while the upload goes on.
+        receiver.finished().await.change_context_lazy(lost)?;
         Ok::<_, Report<Error>>(())
     };
 

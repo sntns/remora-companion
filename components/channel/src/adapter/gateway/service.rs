@@ -20,6 +20,15 @@ pub trait ChannelReceiver: Send {
     /// The device's next bytes, or `None` once it has said it will send no
     /// more (or the channel ended). Sticky: `None` stays `None`.
     async fn recv(&mut self) -> Result<Option<Vec<u8>>>;
+
+    /// Once `recv` has returned `None`: waits for the channel itself to end,
+    /// and says how. `Ok` only for a channel that ended normally after the
+    /// device's end of output; a failure, a cut or a gateway gone is an
+    /// error, so a transfer cut short never reads as complete. Reading on also
+    /// keeps answering the gateway's pings while this end still uploads.
+    async fn finished(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// An open channel to a device, split into its two directions so each can

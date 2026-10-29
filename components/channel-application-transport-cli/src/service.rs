@@ -263,11 +263,10 @@ pub fn proxy_command() -> Result<ProxyCommandBuilder> {
     Ok(Arc::new(move |target: &ProxyTarget| {
         // The context names the role too: it acts as the one the key was
         // just certified for.
-        let mut words = vec![
-            executable.display().to_string(),
-            "--context".into(),
-            target.context.into(),
-        ];
+        let mut words = vec![executable.display().to_string()];
+        if let Some(context) = target.context {
+            words.extend(["--context".into(), context.into()]);
+        }
         words.extend([
             "channel".into(),
             "open".into(),
@@ -363,5 +362,23 @@ mod tests {
         assert_eq!(quote("/opt/my tools/rmra"), "'/opt/my tools/rmra'");
         assert_eq!(quote("it's"), r"'it'\''s'");
         assert_eq!(quote(""), "''");
+    }
+
+    /// A context the environment defines has no name to select it by: the
+    /// ProxyCommand inherits the environment instead, and must not name one
+    /// - `--context env` selected a stored context of that name, or none.
+    #[test]
+    fn a_defined_context_is_inherited_not_named() {
+        let builder = proxy_command().unwrap();
+        let defined = builder(&ProxyTarget {
+            context: None,
+            device: "D1",
+        });
+        assert!(!defined.contains("--context"), "{defined}");
+        let named = builder(&ProxyTarget {
+            context: Some("eu2"),
+            device: "D1",
+        });
+        assert!(named.contains("--context eu2"), "{named}");
     }
 }

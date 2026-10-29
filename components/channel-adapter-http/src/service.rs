@@ -15,8 +15,9 @@ use remora_channel::{
 use remora_context::model::ResolvedContext;
 use remora_platform_http::{
     model::{self, channel, time_of},
-    status_summary, Code, Connection, Gateway, Message, Status, WebSocket,
+    status_summary, CloseFrame, Code, Connection, Gateway, Message, Status, WebSocket,
 };
+use std::time::Duration;
 
 /// The remora-channel gateway: a channel over its WebSocket, everything
 /// else over its REST API.
@@ -89,6 +90,8 @@ impl ChannelGatewayAdapter for GatewayAdapterImpl {
             receiver: Box::new(WebSocketReceiver {
                 stream,
                 ended: false,
+                saw_eof: false,
+                closed: false,
             }),
         })
     }
@@ -266,26 +269,75 @@ impl ChannelSender for WebSocketSender {
 
 struct WebSocketReceiver {
     stream: SplitStream<WebSocket>,
+    /// The device's end of output, or the channel's, has been read.
     ended: bool,
+    /// The device said it will send no more: what makes a normal close a
+    /// complete exchange.
+    saw_eof: bool,
+    /// The gateway's normal close was already read by `recv`.
+    closed: bool,
+}
+
+/// How long the gateway may stay silent. It pings every 30 s, so a live
+/// connection is never quiet this long: a NAT that dropped the mapping or a
+/// laptop that slept leaves no reset, and without this the channel waited
+/// for good.
+const GATEWAY_SILENCE: Duration = Duration::from_secs(75);
+
+impl WebSocketReceiver {
+    /// The next message, `None` at the end of the stream. Reading is also
+    /// what answers the gateway's pings.
+    async fn next(&mut self) -> Result<Option<Message>> {
+        match tokio::time::timeout(GATEWAY_SILENCE, self.stream.next()).await {
+            Err(_) => Err(Report::new(Error::Ended).attach(format!(
+                "nothing heard from the gateway for {}s",
+                GATEWAY_SILENCE.as_secs()
+            ))),
+            Ok(None) => Ok(None),
+            // Mid-channel, any failure is the gateway ending it: a device or
+            // replica going away, the connection cut.
+            Ok(Some(Err(error))) => Err(Report::new(Error::Ended).attach(error.to_string())),
+            Ok(Some(Ok(message))) => Ok(Some(message)),
+        }
+    }
+
+    /// What a close says: a complete exchange only when it is a normal close
+    /// after the device's end of output. Any other - a failure, its reason
+    /// the platform's words; a gateway going away; a normal close before the
+    /// device's end - is a channel cut short.
+    fn close_outcome(&self, frame: Option<CloseFrame>) -> Result<()> {
+        let Some(frame) = frame else {
+            return Err(Report::new(Error::Ended).attach("the gateway closed without a code"));
+        };
+        let code = u16::from(frame.code);
+        if code == 1000 {
+            if self.saw_eof {
+                return Ok(());
+            }
+            return Err(Report::new(Error::Ended)
+                .attach("the channel ended before the device's end of output"));
+        }
+        let reason = match frame.reason.to_string() {
+            reason if reason.is_empty() => format!("closed with code {code}"),
+            reason => reason,
+        };
+        let status = Status::new(Code::Unavailable, reason);
+        Err(Report::new(Error::Ended).attach(status_summary(&status)))
+    }
+
+    fn cut() -> Report<Error> {
+        Report::new(Error::Ended)
+            .attach("the connection ended without the gateway closing the channel")
+    }
 }
 
 #[async_trait::async_trait]
 impl ChannelReceiver for WebSocketReceiver {
     async fn recv(&mut self) -> Result<Option<Vec<u8>>> {
         while !self.ended {
-            // Reading is also what answers the gateway's pings.
-            let message = match self.stream.next().await {
-                None => {
-                    self.ended = true;
-                    continue;
-                }
-                // Mid-channel, any failure is the gateway ending it: a
-                // device or replica going away, the connection cut.
-                Some(Err(error)) => {
-                    self.ended = true;
-                    return Err(Report::new(Error::Ended).attach(error.to_string()));
-                }
-                Some(Ok(message)) => message,
+            let Some(message) = self.next().await.inspect_err(|_| self.ended = true)? else {
+                self.ended = true;
+                return Err(Self::cut());
             };
             match message {
                 Message::Binary(bytes) => return Ok(Some(bytes.to_vec())),
@@ -294,33 +346,38 @@ impl ChannelReceiver for WebSocketReceiver {
                     let control = serde_json::from_str::<channel::Control>(text.as_str());
                     if matches!(control, Ok(control) if control.kind == "eof") {
                         self.ended = true;
+                        self.saw_eof = true;
                     }
                     // Anything else is a message this version doesn't
                     // know: skipped rather than turned into bytes.
                 }
-                // A normal close is both directions done; any other is
-                // the gateway's failure -- a device or replica going away,
-                // what gRPC called Unavailable -- its reason the
-                // platform's words.
                 Message::Close(frame) => {
                     self.ended = true;
-                    if let Some(frame) =
-                        frame.filter(|frame| !matches!(u16::from(frame.code), 1000 | 1001))
-                    {
-                        let reason = match frame.reason.to_string() {
-                            reason if reason.is_empty() => {
-                                format!("closed with code {}", u16::from(frame.code))
-                            }
-                            reason => reason,
-                        };
-                        let status = Status::new(Code::Unavailable, reason);
-                        return Err(Report::new(Error::Ended).attach(status_summary(&status)));
-                    }
+                    self.close_outcome(frame)?;
+                    self.closed = true;
                 }
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
             }
         }
         Ok(None)
+    }
+
+    async fn finished(&mut self) -> Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        loop {
+            match self.next().await? {
+                None => return Err(Self::cut()),
+                Some(Message::Close(frame)) => {
+                    self.closed = true;
+                    return self.close_outcome(frame);
+                }
+                // Nothing else is expected once the device has ended; pings
+                // are answered by the reading itself.
+                Some(_) => {}
+            }
+        }
     }
 }
 
@@ -411,6 +468,46 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), drain).await;
     }
 
+    /// Bytes, then the connection goes: no eof, no close.
+    async fn cut_after_bytes(mut socket: ServerSocket) {
+        let _ = socket
+            .send(WsMessage::Binary(b"partial".to_vec().into()))
+            .await;
+        drop(socket);
+    }
+
+    /// Bytes, then a normal close without the device's end of output.
+    async fn close_without_eof(mut socket: ServerSocket) {
+        let _ = socket
+            .send(WsMessage::Binary(b"partial".to_vec().into()))
+            .await;
+        let _ = socket
+            .send(WsMessage::Close(Some(CloseFrame {
+                code: 1000,
+                reason: "".into(),
+            })))
+            .await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(_)) = socket.recv().await {}
+        })
+        .await;
+    }
+
+    /// The device's end, then the gateway going away rather than closing.
+    async fn eof_then_going_away(mut socket: ServerSocket) {
+        let _ = socket.send(WsMessage::Text(channel::EOF.into())).await;
+        let _ = socket
+            .send(WsMessage::Close(Some(CloseFrame {
+                code: 1001,
+                reason: "".into(),
+            })))
+            .await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(_)) = socket.recv().await {}
+        })
+        .await;
+    }
+
     async fn open(
         Path((device, _profile)): Path<(String, String)>,
         upgrade: WebSocketUpgrade,
@@ -426,6 +523,9 @@ mod tests {
                 "no session is open for this device",
             ),
             "DROP" => accept_channel(upgrade, "stream", &urn, drop_after_first),
+            "CUT" => accept_channel(upgrade, "stream", &urn, cut_after_bytes),
+            "NOEOF" => accept_channel(upgrade, "stream", &urn, close_without_eof),
+            "GONE" => accept_channel(upgrade, "stream", &urn, eof_then_going_away),
             "DGRAM" => accept_channel(upgrade, "datagram", &urn, echo),
             _ => accept_channel(upgrade, "stream", &urn, echo),
         }
@@ -571,6 +671,63 @@ mod tests {
             datagrams.receiver.recv().await.unwrap().unwrap().len(),
             datagram.len()
         );
+    }
+
+    /// A transfer cut short never reads as complete, however it ends.
+    #[tokio::test]
+    async fn every_end_short_of_a_normal_close_after_eof_is_a_failure() {
+        let context = serve().await;
+
+        let mut cut = GatewayAdapterImpl
+            .open(&context, "CUT", "ssh")
+            .await
+            .unwrap();
+        assert_eq!(
+            cut.receiver.recv().await.unwrap(),
+            Some(b"partial".to_vec())
+        );
+        let report = cut.receiver.recv().await.unwrap_err();
+        assert!(matches!(report.current_context(), Error::Ended));
+
+        let mut no_eof = GatewayAdapterImpl
+            .open(&context, "NOEOF", "ssh")
+            .await
+            .unwrap();
+        assert_eq!(
+            no_eof.receiver.recv().await.unwrap(),
+            Some(b"partial".to_vec())
+        );
+        let report = no_eof.receiver.recv().await.unwrap_err();
+        assert!(format!("{report:?}").contains("before the device's end of output"));
+
+        let mut gone = GatewayAdapterImpl
+            .open(&context, "GONE", "ssh")
+            .await
+            .unwrap();
+        assert_eq!(gone.receiver.recv().await.unwrap(), None);
+        assert!(
+            gone.receiver.finished().await.is_err(),
+            "a gateway going away is not an end"
+        );
+    }
+
+    /// The device's end, then the gateway's normal close once this end has
+    /// finished too: the one complete exchange.
+    #[tokio::test]
+    async fn a_normal_close_after_both_ends_is_complete() {
+        let context = serve().await;
+        let mut channel = GatewayAdapterImpl
+            .open(&context, "D1", "ssh")
+            .await
+            .unwrap();
+        channel.sender.send(b"hello".to_vec()).await.unwrap();
+        channel.sender.close_write().await.unwrap();
+        let mut echoed = Vec::new();
+        while let Some(chunk) = channel.receiver.recv().await.unwrap() {
+            echoed.extend(chunk);
+        }
+        assert_eq!(echoed, b"HELLO");
+        channel.receiver.finished().await.unwrap();
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ use remora_channel::{
 };
 use remora_context::{
     application::ContextService,
-    model::{ContextOverride, ResolvedContext},
+    model::{ContextOverride, ResolvedContext, Selection},
 };
 use remora_progress::OperationContext;
 use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
@@ -143,7 +143,8 @@ impl ChannelControllerImpl {
                     .await
                     .change_context_lazy(|| Error::Certify(device.to_owned()))?;
                 let proxy_command = proxy_command(&ProxyTarget {
-                    context: &context.context.name,
+                    context: (context.selection != Selection::Defined)
+                        .then_some(context.context.name.as_str()),
                     device,
                 });
                 (
@@ -715,7 +716,8 @@ mod tests {
             proxy_command: Arc::new(|target| {
                 format!(
                     "rmra --context {} channel open {}",
-                    target.context, target.device
+                    target.context.unwrap_or("-"),
+                    target.device
                 )
             }),
         }
@@ -814,7 +816,8 @@ mod tests {
             proxy_command: Arc::new(|target| {
                 format!(
                     "rmra --context {} channel open {}",
-                    target.context, target.device
+                    target.context.unwrap_or("-"),
+                    target.device
                 )
             }),
         }
@@ -916,7 +919,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let channel = controller(root.path(), Gateway::default()).await;
         let mut ssh = request(&[], "ssh");
-        ssh.proxy_command = Arc::new(|target| format!("context={}", target.context));
+        ssh.proxy_command = Arc::new(|target| format!("context={}", target.context.unwrap_or("-")));
         let prepared = channel.prepare_ssh(ssh).await.unwrap();
         assert_eq!(prepared.command.arguments[1], "ProxyCommand=context=eu2");
     }

@@ -41,7 +41,10 @@ pub struct SshCertificate {
 /// the key was just certified for -- and the device (which, for scp, is only
 /// known once the operands are read).
 pub struct ProxyTarget<'a> {
-    pub context: &'a str,
+    /// `None` for a context the environment defines (`RMRA_ADDRESS`,
+    /// `RMRA_TOKEN`...): it has no name to select it by, and the
+    /// ProxyCommand inherits the environment that defines it.
+    pub context: Option<&'a str>,
     pub device: &'a str,
 }
 
