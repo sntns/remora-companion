@@ -58,6 +58,7 @@ pub(crate) async fn stdio(channel: Channel, device: &str) -> Result<()> {
                 Err(e) => return Err(Report::new(e).change_context(lost())),
             }
         }
+        release_stdout();
         Ok::<_, Report<Error>>(())
     };
 
@@ -71,6 +72,28 @@ pub(crate) async fn stdio(channel: Channel, device: &str) -> Result<()> {
     tokio::time::timeout(HANGUP_GRACE, both)
         .await
         .unwrap_or_else(|_| Err(Report::new(Error::HangupGrace(HANGUP_GRACE.as_secs()))))
+}
+
+/// Lets go of stdout once the device's end has finished, so whoever reads it
+/// sees its end.
+///
+/// Dropping tokio's handle doesn't close the descriptor, and ssh waits for
+/// the end of its ProxyCommand's output before it closes the input -- which
+/// is what the other direction waits for: a channel the gateway ended before
+/// ssh had finished hung both forever. /dev/null takes the descriptor's place,
+/// rather than closing it, so that nothing opened later lands on 1.
+fn release_stdout() {
+    #[cfg(unix)]
+    {
+        // SAFETY: a constant path, and descriptors this process owns.
+        unsafe {
+            let null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+            if null >= 0 {
+                libc::dup2(null, libc::STDOUT_FILENO);
+                libc::close(null);
+            }
+        }
+    }
 }
 
 /// How long the other direction gets to explain a failure: when one

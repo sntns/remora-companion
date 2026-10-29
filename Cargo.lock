@@ -2759,6 +2759,7 @@ version = "0.22.0"
 dependencies = [
  "clap",
  "error-stack",
+ "libc",
  "remora-channel",
  "remora-completion",
  "remora-context",

@@ -109,6 +109,17 @@ async fn drop_after_first(mut socket: WebSocket) {
     closing(socket).await;
 }
 
+/// Says its piece and ends the channel at once, without waiting for the
+/// client's end of input -- as the gateway does when a channel fails.
+async fn ended_early(mut socket: WebSocket) {
+    let _ = socket
+        .send(Message::Binary(b"last words".to_vec().into()))
+        .await;
+    let _ = socket.send(Message::Text(channel::EOF.into())).await;
+    let _ = socket.send(close(1000, "")).await;
+    closing(socket).await;
+}
+
 /// Ends the closing handshake: reads until the client's own close, so that
 /// the connection isn't dropped with its data unread -- the reset that
 /// would cause loses the close frame on Windows, which discards what was
@@ -144,6 +155,9 @@ async fn open_channel(
     let urn = format!("urn:remora:device:{device}");
     if device == "DROP" {
         return accept_channel(upgrade, "stream", "", drop_after_first);
+    }
+    if device == "ENDED" {
+        return accept_channel(upgrade, "stream", &urn, ended_early);
     }
     accept_channel(upgrade, "stream", &urn, reverse)
 }
@@ -549,6 +563,44 @@ async fn login_whoami_and_a_channel_on_stdio() {
     assert_eq!(code, 255);
     assert!(stderr.contains("not logged in"), "{stderr}");
     assert!(stderr.contains("log in with `rmra --context "), "{stderr}");
+}
+
+/// A channel the gateway ends while ssh still holds stdin open: stdout must
+/// end with it, or ssh -- which closes stdin only once its ProxyCommand's
+/// output has ended -- and this process wait on each other forever.
+#[tokio::test]
+async fn a_channel_ended_by_the_gateway_ends_stdout() {
+    use tokio::io::AsyncReadExt;
+
+    let address = serve().await;
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+    let mut command = rmra.command(&["channel", "open", "ENDED", "--quiet"]);
+    command.envs([
+        ("RMRA_ADDRESS", address.as_str()),
+        ("RMRA_TOKEN", TOKEN),
+        ("RMRA_PLAINTEXT", "1"),
+    ]);
+    let mut child = command.stdin(Stdio::piped()).spawn().unwrap();
+    let input = child.stdin.take().unwrap();
+    let mut output = child.stdout.take().unwrap();
+
+    let mut stdout = Vec::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        output.read_to_end(&mut stdout),
+    )
+    .await
+    .expect("stdout never ended while stdin was still open")
+    .unwrap();
+    assert_eq!(stdout, b"last words");
+
+    drop(input);
+    tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+        .await
+        .expect("did not exit once stdin ended")
+        .unwrap();
 }
 
 /// An ephemeral container's or a CI job's identity: the context defined
