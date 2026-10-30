@@ -21,6 +21,13 @@ ignore = [
     # release fixes this notice; it's pulled in transitively via mbrman -> gptman's
     # sibling crate for MBR parsing. Not a vulnerability, just unmaintained.
     "RUSTSEC-2025-0141",
+    # zstd 0.13 / zstd-safe 7: fixed only in zstd 0.14.3 (zstd-safe 8.2), which
+    # backhand (squashfs, remora-etcher only) does not allow yet, up to 0.25.5.
+    # backhand uses zstd::bulk alone -- none of the stream `with_context`
+    # constructors, `Seekable`, or streaming decompression these concern.
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0403",
 ]
 
 [licenses]

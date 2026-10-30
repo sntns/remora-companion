@@ -567,7 +567,9 @@ async fn login_whoami_and_a_channel_on_stdio() {
 
 /// A channel the gateway ends while ssh still holds stdin open: stdout must
 /// end with it, or ssh -- which closes stdin only once its ProxyCommand's
-/// output has ended -- and this process wait on each other forever.
+/// output has ended -- and this process wait on each other forever. Unix
+/// only: rmra does not release stdout on Windows yet.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_channel_ended_by_the_gateway_ends_stdout() {
     use tokio::io::AsyncReadExt;
