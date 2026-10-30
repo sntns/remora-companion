@@ -102,11 +102,21 @@ impl ArtifactTargetAdapter for FileArtifactTargetImpl {
 impl ArtifactWriter for FileWriter {
     async fn write(&mut self, chunk: &[u8]) -> Result<()> {
         self.hasher.update(chunk);
+        // tokio's write_all returns with the last of the chunk still being
+        // written in the background: flushed, the chunk is in the file once
+        // this returns -- or its failure is this call's -- rather than lost
+        // to a writer dropped mid-download.
+        let path = || self.path.display().to_string();
         self.file
             .write_all(chunk)
             .await
             .change_context(Error::Write)
-            .attach_with(|| self.path.display().to_string())
+            .attach_with(path)?;
+        self.file
+            .flush()
+            .await
+            .change_context(Error::Write)
+            .attach_with(path)
     }
 
     async fn finish(mut self: Box<Self>) -> Result<String> {
