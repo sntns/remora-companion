@@ -32,3 +32,8 @@ pr-run-mode = "plan"
 # Build provenance attestations: GitHub only offers them to public repos on
 # this organization's plan.
 github-attestations = true
+
+# dist still builds aarch64-apple-darwin on macos-14, which GitHub retires on
+# 2026-11-02 (brownouts cancel the job before that).
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
