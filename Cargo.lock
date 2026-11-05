@@ -26,7 +26,7 @@ checksum = "5c00781b62009bed91093230d1cd103d6155b264a574c661876b33154a4fad58"
 [[package]]
 name = "am-fs-ext4"
 version = "0.4.0"
-source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#5f14a822563312d7b170f418729097eedb83d7f7"
+source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#32215e80364dfb945017d564060d55f6e63f96ed"
 dependencies = [
  "am-fs-core",
  "bitflags 2.13.1",
