@@ -88,6 +88,21 @@ impl DeviceServiceInterface for DeviceControllerImpl {
         devices.sort_by_key(|(index, _)| *index);
         Ok(devices.into_iter().map(|(_, device)| device).collect())
     }
+
+    async fn delete(&self, over: Option<&ContextOverride>, name: &str) -> Result<()> {
+        let context = self
+            .contexts
+            .resolve(over)
+            .await
+            .change_context(Error::Context)?;
+        self.gateway
+            .delete(&context, name)
+            .await
+            .map_err(|report| match report.current_context() {
+                gateway::Error::NotFound => report.change_context(Error::NotFound(name.to_owned())),
+                _ => report.change_context(Error::Delete(name.to_owned())),
+            })
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +164,10 @@ mod tests {
 
         async fn labels(&self, context: &ResolvedContext, name: &str) -> gateway::Result<Labels> {
             DeviceGatewayAdapterImpl.labels(context, name).await
+        }
+
+        async fn delete(&self, context: &ResolvedContext, name: &str) -> gateway::Result<()> {
+            DeviceGatewayAdapterImpl.delete(context, name).await
         }
     }
 

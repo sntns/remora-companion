@@ -1,6 +1,6 @@
 [package]
 name = "remora-device-application-transport-cli"
-description = "clap subcommands for the device application service: device list"
+description = "clap subcommands for the device application service: device list, remove"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ publish.workspace = true
 remora-device = { path = "../device" }
 remora-context = { path = "../context" }
 remora-tui = { path = "../tui" }
+remora-completion = { path = "../completion" }
 clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true

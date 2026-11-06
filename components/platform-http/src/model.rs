@@ -397,6 +397,13 @@ pub struct ListDevicesResponse {
     pub device_summaries: Vec<DeviceSummary>,
 }
 
+/// `DELETE /remora/v1/device/{device_name}`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeviceReferenceResponse {
+    pub device_reference: Option<ResourceReference>,
+}
+
 /// `POST /remora/v1/factory-device`: exactly one of `device_name` and
 /// `serial_number_policy_name`, `force` only with a name.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

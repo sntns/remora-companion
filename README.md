@@ -197,6 +197,18 @@ rmra device ls -q                 # names only, one per line
 The account's devices and their labels (`--format json` for scripts). The
 same `--label key=value` pairs pick the targets of `rmra deploy --selector`.
 
+### Delete a device
+
+```
+rmra device rm 525400C0FFEE
+rmra device rm -f 525400C0FFEE 525400C0FFEF   # no confirmation
+```
+
+Deletes the device from the platform: its operational record only. Its
+factory record stays, so the device can enroll again. Until it does, it is
+no longer one of the account's devices and cannot reach the platform. It asks
+for confirmation on a terminal, unless `--force` is given.
+
 ### ssh into a device
 
 ```

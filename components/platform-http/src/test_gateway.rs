@@ -343,7 +343,10 @@ impl TestGateway {
                 get(upload_offset),
             )
             .route("/remora/v1/device", get(list_devices))
-            .route("/remora/v1/device/{device_name}", get(get_device))
+            .route(
+                "/remora/v1/device/{device_name}",
+                get(get_device).delete(delete_device),
+            )
             .route("/remora/v1/factory-device", post(create_factory_device))
             .route(
                 "/remora/v1/factory-device/{device_name}/assignment",
@@ -876,6 +879,21 @@ async fn get_device(
             labels,
             certificates: vec![],
         }),
+    }))
+}
+
+/// The operational device only: its factory record, if any, stays.
+async fn delete_device(
+    Shared(gateway): Shared<TestGateway>,
+    Path(name): Path<String>,
+) -> Answer<model::DeviceReferenceResponse> {
+    gateway
+        .state()
+        .devices
+        .remove(&name)
+        .ok_or_else(|| not_found("device"))?;
+    Ok(Json(model::DeviceReferenceResponse {
+        device_reference: reference(&name),
     }))
 }
 

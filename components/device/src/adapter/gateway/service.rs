@@ -10,6 +10,9 @@ pub trait DeviceGatewayAdapter: Send + Sync {
     async fn list(&self, context: &ResolvedContext, labels: &Labels) -> Result<Vec<String>>;
     /// One device's labels.
     async fn labels(&self, context: &ResolvedContext, name: &str) -> Result<Labels>;
+    /// Deletes the device from the account: its operational record only,
+    /// never its factory one.
+    async fn delete(&self, context: &ResolvedContext, name: &str) -> Result<()>;
 }
 
 #[derive(Clone)]

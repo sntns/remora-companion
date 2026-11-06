@@ -1,4 +1,4 @@
-//! `rmra device list` against the in-process fake remora gateway.
+//! `rmra device list` and `rmra device rm` against the in-process fake remora gateway.
 
 use std::process::Stdio;
 
@@ -65,4 +65,53 @@ async fn lists_devices_with_their_labels() {
     assert_eq!(json.as_array().unwrap().len(), 3);
     assert_eq!(json[1]["name"], "DEV1");
     assert_eq!(json[1]["labels"]["board"], "rp5");
+}
+
+#[tokio::test]
+async fn removes_a_device() {
+    let (gateway, resolved) = TestGateway::serve().await;
+    let config = tempfile::tempdir().unwrap();
+    let dir = config.path().join("contexts/test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("meta.json"),
+        format!(
+            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
+            resolved.context.endpoint.address
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("credentials.json"),
+        r#"{"kind":"access-key","token":"t"}"#,
+    )
+    .unwrap();
+
+    let run = |args: &'static [&'static str]| {
+        let config = config.path().to_path_buf();
+        async move {
+            tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
+                .args(args)
+                .env("RMRA_CONFIG", config)
+                .env_remove("RMRA_CONTEXT")
+                .stdin(Stdio::null())
+                .output()
+                .await
+                .unwrap()
+        }
+    };
+
+    // Not a terminal: no confirmation asked.
+    let output = run(&["device", "rm", "DEV3"]).await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!gateway.0.lock().unwrap().devices.contains_key("DEV3"));
+
+    let output = run(&["device", "rm", "--force", "DEV3"]).await;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no device \"DEV3\""), "{stderr}");
 }

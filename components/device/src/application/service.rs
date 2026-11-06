@@ -14,6 +14,11 @@ pub trait DeviceServiceInterface: Send + Sync {
         labels: &Labels,
         with_labels: bool,
     ) -> Result<Vec<Device>>;
+
+    /// Deletes a device from the platform -- its operational record, not
+    /// its factory one: it is no longer one of the account's devices, and
+    /// can no longer reach the platform as one, until it enrolls again.
+    async fn delete(&self, over: Option<&ContextOverride>, name: &str) -> Result<()>;
 }
 
 #[derive(Clone)]

@@ -4,7 +4,7 @@ use remora_device::{application::DeviceService, model::parse_labels};
 use remora_tui as tui;
 use serde_json::json;
 
-use crate::error::{device_error, Error, Result};
+use crate::error::{device_error, prompt_error, Error, Result};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -21,6 +21,18 @@ pub enum Command {
         /// Only print device names (one call, however many devices).
         #[arg(short, long)]
         quiet: bool,
+    },
+
+    /// Delete devices from the platform: their operational record only --
+    /// the factory one stays, so a device can enroll again.
+    #[command(visible_alias = "rm")]
+    Remove {
+        #[arg(required = true)]
+        #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
+        names: Vec<String>,
+        /// Don't ask for confirmation.
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
@@ -84,6 +96,28 @@ pub async fn run(
                     }
                     table.print();
                 }
+            }
+            Ok(())
+        }
+        Command::Remove { names, force } => {
+            for name in names {
+                if !force && tui::interactive() {
+                    let question = format!(
+                        "Delete device {} from the platform? It loses its access until it \
+                         enrolls again.",
+                        tui::accent(&name)
+                    );
+                    if !tui::confirm(question)
+                        .initial_value(false)
+                        .interact()
+                        .map_err(prompt_error)?
+                    {
+                        tui::info(format!("Kept {}", tui::accent(&name)));
+                        continue;
+                    }
+                }
+                service.delete(over, &name).await.map_err(device_error)?;
+                tui::success(format!("Deleted device {}", tui::accent(&name)));
             }
             Ok(())
         }

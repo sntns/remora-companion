@@ -3130,6 +3130,7 @@ version = "0.23.3"
 dependencies = [
  "clap",
  "error-stack",
+ "remora-completion",
  "remora-context",
  "remora-device",
  "remora-tui",

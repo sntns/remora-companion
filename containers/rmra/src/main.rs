@@ -59,7 +59,7 @@ enum Commands {
     #[command(subcommand)]
     Channel(remora_channel_application_transport_cli::Command),
 
-    /// List the account's devices.
+    /// List the account's devices, or delete them from the platform.
     #[command(subcommand)]
     Device(remora_device_application_transport_cli::Command),
 

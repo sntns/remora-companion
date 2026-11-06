@@ -56,6 +56,15 @@ impl DeviceGatewayAdapter for DeviceGatewayAdapterImpl {
             .ok_or_else(|| Report::new(Error::Call).attach("empty device descriptor"))?;
         Ok(descriptor.labels.into_iter().collect())
     }
+
+    async fn delete(&self, context: &ResolvedContext, name: &str) -> Result<()> {
+        let gateway = gateway(context).await?;
+        gateway
+            .delete::<model::DeviceReferenceResponse>(gateway.url(["remora", "v1", "device", name]))
+            .await
+            .map_err(classify)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -86,6 +95,21 @@ mod tests {
         );
         let report = DeviceGatewayAdapterImpl
             .labels(&context, "NOPE")
+            .await
+            .unwrap_err();
+        assert!(matches!(report.current_context(), Error::NotFound));
+    }
+
+    #[tokio::test]
+    async fn deletes_a_device() {
+        let (gateway, context) = TestGateway::serve().await;
+        DeviceGatewayAdapterImpl
+            .delete(&context, "DEV3")
+            .await
+            .unwrap();
+        assert!(!gateway.0.lock().unwrap().devices.contains_key("DEV3"));
+        let report = DeviceGatewayAdapterImpl
+            .delete(&context, "DEV3")
             .await
             .unwrap_err();
         assert!(matches!(report.current_context(), Error::NotFound));
