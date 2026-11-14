@@ -1,0 +1,18 @@
+[package]
+name = "remora-monitor"
+description = "Domain crate for the monitor vertical: what devices report of themselves (remora-monitord's documents), as the platform's time series store keeps it -- the store port and the monitor application port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-context = { path = "../context" }
+busybody.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+# A document is JSON whose shape is its provider's, on the device: kept as
+# it came. humantime reads the date a device stamped it with.
+serde_json.workspace = true
+humantime.workspace = true

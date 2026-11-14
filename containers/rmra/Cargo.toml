@@ -39,6 +39,10 @@ remora-device = { path = "../../components/device" }
 remora-device-application = { path = "../../components/device-application" }
 remora-device-adapter-http = { path = "../../components/device-adapter-http" }
 remora-device-application-transport-cli = { path = "../../components/device-application-transport-cli" }
+remora-monitor = { path = "../../components/monitor" }
+remora-monitor-application = { path = "../../components/monitor-application" }
+remora-monitor-adapter-http = { path = "../../components/monitor-adapter-http" }
+remora-monitor-application-transport-cli = { path = "../../components/monitor-application-transport-cli" }
 remora-update = { path = "../../components/update" }
 remora-update-application = { path = "../../components/update-application" }
 remora-update-adapter-github = { path = "../../components/update-adapter-github" }

@@ -5,7 +5,8 @@
 //! [`TestGateway`] holds releases and resumable uploads in memory, a fixed
 //! set of labelled devices, factory devices, and deployments that move
 //! PENDING → RUNNING → SUCCEEDED as they're polled (FAILED for a device
-//! named `BROKEN`), reporting progress as log entries on the way, and
+//! named `BROKEN`), reporting progress as log entries on the way, the
+//! time series store's buckets a test fills, and
 //! answers IAM's `whoami` calls for any token (until `revoked`). A
 //! deployment's log WebSocket moves it on by itself, a step at a time.
 //! Like the platform, it takes an upload in requests that each store their
@@ -272,6 +273,17 @@ pub struct State {
     /// Assigned serials, with the account each was last assigned to, as
     /// asked (an id or a URN).
     pub factory_owners: BTreeMap<String, String>,
+    /// The time series store: per bucket, then per `(resource, schema)`,
+    /// the points in the order they were stored -- the last one is the
+    /// shadow. Fill it with [`TestGateway::store_point`].
+    pub buckets: BTreeMap<String, BTreeMap<(String, String), Vec<model::BucketPointData>>>,
+    /// The time series store refuses every call: a role without access.
+    pub tbss_denied: bool,
+    /// The most points the time series store answers at once: more is an
+    /// answer too large, refused whole.
+    pub tbss_max_points: Option<usize>,
+    /// How many times points were asked of the time series store.
+    pub tbss_point_calls: usize,
     /// Every call is refused as unauthenticated, as for credentials
     /// revoked after login.
     pub revoked: bool,
@@ -342,6 +354,7 @@ impl TestGateway {
                 "/remora/v1/release-artifact-upload-offset/{artifact_content_id}",
                 get(upload_offset),
             )
+            .route("/tbss/v1/bucket/{*path}", get(tbss))
             .route("/remora/v1/device", get(list_devices))
             .route(
                 "/remora/v1/device/{device_name}",
@@ -380,6 +393,31 @@ impl TestGateway {
     }
 
     /// The bytes an artifact of `release` was uploaded with.
+    /// Stores a point in the time series store, as an account's pipeline
+    /// does a device's message: `resource` and `schema` are URNs
+    /// (`sntns:remora:<region>:<tenant>:device:<name>`,
+    /// `sntns:catalog:<region>:<tenant>:schema:<name>`), `timestamp` is
+    /// RFC 3339.
+    pub fn store_point(
+        &self,
+        bucket: &str,
+        resource: &str,
+        schema: &str,
+        timestamp: &str,
+        value: serde_json::Value,
+    ) {
+        self.state()
+            .buckets
+            .entry(bucket.to_owned())
+            .or_default()
+            .entry((resource.to_owned(), schema.to_owned()))
+            .or_default()
+            .push(model::BucketPointData {
+                timestamp: Some(timestamp.to_owned()),
+                value,
+            });
+    }
+
     pub fn artifact_bytes(&self, release: &str, file_name: &str) -> Option<Vec<u8>> {
         let state = self.state();
         let descriptor = state.releases.get(release)?;
@@ -859,6 +897,135 @@ async fn download_artifact(
         );
     }
     response
+}
+
+// --- tbss --------------------------------------------------------------
+
+/// The bucket routes `rmra monitor` reads. A bucket's name holds `/`, so
+/// what is asked of it is the path's end, as upstream's
+/// `{bucket_name=**}` has it.
+async fn tbss(
+    Shared(gateway): Shared<TestGateway>,
+    Path(path): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Result<Response, Response> {
+    let mut state = gateway.state();
+    if state.tbss_denied {
+        return Err(rpc_error(Code::PermissionDenied, "user permission denied"));
+    }
+    let (bucket, what) = ["/shadow/resource", "/shadow/schema", "/shadow", "/point"]
+        .iter()
+        .find_map(|what| Some((path.strip_suffix(what)?, *what)))
+        .ok_or_else(|| not_found("route"))?;
+    if what == "/point" {
+        state.tbss_point_calls += 1;
+    }
+    let most = state.tbss_max_points;
+    let series = state
+        .buckets
+        .get(bucket)
+        .ok_or_else(|| not_found("bucket"))?;
+    // Like the store: a resource is asked for as `service:type:name`, a
+    // schema as `[scope:]name`, and both are answered as URNs -- which it
+    // refuses to be asked for.
+    let resource = query_value(query.as_deref(), "resourceName");
+    let schema = query_value(query.as_deref(), "schemaName");
+    if resource
+        .as_ref()
+        .is_some_and(|name| name.split(':').count() != 3)
+    {
+        return Err(rpc_error(Code::Unknown, "invalid name"));
+    }
+    if schema
+        .as_ref()
+        .is_some_and(|name| name.split(':').count() > 2)
+    {
+        return Err(rpc_error(Code::Unknown, "invalid resource name"));
+    }
+    let wanted = |(of, in_schema): &(String, String)| {
+        let of: Vec<&str> = of.split(':').collect();
+        resource.as_ref().is_none_or(|resource| {
+            matches!(of.as_slice(), [_, service, _, _, kind, name]
+                if format!("{service}:{kind}:{name}") == *resource)
+        }) && schema.as_ref().is_none_or(|schema| {
+            let name = schema.strip_prefix("managed:").unwrap_or(schema);
+            in_schema
+                .rsplit_once(":schema:")
+                .is_some_and(|(_, stored)| stored == name)
+        })
+    };
+    let mut names: Vec<String> = Vec::new();
+    let mut name = |name: &String| {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    };
+    Ok(match what {
+        "/shadow/resource" => {
+            series
+                .keys()
+                .filter(|key| wanted(key))
+                .for_each(|key| name(&key.0));
+            Json(model::ListBucketShadowResourcesResponse {
+                bucket_shadow_resources: names,
+            })
+            .into_response()
+        }
+        "/shadow/schema" => {
+            series
+                .keys()
+                .filter(|key| wanted(key))
+                .for_each(|key| name(&key.1));
+            Json(model::ListBucketShadowSchemasResponse {
+                bucket_shadow_schemas: names,
+            })
+            .into_response()
+        }
+        "/shadow" => {
+            let shadow = series
+                .iter()
+                .find(|(key, _)| wanted(key))
+                .and_then(|(key, points)| Some((key, points.last()?)))
+                .map(|((resource, schema), point)| model::BucketShadow {
+                    timestamp: point.timestamp.clone(),
+                    value: point.value.clone(),
+                    resource: resource.clone(),
+                    schema: schema.clone(),
+                })
+                .ok_or_else(|| not_found("shadow"))?;
+            Json(model::GetBucketShadowResponse {
+                bucket_shadow: Some(shadow),
+            })
+            .into_response()
+        }
+        _ => {
+            let from = model::time_of(query_value(query.as_deref(), "from").as_deref());
+            let to = model::time_of(query_value(query.as_deref(), "to").as_deref());
+            // Newest first, as the store answers.
+            let data: Vec<_> = series
+                .iter()
+                .filter(|(key, _)| wanted(key))
+                .flat_map(|(_, points)| points.iter().rev())
+                .filter(|point| {
+                    let at = model::time_of(point.timestamp.as_deref());
+                    at >= from && to.is_none_or(|to| at <= Some(to))
+                })
+                .cloned()
+                .collect();
+            if most.is_some_and(|most| data.len() > most) {
+                return Err(rpc_error(
+                    Code::ResourceExhausted,
+                    "grpc: received message larger than max (5838006 vs. 4194304)",
+                ));
+            }
+            Json(model::GetBucketPointsResponse {
+                resource,
+                schema,
+                data,
+            })
+            .into_response()
+        }
+    })
 }
 
 // --- devices -----------------------------------------------------------

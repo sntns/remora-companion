@@ -1,0 +1,25 @@
+[package]
+name = "remora-monitor-application-transport-cli"
+description = "clap subcommands for the monitor application service: a device's latest monitoring documents (table, JSON), its presence and system metrics over time (charts, JSON), and the same full screen, refreshed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-monitor = { path = "../monitor" }
+remora-context = { path = "../context" }
+remora-tui = { path = "../tui" }
+remora-completion = { path = "../completion" }
+clap.workspace = true
+error-stack.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+humantime.workspace = true
+# The terminal's width, for the charts, and the charts themselves.
+console.workspace = true
+ratatui.workspace = true
+# `watch`: the keyboard, as a stream beside the refreshes.
+crossterm.workspace = true
+futures-util.workspace = true
+tokio.workspace = true

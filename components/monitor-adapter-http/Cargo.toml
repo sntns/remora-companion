@@ -1,0 +1,20 @@
+[package]
+name = "remora-monitor-adapter-http"
+description = "MonitorGatewayAdapter over sntns-platform's time series store (tbss) REST API: a bucket's resources and schemas, its latest values and its points"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-monitor = { path = "../monitor" }
+remora-context = { path = "../context" }
+remora-platform-http = { path = "../platform-http" }
+async-trait.workspace = true
+error-stack.workspace = true
+url.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

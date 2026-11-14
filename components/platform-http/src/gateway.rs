@@ -178,6 +178,26 @@ impl Gateway {
         self.call(self.request(Method::GET, url)).await
     }
 
+    /// A GET sent once, whatever the answer: for a route whose 429 says
+    /// something of the request itself (an answer too large to send), not
+    /// that the call was not taken -- trying it again would only fail the
+    /// same way, later.
+    pub async fn get_once<T: DeserializeOwned>(&self, url: Url) -> std::result::Result<T, Status> {
+        let response = self
+            .request(Method::GET, url)
+            .send()
+            .await
+            .map_err(|error| Status::unavailable(&error))?;
+        if !response.status().is_success() {
+            return Err(Status::of(response).await);
+        }
+        let body = response
+            .bytes()
+            .await
+            .map_err(|error| Status::unavailable(&error))?;
+        serde_json::from_slice(&body).map_err(Status::malformed)
+    }
+
     pub async fn delete<T: DeserializeOwned>(&self, url: Url) -> std::result::Result<T, Status> {
         self.call(self.request(Method::DELETE, url)).await
     }

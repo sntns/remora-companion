@@ -209,6 +209,86 @@ factory record stays, so the device can enroll again. Until it does, it is
 no longer one of the account's devices and cannot reach the platform. It asks
 for confirmation on a terminal, unless `--force` is given.
 
+### See what a device reports of itself
+
+```
+rmra monitor status 525400C0FFEE              # the latest of each document
+rmra monitor show 525400C0FFEE heartbeat      # one document in full, as JSON
+rmra monitor graph 525400C0FFEE               # presence and metrics, last 24h
+rmra monitor graph 525400C0FFEE --since 7d --metric presence --metric cpu
+rmra monitor watch 525400C0FFEE               # the same, full screen, live
+```
+
+A device posts a heartbeat while it reaches the platform, and, when it
+runs `remora-monitord`, monitoring documents (`system`, `network`,
+`health`, `ota`...); the account's pipelines keep them in its time series
+store. `status` shows the latest of each with its age and a one-line
+summary. `graph` draws the device's presence from its heartbeats -- how
+much of the time it was there, and when it was silent -- and CPU use, load,
+memory, filesystems and the hottest temperature from the `system`
+documents, a blank where the device reported nothing. Both take `--format
+json` for scripts (`status`: the documents in full; `graph`: the silences
+and every point).
+
+```
+525400C0FFEE · last 1day
+
+presence  99.6% · 287 heartbeats, one every 5m · 1 silence of 45m
+│████████████████████████████████████████████████▓███████████████
+└────────────────────────────────────────────────────────────────
+11-13 13:14Z                                         11-14 13:14Z
+
+load  now 0.21 · min 0.01 · avg 0.22 · max 2.02
+3.00│
+    │
+    │                                              ⢸
+    │                                              ⣸
+    │                                              ⣿      ⢠
+0.00│⠣⢷⠢⠞⠶⠢⠞⠣⠶⡧⠿⠳⠷⡷⢦⠦⠟⠔⠒⢴⠦⢲⠦⠳⠦⠖⠷⠴⠚⠶⠢⠴⠾⠜⠖⠶⠖⢤⠟⠔⡼⠴⠙⠶⠲⠴⠊⡾⠾⠚⠶⠞⠷⠖⠴⠳⠔⠛⠦⠖⠔
+    └─────────────────────────────────────────────────────────────
+     11-13 13:14Z                                     11-14 13:14Z
+```
+
+The curves are braille line charts (ratatui's, printed: the command
+returns, and its output pipes), on a scale that fits the values; a curve
+stops where the device reported nothing.
+
+`watch` shows all of it full screen and in color, and reads the platform
+again every minute (`--every`): the device's presence (a strip tall and
+green where it was there, low and red where it was silent), what it last
+reported with each document's age (green, then yellow past the hour, red
+past the day -- the heartbeat as soon as one is overdue), and one of those
+documents in detail: `system` to start with (`--document` for another),
+`↑` `↓` or Tab for the next. Its detail is what it last said -- `system`
+as a meter per metric, `network` as its interfaces (addresses, traffic,
+Wi-Fi link, mesh) and routes, `processes` as a table and its services,
+any other as its fields -- and, under it, a graph per number it has over
+time, filled under its curve and shaded in its own color, side by side on
+a wide terminal:
+
+| document    | graphs                                                           |
+|-------------|------------------------------------------------------------------|
+| `system`    | CPU use, load, memory, filesystems, hottest temperature          |
+| `network`   | per interface: received and sent per second, Wi-Fi signal, channel use |
+| `access`    | round trip to the platform                                       |
+| `processes` | CPU use and memory of the selected processes, together           |
+
+`1`, `6`, `d`, `w`, `m` pick the window (1h, 6h, 24h, 7d, 30d), `r` reads
+again now, `q` leaves. Colors are 24-bit where the terminal says it shows
+them (`COLORTERM`), the nearest of the 256 otherwise. It needs a terminal:
+scripts use `status` and `graph`.
+
+They are read from the account's `thing-data` bucket, under the thing
+named after the device: where the account's pipelines store what its
+devices send. An account that stores it elsewhere says so with `--bucket`
+(or `RMRA_MONITOR_BUCKET`); `--bucket remora-device` reads the heartbeats
+remora's own pipeline keeps. The store only holds what the bucket's
+retention allows (a month, typically), and a long `--since` reads a lot:
+every document comes in full. The role in use needs read access to that
+bucket in the time series store (`tbss::list-bucket-shadow-schemas`,
+`tbss::get-bucket-shadow`, `tbss::get-bucket-points`), on top of its
+remora permissions.
+
 ### ssh into a device
 
 ```

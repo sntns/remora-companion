@@ -23,6 +23,9 @@ use remora_device_adapter_http::DeviceGatewayAdapterImpl;
 use remora_device_application::DeviceControllerImpl;
 use remora_install::application::InstallService;
 use remora_install_application::InstallControllerImpl;
+use remora_monitor::{adapter::gateway::MonitorGatewayAdapterService, application::MonitorService};
+use remora_monitor_adapter_http::MonitorGatewayAdapterImpl;
+use remora_monitor_application::MonitorControllerImpl;
 use remora_ota::{
     adapter::{
         gateway::OtaGatewayAdapterService, source::ArtifactSourceAdapterService,
@@ -51,6 +54,7 @@ pub struct Services {
     pub ota: OtaService,
     pub install: InstallService,
     pub device: DeviceService,
+    pub monitor: MonitorService,
     pub update: UpdateService,
 }
 
@@ -169,6 +173,25 @@ pub async fn wire() -> Services {
         .await
         .expect("DeviceService was just registered");
 
+    container
+        .set_type(MonitorGatewayAdapterService::new(MonitorGatewayAdapterImpl))
+        .await;
+    let monitor_gateway = container
+        .get_type::<MonitorGatewayAdapterService>()
+        .await
+        .expect("MonitorGatewayAdapterService was just registered");
+
+    container
+        .set_type(MonitorService::new(MonitorControllerImpl::new(
+            context.clone(),
+            monitor_gateway,
+        )))
+        .await;
+    let monitor = container
+        .get_type::<MonitorService>()
+        .await
+        .expect("MonitorService was just registered");
+
     // OTA after device: a selector picks its devices through DeviceService.
     container
         .set_type(OtaGatewayAdapterService::new(OtaGatewayAdapterImpl))
@@ -260,6 +283,7 @@ pub async fn wire() -> Services {
         ota,
         install,
         device,
+        monitor,
         update,
     }
 }

@@ -63,6 +63,11 @@ enum Commands {
     #[command(subcommand)]
     Device(remora_device_application_transport_cli::Command),
 
+    /// What devices report of themselves (remora-monitord): their latest
+    /// state, and their system metrics over time.
+    #[command(subcommand)]
+    Monitor(remora_monitor_application_transport_cli::Command),
+
     /// Log into a device over ssh, through its remora channel.
     Ssh(remora_channel_application_transport_cli::SshArgs),
 
@@ -203,6 +208,10 @@ async fn run() {
         ),
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
+            verbose,
+        ),
+        Commands::Monitor(command) => exit_on_error(
+            remora_monitor_application_transport_cli::run(command, &services.monitor, over).await,
             verbose,
         ),
         Commands::Release(command) => exit_on_error(

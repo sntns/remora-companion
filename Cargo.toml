@@ -93,6 +93,10 @@ members = [
     "components/device-application",
     "components/device-adapter-http",
     "components/device-application-transport-cli",
+    "components/monitor",
+    "components/monitor-application",
+    "components/monitor-adapter-http",
+    "components/monitor-application-transport-cli",
     "components/update",
     "components/update-application",
     "components/update-adapter-github",
@@ -202,6 +206,10 @@ cliclack = "0.5"
 clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
 console = "0.16"
 comfy-table = "7"
+# rmra monitor: `graph` draws its charts into an off-screen buffer and
+# prints them (a command that prints and returns, piped or not); `watch`
+# is full screen, on the workspace's own crossterm.
+ratatui = { version = "0.30", default-features = false, features = ["std", "crossterm_0_29"] }
 # rmra ssh: a throwaway ed25519 key, certified by the platform per session.
 ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }

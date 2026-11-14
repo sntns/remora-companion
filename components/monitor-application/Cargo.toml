@@ -1,0 +1,22 @@
+[package]
+name = "remora-monitor-application"
+description = "Monitor use case: the latest of what a device reports of itself, and its history, read from the platform's time series store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+remora-monitor = { path = "../monitor" }
+remora-context = { path = "../context" }
+async-trait.workspace = true
+error-stack.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+remora-monitor-adapter-http = { path = "../monitor-adapter-http" }
+remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
+remora-context-application = { path = "../context-application" }
+remora-context-adapter-file = { path = "../context-adapter-file" }
+tempfile.workspace = true
+serde_json.workspace = true

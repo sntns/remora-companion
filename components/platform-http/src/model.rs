@@ -639,3 +639,56 @@ mod tests {
         assert_eq!(commit["artifact_content_length"], "12");
     }
 }
+
+// --- tbss: the time series store ---------------------------------------
+
+/// `GET /tbss/v1/bucket/{bucket_name}/shadow/resource`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ListBucketShadowResourcesResponse {
+    pub bucket_shadow_resources: Vec<String>,
+}
+
+/// `GET /tbss/v1/bucket/{bucket_name}/shadow/schema?resourceName=`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ListBucketShadowSchemasResponse {
+    pub bucket_shadow_schemas: Vec<String>,
+}
+
+/// `sntns.service.tbss.v1.BucketShadow`: the latest value of a resource in
+/// a schema.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BucketShadow {
+    pub timestamp: Option<String>,
+    pub value: serde_json::Value,
+    pub resource: String,
+    pub schema: String,
+}
+
+/// `GET /tbss/v1/bucket/{bucket_name}/shadow?resourceName=&schemaName=`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GetBucketShadowResponse {
+    pub bucket_shadow: Option<BucketShadow>,
+}
+
+/// `sntns.service.tbss.v1.BucketPointData`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BucketPointData {
+    pub timestamp: Option<String>,
+    pub value: serde_json::Value,
+}
+
+/// `GET /tbss/v1/bucket/{bucket_name}/point?resourceName=&schemaName=&from=&to=`:
+/// newest first. An answer over the platform's message size (4 MiB) is
+/// refused whole, as resource exhausted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GetBucketPointsResponse {
+    pub resource: Option<String>,
+    pub schema: Option<String>,
+    pub data: Vec<BucketPointData>,
+}
