@@ -2869,7 +2869,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remora-batch"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -2885,7 +2885,7 @@ dependencies = [
 
 [[package]]
 name = "remora-batch-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "remora-batch-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "remora-block-io"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "remora-channel"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "remora-channel-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "remora-channel-adapter-openssh"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "remora-channel-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3012,7 +3012,7 @@ dependencies = [
 
 [[package]]
 name = "remora-channel-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3028,7 +3028,7 @@ dependencies = [
 
 [[package]]
 name = "remora-claim"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "remora-claim-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "remora-claim-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "remora-completion"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "remora-config"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3098,7 +3098,7 @@ dependencies = [
 
 [[package]]
 name = "remora-config-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3118,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "remora-config-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3130,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "remora-console"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3143,7 +3143,7 @@ dependencies = [
 
 [[package]]
 name = "remora-console-adapter-serialport"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3155,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "remora-console-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3169,7 +3169,7 @@ dependencies = [
 
 [[package]]
 name = "remora-console-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "crossterm",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "remora-context"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "remora-context-adapter-file"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "remora-context",
@@ -3207,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "remora-context-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3218,7 +3218,7 @@ dependencies = [
 
 [[package]]
 name = "remora-context-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3230,7 +3230,7 @@ dependencies = [
 
 [[package]]
 name = "remora-context-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3245,7 +3245,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3256,7 +3256,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-adapter-bmaptar"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "bmap-parser",
  "error-stack",
@@ -3271,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-adapter-bzip2"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "bzip2",
  "error-stack",
@@ -3282,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-adapter-gzip"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "flate2",
@@ -3292,7 +3292,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-adapter-qcow2"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "remora-convert",
@@ -3300,7 +3300,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-adapter-zstd"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "remora-convert",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "remora-convert-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3344,7 +3344,7 @@ dependencies = [
 
 [[package]]
 name = "remora-device"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3355,7 +3355,7 @@ dependencies = [
 
 [[package]]
 name = "remora-device-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3367,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "remora-device-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3383,7 +3383,7 @@ dependencies = [
 
 [[package]]
 name = "remora-device-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3397,7 +3397,7 @@ dependencies = [
 
 [[package]]
 name = "remora-disk"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "remora-disk-adapter-native"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "libc",
@@ -3421,7 +3421,7 @@ dependencies = [
 
 [[package]]
 name = "remora-disk-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3431,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "remora-disk-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "remora-elevate"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "libc",
  "serde_json",
@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "remora-etcher"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "busybody",
  "clap",
@@ -3552,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "remora-factory"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3565,7 +3565,7 @@ dependencies = [
 
 [[package]]
 name = "remora-factory-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3577,7 +3577,7 @@ dependencies = [
 
 [[package]]
 name = "remora-factory-adapter-local"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3596,7 +3596,7 @@ dependencies = [
 
 [[package]]
 name = "remora-factory-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3614,7 +3614,7 @@ dependencies = [
 
 [[package]]
 name = "remora-factory-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3627,7 +3627,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "bmap-parser",
@@ -3643,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash-adapter-bmap"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "bmap-parser",
  "error-stack",
@@ -3653,7 +3653,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash-adapter-file"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "bmap-parser",
  "bzip2",
@@ -3668,7 +3668,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash-adapter-release"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3679,7 +3679,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "bzip2",
@@ -3702,7 +3702,7 @@ dependencies = [
 
 [[package]]
 name = "remora-flash-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3719,11 +3719,11 @@ dependencies = [
 
 [[package]]
 name = "remora-format"
-version = "0.25.0"
+version = "0.25.1"
 
 [[package]]
 name = "remora-fs-walk"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "busybody",
  "error-stack",
@@ -3733,7 +3733,7 @@ dependencies = [
 
 [[package]]
 name = "remora-identity"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3745,7 +3745,7 @@ dependencies = [
 
 [[package]]
 name = "remora-identity-adapter-keygen"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "rand 0.8.7",
@@ -3755,7 +3755,7 @@ dependencies = [
 
 [[package]]
 name = "remora-identity-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3781,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "remora-identity-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "am-fs-ext4",
  "async-trait",
@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image-adapter-ext4"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "am-fs-ext4",
  "error-stack",
@@ -3818,7 +3818,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image-adapter-partition-table"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "gptman",
@@ -3829,7 +3829,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image-adapter-vfat"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "error-stack",
  "fatfs",
@@ -3839,7 +3839,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3858,7 +3858,7 @@ dependencies = [
 
 [[package]]
 name = "remora-image-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3872,7 +3872,7 @@ dependencies = [
 
 [[package]]
 name = "remora-install"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3885,7 +3885,7 @@ dependencies = [
 
 [[package]]
 name = "remora-install-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "remora-install-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3922,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "remora-installer"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3934,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "remora-installer-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -3962,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "remora-installer-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -3975,7 +3975,7 @@ dependencies = [
 
 [[package]]
 name = "remora-monitor"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -3988,7 +3988,7 @@ dependencies = [
 
 [[package]]
 name = "remora-monitor-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4002,7 +4002,7 @@ dependencies = [
 
 [[package]]
 name = "remora-monitor-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4019,7 +4019,7 @@ dependencies = [
 
 [[package]]
 name = "remora-monitor-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "console",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "remora-ota"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -4051,7 +4051,7 @@ dependencies = [
 
 [[package]]
 name = "remora-ota-adapter-file"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4063,7 +4063,7 @@ dependencies = [
 
 [[package]]
 name = "remora-ota-adapter-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4079,7 +4079,7 @@ dependencies = [
 
 [[package]]
 name = "remora-ota-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4103,7 +4103,7 @@ dependencies = [
 
 [[package]]
 name = "remora-ota-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -4123,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "remora-platform-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "remora-progress"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -4155,11 +4155,11 @@ dependencies = [
 
 [[package]]
 name = "remora-scratch"
-version = "0.25.0"
+version = "0.25.1"
 
 [[package]]
 name = "remora-squashfs"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "backhand",
@@ -4173,7 +4173,7 @@ dependencies = [
 
 [[package]]
 name = "remora-squashfs-adapter-backhand"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "backhand",
  "error-stack",
@@ -4182,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "remora-squashfs-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4195,7 +4195,7 @@ dependencies = [
 
 [[package]]
 name = "remora-squashfs-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -4209,7 +4209,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -4221,7 +4221,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-adapter-hooks-process"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4234,7 +4234,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-adapter-jsonl"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4250,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-adapter-operator-tui"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "remora-station",
  "remora-tui",
@@ -4258,7 +4258,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -4303,7 +4303,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-application-transport-http"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -4334,7 +4334,7 @@ dependencies = [
 
 [[package]]
 name = "remora-station-protocol"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "base64 0.22.1",
  "remora-factory",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "remora-tui"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "cliclack",
  "comfy-table",
@@ -4359,7 +4359,7 @@ dependencies = [
 
 [[package]]
 name = "remora-unpack"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "bzip2",
  "error-stack",
@@ -4372,7 +4372,7 @@ dependencies = [
 
 [[package]]
 name = "remora-update"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "busybody",
@@ -4382,7 +4382,7 @@ dependencies = [
 
 [[package]]
 name = "remora-update-adapter-file"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4395,7 +4395,7 @@ dependencies = [
 
 [[package]]
 name = "remora-update-adapter-github"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4409,7 +4409,7 @@ dependencies = [
 
 [[package]]
 name = "remora-update-application"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "async-trait",
  "error-stack",
@@ -4419,7 +4419,7 @@ dependencies = [
 
 [[package]]
 name = "remora-update-application-transport-cli"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "clap",
  "error-stack",
@@ -4506,7 +4506,7 @@ dependencies = [
 
 [[package]]
 name = "rmra"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "busybody",
  "clap",
