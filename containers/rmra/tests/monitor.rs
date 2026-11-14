@@ -166,6 +166,39 @@ async fn shows_what_a_device_reports_as_tables_charts_and_json() {
         "{stderr}"
     );
 
+    // A document over a period: every one reported in it, oldest first.
+    let (ok, json, stderr) = run(&["monitor", "show", "DEV1", "system", "--since", "3h"]).await;
+    assert!(ok, "{stderr}");
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let reported = json.as_array().unwrap();
+    assert_eq!(reported.len(), 6, "{json}");
+    assert_eq!(reported[0]["seq"], 42);
+    assert_eq!(reported[5]["seq"], 47);
+    let (ok, json, stderr) = run(&[
+        "monitor",
+        "show",
+        "DEV1",
+        "system",
+        "--from",
+        "2000-01-01T00:00:00Z",
+        "--to",
+        "2000-01-02T00:00:00Z",
+    ])
+    .await;
+    assert!(ok, "{stderr}");
+    assert_eq!(json.trim(), "[]");
+    let (ok, _, stderr) = run(&[
+        "monitor",
+        "show",
+        "DEV1",
+        "system",
+        "--to",
+        "2000-01-01T00:00:00Z",
+    ])
+    .await;
+    assert!(!ok);
+    assert!(stderr.contains("--to ends a period"), "{stderr}");
+
     // Its presence and its system metrics over time.
     let (ok, charts, stderr) = run(&["monitor", "graph", "DEV1"]).await;
     assert!(ok, "{stderr}");

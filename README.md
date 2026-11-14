@@ -214,6 +214,8 @@ for confirmation on a terminal, unless `--force` is given.
 ```
 rmra monitor status 525400C0FFEE              # the latest of each document
 rmra monitor show 525400C0FFEE heartbeat      # one document in full, as JSON
+rmra monitor show 525400C0FFEE system --since 6h   # every one of the last 6 hours
+rmra monitor show 525400C0FFEE network --from 2026-11-14T08:00:00Z --to 2026-11-14T12:00:00Z
 rmra monitor graph 525400C0FFEE               # presence and metrics, last 24h
 rmra monitor graph 525400C0FFEE --since 7d --metric presence --metric cpu
 rmra monitor watch 525400C0FFEE               # the same, full screen, live
@@ -223,7 +225,9 @@ A device posts a heartbeat while it reaches the platform, and, when it
 runs `remora-monitord`, monitoring documents (`system`, `network`,
 `health`, `ota`...); the account's pipelines keep them in its time series
 store. `status` shows the latest of each with its age and a one-line
-summary. `graph` draws the device's presence from its heartbeats -- how
+summary. `show` prints one document in full, the latest, or with a period
+(`--since`, or `--from` with or without `--to`) every one the device
+reported in it, oldest first, as a JSON array. `graph` draws the device's presence from its heartbeats -- how
 much of the time it was there, and when it was silent -- and CPU use, load,
 memory, filesystems and the hottest temperature from the `system`
 documents, a blank where the device reported nothing. Both take `--format

@@ -52,13 +52,25 @@ pub enum Command {
         format: StatusFormat,
     },
 
-    /// One monitoring document as last reported, in full, as JSON.
+    /// One monitoring document in full, as JSON: as last reported, or,
+    /// with a period (`--since`, or `--from` and `--to`), every one
+    /// reported in it, oldest first, as an array.
     Show {
         #[command(flatten)]
         target: Target,
         /// The document: `heartbeat`, `system`, `network`... (`rmra monitor
         /// status` lists a device's).
         document: String,
+        /// Those reported this far back: `30m`, `24h`, `7d`.
+        #[arg(long, value_parser = humantime::parse_duration, conflicts_with = "from")]
+        since: Option<Duration>,
+        /// Those reported from then on: `2026-11-14T08:00:00Z`.
+        #[arg(long, value_name = "TIME", value_parser = humantime::parse_rfc3339_weak)]
+        from: Option<SystemTime>,
+        /// Those reported until then, not until now; with `--since` or
+        /// `--from`.
+        #[arg(long, value_name = "TIME", value_parser = humantime::parse_rfc3339_weak)]
+        to: Option<SystemTime>,
     },
 
     /// A device over time, as charts: its presence (from its heartbeats)
@@ -146,7 +158,22 @@ pub async fn run(
             every,
             document,
         } => watch::run(service, over, &target, since, every, document).await,
-        Command::Show { target, document } => {
+        Command::Show {
+            target,
+            document,
+            since,
+            from,
+            to,
+        } => {
+            let now = SystemTime::now();
+            if let Some(from) = period(since, from, to, now)? {
+                let spinner = tui::Spinner::start("Reading the device's history");
+                let reported = history(service, over, &target, &document, from).await;
+                drop(spinner);
+                let reported = within(reported.map_err(monitor_error)?, from, to);
+                print_json(&Value::Array(reported.iter().map(document_json).collect()));
+                return Ok(());
+            }
             let documents = latest(service, over, &target).await?;
             let Some(found) = documents.iter().find(|d| d.name == document) else {
                 let reported: Vec<_> = documents.iter().map(|d| d.name.as_str()).collect();
@@ -261,6 +288,41 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// Where the period asked of `show` starts, if one is: `since` back from
+/// `now`, or `from`. An end alone, or before its start, is a usage error.
+fn period(
+    since: Option<Duration>,
+    from: Option<SystemTime>,
+    to: Option<SystemTime>,
+    now: SystemTime,
+) -> Result<Option<SystemTime>> {
+    let start = match (since, from) {
+        (Some(since), _) => Some(now.checked_sub(since).unwrap_or(SystemTime::UNIX_EPOCH)),
+        (None, from) => from,
+    };
+    match (start, to) {
+        (None, Some(_)) => Err(Report::new(Error::Monitor(
+            "--to ends a period: give its start, with --from or --since".to_owned(),
+        ))),
+        (Some(start), Some(to)) if to < start => Err(Report::new(Error::Monitor(format!(
+            "the period ends ({}) before it starts ({})",
+            rfc3339(to),
+            rfc3339(start)
+        )))),
+        (start, _) => Ok(start),
+    }
+}
+
+/// The documents captured from `from` to `to` (to the last one, without).
+fn within(documents: Vec<Document>, from: SystemTime, to: Option<SystemTime>) -> Vec<Document> {
+    documents
+        .into_iter()
+        .filter(|document| {
+            document.captured_at >= from && to.is_none_or(|to| document.captured_at <= to)
+        })
+        .collect()
 }
 
 /// A document's history; empty for one the device doesn't report.
@@ -450,6 +512,39 @@ mod tests {
         assert_eq!(long.chars().count(), SUMMARY_LENGTH);
         assert!(long.ends_with('…'));
         assert_eq!(summary(&document("x", json!("text"))), "");
+    }
+
+    #[test]
+    fn a_period_starts_since_or_from_and_ends_after_its_start() {
+        let at = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+        assert_eq!(period(None, None, None, at(100)).unwrap(), None);
+        assert_eq!(
+            period(Some(Duration::from_secs(60)), None, None, at(100)).unwrap(),
+            Some(at(40))
+        );
+        assert_eq!(
+            period(None, Some(at(10)), Some(at(20)), at(100)).unwrap(),
+            Some(at(10))
+        );
+        assert!(period(None, None, Some(at(20)), at(100)).is_err());
+        assert!(period(None, Some(at(30)), Some(at(20)), at(100)).is_err());
+
+        let captured = |seconds| Document {
+            captured_at: at(seconds),
+            ..document("system", json!({}))
+        };
+        let seconds = |from, to| -> Vec<SystemTime> {
+            within(
+                vec![captured(5), captured(10), captured(20), captured(30)],
+                at(from),
+                to,
+            )
+            .iter()
+            .map(|document| document.captured_at)
+            .collect()
+        };
+        assert_eq!(seconds(10, None), [at(10), at(20), at(30)]);
+        assert_eq!(seconds(10, Some(at(20))), [at(10), at(20)]);
     }
 
     #[test]
