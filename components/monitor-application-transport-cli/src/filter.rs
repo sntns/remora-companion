@@ -20,7 +20,8 @@ pub(crate) fn apply(filter: &str, input: &Value) -> Result<Vec<String>> {
     };
     let defs = jaq_core::defs()
         .chain(jaq_std::defs())
-        .chain(jaq_json::defs());
+        .chain(jaq_json::defs())
+        .chain(formats());
     let funs = jaq_core::funs()
         .chain(jaq_std::funs())
         .chain(jaq_json::funs());
@@ -61,6 +62,13 @@ pub(crate) fn apply(filter: &str, input: &Value) -> Result<Vec<String>> {
             )))),
         })
         .collect()
+}
+
+/// `@csv` and `@tsv`, as jq has them.
+fn formats() -> impl Iterator<Item = load::parse::Def<&'static str>> {
+    load::parse(include_str!("formats.jq"), |parser| parser.defs())
+        .expect("formats.jq is jq")
+        .into_iter()
 }
 
 /// Why a filter could not be read: what was expected, and where.
@@ -130,6 +138,39 @@ mod tests {
         assert_eq!(
             apply(r#".[0] | "\(.seq): \(.document.state)""#, &input).unwrap(),
             ["1: ok"]
+        );
+    }
+
+    #[test]
+    fn rows_come_as_csv_and_tsv() {
+        let input = json!([
+            {"name": "eth0", "rx": 12, "up": true, "note": null},
+            {"name": "say \"hi\", you", "rx": 1.5, "up": false, "note": "a\tb\\c\nd"},
+        ]);
+        let rows = ".[] | [.name, .rx, .up, .note]";
+        assert_eq!(
+            apply(&format!("{rows} | @csv"), &input).unwrap(),
+            [
+                "\"eth0\",12,true,",
+                "\"say \"\"hi\"\", you\",1.5,false,\"a\tb\\c\nd\""
+            ]
+        );
+        assert_eq!(
+            apply(&format!("{rows} | @tsv"), &input).unwrap(),
+            [
+                "eth0\t12\ttrue\t",
+                "say \"hi\", you\t1.5\tfalse\ta\\tb\\\\c\\nd"
+            ]
+        );
+        // In a string, the format is applied to what is interpolated.
+        assert_eq!(
+            apply(r#".[0] | @csv "\([.name, .rx])""#, &input).unwrap(),
+            ["\"eth0\",12"]
+        );
+        let error = apply(".[] | [.] | @csv", &input).unwrap_err();
+        assert!(
+            error.to_string().contains("not valid in a csv row"),
+            "{error}"
         );
     }
 
