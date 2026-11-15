@@ -187,6 +187,31 @@ async fn shows_what_a_device_reports_as_tables_charts_and_json() {
     .await;
     assert!(ok, "{stderr}");
     assert_eq!(json.trim(), "[]");
+
+    // Through a jq filter.
+    let (ok, out, stderr) = run(&[
+        "monitor", "show", "DEV1", "system", "--since", "3h", "--jq", ".[].seq",
+    ])
+    .await;
+    assert!(ok, "{stderr}");
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        ["42", "43", "44", "45", "46", "47"]
+    );
+    let (ok, out, stderr) = run(&[
+        "monitor",
+        "show",
+        "DEV1",
+        "health",
+        "--jq",
+        ".document.state",
+    ])
+    .await;
+    assert!(ok, "{stderr}");
+    assert_eq!(out.trim(), "ok");
+    let (ok, _, stderr) = run(&["monitor", "show", "DEV1", "health", "--jq", ".["]).await;
+    assert!(!ok);
+    assert!(stderr.contains("is not a jq filter"), "{stderr}");
     let (ok, _, stderr) = run(&[
         "monitor",
         "show",

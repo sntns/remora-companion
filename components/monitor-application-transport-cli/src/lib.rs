@@ -2,6 +2,7 @@ mod area;
 mod chart;
 mod detail;
 mod error;
+mod filter;
 mod service;
 mod watch;
 

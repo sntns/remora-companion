@@ -210,6 +210,11 @@ comfy-table = "7"
 # prints them (a command that prints and returns, piped or not); `watch`
 # is full screen, on the workspace's own crossterm.
 ratatui = { version = "0.30", default-features = false, features = ["std", "crossterm_0_29"] }
+# rmra monitor show --jq: jq filters over the JSON printed, without jq
+# installed.
+jaq-core = "3"
+jaq-std = "3"
+jaq-json = "2"
 # rmra ssh: a throwaway ed25519 key, certified by the platform per session.
 ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }

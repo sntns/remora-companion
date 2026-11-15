@@ -23,3 +23,7 @@ ratatui.workspace = true
 crossterm.workspace = true
 futures-util.workspace = true
 tokio.workspace = true
+# `show --jq`: jq's language, in Rust.
+jaq-core.workspace = true
+jaq-std.workspace = true
+jaq-json.workspace = true

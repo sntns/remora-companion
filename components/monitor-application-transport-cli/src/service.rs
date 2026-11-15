@@ -71,6 +71,10 @@ pub enum Command {
         /// `--from`.
         #[arg(long, value_name = "TIME", value_parser = humantime::parse_rfc3339_weak)]
         to: Option<SystemTime>,
+        /// Print what this jq filter makes of the JSON instead:
+        /// `.document.cpu`, `.[] | select(.document.state != "ok")`.
+        #[arg(long, value_name = "FILTER")]
+        jq: Option<String>,
     },
 
     /// A device over time, as charts: its presence (from its heartbeats)
@@ -164,6 +168,7 @@ pub async fn run(
             since,
             from,
             to,
+            jq,
         } => {
             let now = SystemTime::now();
             if let Some(from) = period(since, from, to, now)? {
@@ -171,8 +176,10 @@ pub async fn run(
                 let reported = history(service, over, &target, &document, from).await;
                 drop(spinner);
                 let reported = within(reported.map_err(monitor_error)?, from, to);
-                print_json(&Value::Array(reported.iter().map(document_json).collect()));
-                return Ok(());
+                return print_filtered(
+                    &Value::Array(reported.iter().map(document_json).collect()),
+                    jq.as_deref(),
+                );
             }
             let documents = latest(service, over, &target).await?;
             let Some(found) = documents.iter().find(|d| d.name == document) else {
@@ -183,8 +190,7 @@ pub async fn run(
                 )))
                 .attach(format!("it reports: {}", reported.join(", "))));
             };
-            print_json(&document_json(found));
-            Ok(())
+            print_filtered(&document_json(found), jq.as_deref())
         }
         Command::Graph {
             target,
@@ -361,6 +367,18 @@ fn print_json(value: &Value) {
         "{}",
         serde_json::to_string_pretty(value).expect("json values serialize")
     );
+}
+
+/// The JSON, or what a jq filter makes of it.
+fn print_filtered(value: &Value, jq: Option<&str>) -> Result<()> {
+    let Some(jq) = jq else {
+        print_json(value);
+        return Ok(());
+    };
+    for line in crate::filter::apply(jq, value)? {
+        println!("{line}");
+    }
+    Ok(())
 }
 
 fn rfc3339(time: SystemTime) -> String {
