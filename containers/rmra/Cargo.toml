@@ -80,6 +80,7 @@ assets = [
 ]
 
 [dev-dependencies]
+reqwest.workspace = true
 remora-platform-http = { path = "../../components/platform-http", features = ["test-gateway"] }
 futures-util = { workspace = true, features = ["sink", "std"] }
 tokio = { workspace = true, features = ["net", "process", "io-util"] }

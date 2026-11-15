@@ -18,6 +18,7 @@ tokio.workspace = true
 rand_core.workspace = true
 
 [dev-dependencies]
+reqwest.workspace = true
 sha2.workspace = true
 remora-platform-http = { path = "../platform-http", features = ["test-gateway"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

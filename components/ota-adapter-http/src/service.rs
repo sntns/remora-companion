@@ -309,6 +309,18 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         }))
     }
 
+    async fn download_url(
+        &self,
+        context: &ResolvedContext,
+        release: &str,
+        file_name: &str,
+    ) -> Result<Option<String>> {
+        let gateway = gateway(context).await?;
+        let url = gateway.url(["remora", "v1", "release", release, "artifact", file_name]);
+        let address = gateway.redirection(url).await.map_err(classify)?;
+        Ok(address.map(String::from))
+    }
+
     async fn create_deployment(
         &self,
         context: &ResolvedContext,
@@ -920,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_artifact_downloads_whole_or_from_an_offset() {
-        let (_gateway, context) = with_release().await;
+        let (fake, context) = with_release().await;
         let adapter = OtaGatewayAdapterImpl;
         let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
         let mut sink = adapter
@@ -951,6 +963,34 @@ mod tests {
         };
         assert_eq!(read_all(0).await, bytes);
         assert_eq!(read_all(150_000).await, bytes[150_000..]);
+        // Its address: none while the platform serves it itself, the one
+        // it redirects to otherwise -- fetched without credentials.
+        let address = OtaGatewayAdapterImpl
+            .download_url(&context, "r1", "bundle.raucb")
+            .await
+            .unwrap();
+        assert_eq!(address, None);
+        fake.0.lock().unwrap().redirect_downloads = true;
+        let address = OtaGatewayAdapterImpl
+            .download_url(&context, "r1", "bundle.raucb")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            address.contains("/storage/r1/bundle.raucb?signature="),
+            "{address}"
+        );
+        let fetched = reqwest::get(&address).await.unwrap().bytes().await.unwrap();
+        assert_eq!(fetched.as_ref(), bytes.as_slice());
+        // A download follows the redirection.
+        assert_eq!(read_all(0).await, bytes);
+        fake.0.lock().unwrap().redirect_downloads = false;
+        let missing = OtaGatewayAdapterImpl
+            .download_url(&context, "r1", "missing")
+            .await
+            .unwrap_err();
+        assert!(matches!(missing.current_context(), Error::NotFound));
+
         // Resuming a download that was complete: nothing more.
         assert!(read_all(bytes.len() as u64).await.is_empty());
         let report = adapter

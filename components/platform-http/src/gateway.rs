@@ -29,6 +29,8 @@ pub type WebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 #[derive(Clone)]
 pub struct Gateway {
     http: reqwest::Client,
+    /// The same, that leaves a redirection unfollowed.
+    unfollowed: reqwest::Client,
     base: Url,
     /// `host:port` to connect to: the address's, even when the URL names
     /// the `server_name` override instead.
@@ -72,32 +74,47 @@ impl Gateway {
             headers.insert(HeaderName::from_static(name), value);
         }
 
-        let mut builder = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .user_agent(concat!("remora/", env!("CARGO_PKG_VERSION")));
         let tls = if base.scheme() == "https" {
-            let config = Arc::new(tls_config(&connection.tls.authorities)?);
-            builder = builder.use_preconfigured_tls((*config).clone());
-            if let Some(name) = &connection.tls.server_name {
+            Some(Arc::new(tls_config(&connection.tls.authorities)?))
+        } else {
+            None
+        };
+        // The address the certificate's name is dialed at, when the
+        // connection names another than the address's.
+        let pinned = match (&tls, &connection.tls.server_name) {
+            (Some(_), Some(name)) => {
                 let addresses: Vec<_> = tokio::net::lookup_host(&dial)
                     .await
                     .change_context_lazy(|| Error::Resolve(dial.clone()))?
                     .collect();
                 base.set_host(Some(name))
                     .change_context_lazy(|| Error::InvalidAddress(name.clone()))?;
-                builder = builder.resolve_to_addrs(name, &addresses);
+                Some((name.clone(), addresses))
             }
-            Some(config)
-        } else {
-            None
+            _ => None,
         };
-        let http = builder.build().change_context(Error::Client)?;
+        let client = |redirects: reqwest::redirect::Policy| {
+            let mut builder = reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .user_agent(concat!("remora/", env!("CARGO_PKG_VERSION")))
+                .redirect(redirects);
+            if let Some(config) = &tls {
+                builder = builder.use_preconfigured_tls((**config).clone());
+            }
+            if let Some((name, addresses)) = &pinned {
+                builder = builder.resolve_to_addrs(name, addresses);
+            }
+            builder.build().change_context(Error::Client)
+        };
+        let http = client(reqwest::redirect::Policy::default())?;
+        let unfollowed = client(reqwest::redirect::Policy::none())?;
         let host = dial
             .rsplit_once(':')
             .map_or(dial.as_str(), |(host, _)| host);
         let proxy = proxy_for(tls.is_some(), host, |name| std::env::var(name).ok());
         Ok(Self {
             http,
+            unfollowed,
             base,
             dial,
             tls,
@@ -196,6 +213,32 @@ impl Gateway {
             .await
             .map_err(|error| Status::unavailable(&error))?;
         serde_json::from_slice(&body).map_err(Status::malformed)
+    }
+
+    /// Where the platform sends a GET of `url` on to (a signed address of
+    /// what it stores, good for a while without credentials), unfollowed;
+    /// `None` when it answers by itself.
+    pub async fn redirection(&self, url: Url) -> std::result::Result<Option<Url>, Status> {
+        let request = self
+            .unfollowed
+            .request(Method::GET, url.clone())
+            .headers(self.headers.clone());
+        let response = self.execute(request).await?;
+        if response.status().is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|location| url.join(location).ok());
+            return location
+                .map(Some)
+                .ok_or_else(|| Status::malformed("a redirection without a location"));
+        }
+        if response.status().is_success() {
+            // Its body is left unread: the connection is dropped with it.
+            return Ok(None);
+        }
+        Err(Status::of(response).await)
     }
 
     pub async fn delete<T: DeserializeOwned>(&self, url: Url) -> std::result::Result<T, Status> {

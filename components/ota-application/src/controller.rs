@@ -397,6 +397,29 @@ impl OtaServiceInterface for OtaControllerImpl {
             })
     }
 
+    async fn download_url(
+        &self,
+        over: Option<&ContextOverride>,
+        release: &str,
+        file_name: &str,
+    ) -> Result<String> {
+        let context = self.resolve(over).await?;
+        let failed = || Error::Download {
+            file: file_name.to_owned(),
+            release: release.to_owned(),
+        };
+        self.gateway
+            .download_url(&context, release, file_name)
+            .await
+            .change_context_lazy(failed)?
+            .ok_or_else(|| {
+                Report::new(Error::NoDownloadAddress {
+                    file: file_name.to_owned(),
+                    release: release.to_owned(),
+                })
+            })
+    }
+
     async fn download_file(
         &self,
         over: Option<&ContextOverride>,

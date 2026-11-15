@@ -103,6 +103,11 @@ pub enum Command {
         /// Replace the file if it already exists.
         #[arg(long)]
         force: bool,
+        /// Download nothing: print the address the artifact can be fetched
+        /// from as it is, without credentials, for a while -- to hand to
+        /// `rauc install` on a device, or to `curl`.
+        #[arg(long, conflicts_with_all = ["output", "force"])]
+        url: bool,
     },
 
     /// Set or remove a release's labels.
@@ -247,6 +252,7 @@ pub async fn run(
             kind,
             output,
             force,
+            url,
         } => {
             let found = service
                 .get_release(over, &release)
@@ -259,6 +265,14 @@ pub async fn run(
                 board.as_deref(),
                 kind.as_deref(),
             )?;
+            if url {
+                let address = service
+                    .download_url(over, &release, &picked.file_name)
+                    .await
+                    .map_err(ota_error)?;
+                println!("{address}");
+                return Ok(());
+            }
             let path = match output {
                 Some(path) if path.is_dir() => path.join(&picked.file_name),
                 Some(path) => path,

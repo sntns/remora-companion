@@ -56,6 +56,16 @@ pub trait OtaServiceInterface: Send + Sync {
         file_name: &str,
         offset: u64,
     ) -> Result<Box<dyn ArtifactChunks>>;
+    /// The address the artifact `file_name` of `release` can be fetched
+    /// from without credentials, for a while: the signed one the platform
+    /// sends a download on to. [`super::Error::NoDownloadAddress`] from a
+    /// platform that serves its artifacts itself.
+    async fn download_url(
+        &self,
+        over: Option<&ContextOverride>,
+        release: &str,
+        file_name: &str,
+    ) -> Result<String>;
     /// Downloads an artifact to a local file, reporting bytes through
     /// `ctx`: into a partial file next to it, picked up again where it
     /// stopped after a dropped connection and, across runs, after an

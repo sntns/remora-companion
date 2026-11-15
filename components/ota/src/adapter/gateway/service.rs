@@ -123,6 +123,15 @@ pub trait OtaGatewayAdapter: Send + Sync {
         file_name: &str,
         offset: u64,
     ) -> Result<Box<dyn ArtifactChunks>>;
+    /// The address the platform sends a download of `file_name` of
+    /// `release` on to: a signed one, good for a while without
+    /// credentials. `None` when the platform serves the artifact itself.
+    async fn download_url(
+        &self,
+        context: &ResolvedContext,
+        release: &str,
+        file_name: &str,
+    ) -> Result<Option<String>>;
 
     async fn create_deployment(
         &self,

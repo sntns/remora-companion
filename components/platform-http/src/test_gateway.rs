@@ -259,6 +259,10 @@ pub struct State {
     /// The next download fails after sending this many bytes, once: a
     /// dropped connection.
     pub fail_next_download_after: Option<usize>,
+    /// A download is sent on to the artifact's store (`/storage/...`,
+    /// signed, no credentials asked), as a platform keeping its artifacts
+    /// in an object store does; served by the route itself otherwise.
+    pub redirect_downloads: bool,
     /// Every download, as `(file name, offset)`.
     pub downloads: Vec<(String, u64)>,
     /// The next deployment log WebSocket fails after sending this many
@@ -350,6 +354,7 @@ impl TestGateway {
                 "/remora/v1/release/{release_name}/artifact/{artifact_file_name}",
                 get(download_artifact),
             )
+            .route("/storage/{release_name}/{artifact_file_name}", get(stored_artifact))
             .route(
                 "/remora/v1/release-artifact-upload-offset/{artifact_content_id}",
                 get(upload_offset),
@@ -838,11 +843,46 @@ async fn download_artifact(
     Path((release, file_name)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
+    if gateway.state().redirect_downloads && gateway.artifact_bytes(&release, &file_name).is_some()
+    {
+        let location = format!("/storage/{release}/{file_name}?signature={STORE_SIGNATURE}");
+        return (
+            StatusCode::TEMPORARY_REDIRECT,
+            [(header::LOCATION, location)],
+        )
+            .into_response();
+    }
+    serve_artifact(&gateway, release, file_name, &headers)
+}
+
+/// What signs an address of the fake's artifact store.
+const STORE_SIGNATURE: &str = "test";
+
+/// The artifact store a download is sent on to: whoever holds a signed
+/// address is served, credentials or not.
+async fn stored_artifact(
+    Shared(gateway): Shared<TestGateway>,
+    Path((release, file_name)): Path<(String, String)>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
+) -> Response {
+    if query.as_deref() != Some(&format!("signature={STORE_SIGNATURE}")) {
+        return (StatusCode::FORBIDDEN, "signature does not match\n").into_response();
+    }
+    serve_artifact(&gateway, release, file_name, &headers)
+}
+
+fn serve_artifact(
+    gateway: &TestGateway,
+    release: String,
+    file_name: String,
+    headers: &HeaderMap,
+) -> Response {
     let Some(bytes) = gateway.artifact_bytes(&release, &file_name) else {
         return text_error(Code::NotFound, "artifact not found in release");
     };
     let total = bytes.len();
-    let offset = match header(&headers, "range") {
+    let offset = match header(headers, "range") {
         None => None,
         Some(range) => match range
             .strip_prefix("bytes=")

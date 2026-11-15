@@ -217,6 +217,7 @@ rmra monitor show 525400C0FFEE heartbeat      # one document in full, as JSON
 rmra monitor show 525400C0FFEE system --since 6h   # every one of the last 6 hours
 rmra monitor show 525400C0FFEE network --from 2026-11-14T08:00:00Z --to 2026-11-14T12:00:00Z
 rmra monitor show 525400C0FFEE system --since 6h --jq '.[] | "\(.capturedAt) \(.document.cpu."usage-percent")"'
+rmra monitor show 525400C0FFEE system --since 6h --jq '.[] | [.capturedAt, .document.cpu."usage-percent"] | @csv'
 rmra monitor graph 525400C0FFEE               # presence and metrics, last 24h
 rmra monitor graph 525400C0FFEE --since 7d --metric presence --metric cpu
 rmra monitor watch 525400C0FFEE               # the same, full screen, live
@@ -230,7 +231,8 @@ summary. `show` prints one document in full, the latest, or with a period
 (`--since`, or `--from` with or without `--to`) every one the device
 reported in it, oldest first, as a JSON array; `--jq` prints what a
 [jq](https://jqlang.org) filter makes of that JSON instead (built in: no
-`jq` to install), a string result without its quotes. `graph` draws the device's presence from its heartbeats -- how
+`jq` to install), a string result without its quotes -- so `@csv` and `@tsv` give a table's
+lines. `graph` draws the device's presence from its heartbeats -- how
 much of the time it was there, and when it was silent -- and CPU use, load,
 memory, filesystems and the hottest temperature from the `system`
 documents, a blank where the device reported nothing. Both take `--format
@@ -422,6 +424,7 @@ that continues it.
 ```
 rmra release download 2026.10.0 --board rp5 --type diskimage -o ~/images/
 rmra release download 2026.10.0 --artifact remora-hdc.raucb
+rmra release download 2026.10.0 --board rp5 --type rauc --url   # its address, nothing downloaded
 ```
 
 Picks the artifact like `remora-etcher flash --release` does: by file name
@@ -431,6 +434,18 @@ It's written to `<file>.part` until it's whole and matches the release's
 sha256, then renamed (`--force` replaces an existing file). A dropped
 connection is picked up where it stopped, and so is an interrupted run:
 run the same command again.
+
+`--url` downloads nothing and prints the address the artifact can be
+fetched from as it is: the signed one the platform sends a download on to,
+good for a while without credentials -- so a device can install a bundle
+straight from it, without a deployment:
+
+```
+rauc install "$(rmra release download 2026.10.0 --board rp5 --type rauc --url)"
+```
+
+Whoever holds that address can fetch the artifact until it expires: hand
+it over as you would the artifact.
 
 ### Install an image on one device, over its channel
 

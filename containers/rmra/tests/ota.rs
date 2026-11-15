@@ -336,6 +336,30 @@ async fn download_picks_an_artifact_by_board_and_type() {
         assert_eq!(code, 0, "{stderr}");
     }
 
+    // Its address alone: none from a platform serving its artifacts
+    // itself, the signed one it sends a download on to otherwise.
+    let address = ["release", "download", "R1", "--type", "rauc", "--url"];
+    let (code, _, stderr) = rmra.run(&address).await;
+    assert_ne!(code, 0);
+    assert!(stderr.contains("gives no download address"), "{stderr}");
+    gateway.0.lock().unwrap().redirect_downloads = true;
+    let (code, stdout, stderr) = rmra.run(&address).await;
+    assert_eq!(code, 0, "{stderr}");
+    let url = stdout.trim();
+    assert!(
+        url.starts_with("http://") && url.contains("/storage/R1/update-rp5.raucb?signature="),
+        "{stdout}"
+    );
+    let fetched = reqwest::get(url).await.unwrap().bytes().await.unwrap();
+    assert_eq!(fetched.as_ref(), bundle.as_slice());
+    let (code, _, stderr) = rmra
+        .run(&[
+            "release", "download", "R1", "--type", "rauc", "--url", "--force",
+        ])
+        .await;
+    assert_ne!(code, 0);
+    assert!(stderr.contains("cannot be used with"), "{stderr}");
+
     // Two artifacts for rp5 and nobody at the terminal: it says which.
     let out = tempfile::tempdir().unwrap();
     let out_dir = out.path().to_str().unwrap();
