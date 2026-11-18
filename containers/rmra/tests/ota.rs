@@ -341,8 +341,41 @@ async fn download_picks_an_artifact_by_board_and_type() {
     let address = ["release", "download", "R1", "--type", "rauc", "--url"];
     let (code, _, stderr) = rmra.run(&address).await;
     assert_ne!(code, 0);
-    assert!(stderr.contains("gives no download address"), "{stderr}");
+    assert!(stderr.contains("use --curl"), "{stderr}");
+    // The curl command: refused while it would carry the credentials,
+    // unless the caller accepts the leak.
+    let curl = ["release", "download", "R1", "--type", "rauc", "--curl"];
+    let (code, stdout, stderr) = rmra.run(&curl).await;
+    assert_ne!(code, 0);
+    assert!(stderr.contains("--allow-credential-leak"), "{stderr}");
+    assert!(!stdout.contains("authentication-"), "{stdout}");
+    let leak = [
+        "release",
+        "download",
+        "R1",
+        "--type",
+        "rauc",
+        "--curl",
+        "--allow-credential-leak",
+    ];
+    let (code, stdout, stderr) = rmra.run(&leak).await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.starts_with("curl -fL "), "{stdout}");
+    assert!(stdout.contains(" -C - "), "{stdout}");
+    assert!(stdout.contains("-H 'authentication-token: "), "{stdout}");
+    assert!(
+        stdout.contains("/release/R1/artifact/update-rp5.raucb'"),
+        "{stdout}"
+    );
     gateway.0.lock().unwrap().redirect_downloads = true;
+    // A signed address carries no credentials: no flag needed.
+    let (code, stdout, stderr) = rmra.run(&curl).await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!stdout.contains("-H "), "{stdout}");
+    assert!(
+        stdout.contains("/storage/R1/update-rp5.raucb?signature="),
+        "{stdout}"
+    );
     let (code, stdout, stderr) = rmra.run(&address).await;
     assert_eq!(code, 0, "{stderr}");
     let url = stdout.trim();
