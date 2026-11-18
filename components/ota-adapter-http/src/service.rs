@@ -6,8 +6,8 @@ use remora_ota::{
         OtaGatewayAdapter, Result,
     },
     model::{
-        Artifact, Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary, Labels,
-        LogEntry, LogProgress, Release, ReleaseSummary,
+        Artifact, Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary,
+        DownloadAddress, Labels, LogEntry, LogProgress, Release, ReleaseSummary,
     },
 };
 use std::time::{Duration, Instant};
@@ -314,11 +314,23 @@ impl OtaGatewayAdapter for OtaGatewayAdapterImpl {
         context: &ResolvedContext,
         release: &str,
         file_name: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<DownloadAddress> {
         let gateway = gateway(context).await?;
         let url = gateway.url(["remora", "v1", "release", release, "artifact", file_name]);
-        let address = gateway.redirection(url).await.map_err(classify)?;
-        Ok(address.map(String::from))
+        // The signed address the platform sends it on to; failing that, the
+        // route it serves it at itself, which takes the credentials.
+        Ok(
+            match gateway.redirection(url.clone()).await.map_err(classify)? {
+                Some(signed) => DownloadAddress {
+                    url: signed.into(),
+                    headers: Vec::new(),
+                },
+                None => DownloadAddress {
+                    url: url.into(),
+                    headers: gateway.credential_headers(),
+                },
+            },
+        )
     }
 
     async fn create_deployment(
@@ -969,13 +981,23 @@ mod tests {
             .download_url(&context, "r1", "bundle.raucb")
             .await
             .unwrap();
-        assert_eq!(address, None);
+        assert!(
+            address.url.ends_with("/release/r1/artifact/bundle.raucb"),
+            "{}",
+            address.url
+        );
+        // The credentials the request carries ride along.
+        assert_eq!(
+            address.headers,
+            vec![("authentication-token".to_owned(), "t".to_owned())]
+        );
         fake.0.lock().unwrap().redirect_downloads = true;
         let address = OtaGatewayAdapterImpl
             .download_url(&context, "r1", "bundle.raucb")
             .await
-            .unwrap()
             .unwrap();
+        assert!(address.headers.is_empty());
+        let address = address.url;
         assert!(
             address.contains("/storage/r1/bundle.raucb?signature="),
             "{address}"

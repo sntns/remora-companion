@@ -134,6 +134,17 @@ impl Gateway {
         url
     }
 
+    /// The credentials every request carries, as header name and value: for
+    /// a caller that hands a request to something else (a `curl` command).
+    pub fn credential_headers(&self) -> Vec<(String, String)> {
+        self.headers
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect()
+    }
+
     /// A request carrying the credentials.
     pub fn request(&self, method: Method, url: Url) -> RequestBuilder {
         self.http.request(method, url).headers(self.headers.clone())

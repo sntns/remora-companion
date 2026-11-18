@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use remora_context::{application::ContextService, model::ContextOverride};
 use remora_ota::{
     application::OtaService,
-    model::{Artifact, DownloadRequest, Release, UploadRequest},
+    model::{Artifact, DownloadAddress, DownloadRequest, Release, UploadRequest},
 };
 use remora_progress::{OperationContext, OperationEvent};
 use remora_tui as tui;
@@ -105,9 +105,24 @@ pub enum Command {
         force: bool,
         /// Download nothing: print the address the artifact can be fetched
         /// from as it is, without credentials, for a while -- to hand to
-        /// `rauc install` on a device, or to `curl`.
-        #[arg(long, conflicts_with_all = ["output", "force"])]
+        /// `rauc install` on a device, or to `curl`. Fails when the
+        /// platform serves the artifact itself (see --curl).
+        #[arg(long, conflicts_with_all = ["output", "force", "curl"])]
         url: bool,
+        /// Download nothing: print the `curl` command that fetches the
+        /// artifact, resumably, to run where the artifact is wanted (a
+        /// device). When the platform serves the artifact itself, the
+        /// command carries your credentials as headers: anyone who reads it
+        /// can act as you, so run it at once, never keep it.
+        #[arg(long, conflicts_with_all = ["output", "force"])]
+        curl: bool,
+        /// With --curl, when the command would carry your credentials: say
+        /// that you accept to leak them into it (the shell's history, the
+        /// device's process list, whatever reads the output). Without it,
+        /// such a command is refused. For one particular use: a device that
+        /// cannot sign in, and nothing else.
+        #[arg(long, requires = "curl")]
+        allow_credential_leak: bool,
     },
 
     /// Set or remove a release's labels.
@@ -253,6 +268,8 @@ pub async fn run(
             output,
             force,
             url,
+            curl,
+            allow_credential_leak,
         } => {
             let found = service
                 .get_release(over, &release)
@@ -265,12 +282,31 @@ pub async fn run(
                 board.as_deref(),
                 kind.as_deref(),
             )?;
-            if url {
+            if url || curl {
                 let address = service
                     .download_url(over, &release, &picked.file_name)
                     .await
                     .map_err(ota_error)?;
-                println!("{address}");
+                if curl {
+                    if !address.headers.is_empty() {
+                        if !allow_credential_leak {
+                            return Err(error_stack::Report::new(Error::CredentialLeak));
+                        }
+                        eprintln!(
+                            "warning: this command holds your credentials; run it at once and do not keep it"
+                        );
+                    }
+                    println!("{}", curl_command(&address, &picked.file_name));
+                } else if address.headers.is_empty() {
+                    println!("{}", address.url);
+                } else {
+                    return Err(ota_error(error_stack::Report::new(
+                        remora_ota::application::Error::NoDownloadAddress {
+                            file: picked.file_name.clone(),
+                            release: release.clone(),
+                        },
+                    )));
+                }
                 return Ok(());
             }
             let path = match output {
@@ -640,4 +676,55 @@ fn release_json(release: &Release) -> serde_json::Value {
             "tagCondition": a.tag_condition,
         })).collect::<Vec<_>>(),
     })
+}
+
+/// `text` as one word of a POSIX shell command.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The `curl` command that fetches an artifact into `file_name`: resumable
+/// (`-C -`), retrying, failing on an HTTP error, with the credentials the
+/// platform asks for as headers.
+fn curl_command(address: &DownloadAddress, file_name: &str) -> String {
+    let mut command = String::from("curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 -C -");
+    for (name, value) in &address.headers {
+        command.push_str(" -H ");
+        command.push_str(&shell_quote(&format!("{name}: {value}")));
+    }
+    command.push_str(" -o ");
+    command.push_str(&shell_quote(file_name));
+    command.push(' ');
+    command.push_str(&shell_quote(&address.url));
+    command
+}
+
+#[cfg(test)]
+mod curl_tests {
+    use super::*;
+
+    #[test]
+    fn a_signed_address_needs_no_header() {
+        let address = DownloadAddress {
+            url: "https://s/x?signature=a&b=c".into(),
+            headers: Vec::new(),
+        };
+        assert_eq!(
+            curl_command(&address, "b.raucb"),
+            "curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 -C - -o 'b.raucb' 'https://s/x?signature=a&b=c'"
+        );
+    }
+
+    #[test]
+    fn credentials_become_quoted_headers() {
+        let address = DownloadAddress {
+            url: "https://p/artifact/b.raucb".into(),
+            headers: vec![("authentication-token".into(), "it's".into())],
+        };
+        let command = curl_command(&address, "b.raucb");
+        assert!(
+            command.contains(" -H 'authentication-token: it'\\''s' "),
+            "{command}"
+        );
+    }
 }

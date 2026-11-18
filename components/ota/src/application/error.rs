@@ -35,7 +35,7 @@ pub enum Error {
     },
     #[error("failed to download {file} of release {release:?}")]
     Download { file: String, release: String },
-    #[error("the platform gives no download address for {file} of release {release:?}: it serves it itself, to its own credentials")]
+    #[error("{file} of release {release:?} has no address that works without credentials: the platform serves it itself (use --curl)")]
     NoDownloadAddress { file: String, release: String },
     #[error("release {release:?} has no artifact {file}")]
     NoArtifact { file: String, release: String },

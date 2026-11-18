@@ -5,8 +5,8 @@ use super::error::Result;
 use crate::adapter::gateway::ArtifactChunks;
 use crate::model::{
     DeployRequest, Deployment, DeploymentFilter, DeploymentProgress, DeploymentStatus,
-    DeploymentSummary, DownloadOutcome, DownloadRequest, Labels, LogEntry, Planned, Release,
-    ReleaseSummary, Targets, UploadOutcome, UploadRequest, WatchOutcome,
+    DeploymentSummary, DownloadAddress, DownloadOutcome, DownloadRequest, Labels, LogEntry,
+    Planned, Release, ReleaseSummary, Targets, UploadOutcome, UploadRequest, WatchOutcome,
 };
 
 /// The ota vertical's application-facing port: over-the-air updates as an
@@ -56,16 +56,17 @@ pub trait OtaServiceInterface: Send + Sync {
         file_name: &str,
         offset: u64,
     ) -> Result<Box<dyn ArtifactChunks>>;
-    /// The address the artifact `file_name` of `release` can be fetched
-    /// from without credentials, for a while: the signed one the platform
-    /// sends a download on to. [`super::Error::NoDownloadAddress`] from a
-    /// platform that serves its artifacts itself.
+    /// Where the artifact `file_name` of `release` can be fetched from:
+    /// the signed address the platform sends a download on to (good for a
+    /// while without credentials), or, from a platform that serves its
+    /// artifacts itself, its own address with the credentials the request
+    /// carries ([`DownloadAddress::headers`]).
     async fn download_url(
         &self,
         over: Option<&ContextOverride>,
         release: &str,
         file_name: &str,
-    ) -> Result<String>;
+    ) -> Result<DownloadAddress>;
     /// Downloads an artifact to a local file, reporting bytes through
     /// `ctx`: into a partial file next to it, picked up again where it
     /// stopped after a dropped connection and, across runs, after an
