@@ -22,9 +22,9 @@ use remora_ota::{
     application::{Error, OtaServiceInterface, Result},
     model::{
         is_artifact_file_name, upload_token, DeployRequest, Deployment, DeploymentFilter,
-        DeploymentProgress, DeploymentStatus, DeploymentSummary, DownloadOutcome, DownloadRequest,
-        Labels, LogEntry, Planned, PlannedOutcome, Release, ReleaseSummary, Targets, UploadOutcome,
-        UploadRequest, WatchOutcome,
+        DeploymentProgress, DeploymentStatus, DeploymentSummary, DownloadAddress, DownloadOutcome,
+        DownloadRequest, Labels, LogEntry, Planned, PlannedOutcome, Release, ReleaseSummary,
+        Targets, UploadOutcome, UploadRequest, WatchOutcome,
     },
 };
 use remora_progress::OperationContext;
@@ -402,7 +402,7 @@ impl OtaServiceInterface for OtaControllerImpl {
         over: Option<&ContextOverride>,
         release: &str,
         file_name: &str,
-    ) -> Result<String> {
+    ) -> Result<DownloadAddress> {
         let context = self.resolve(over).await?;
         let failed = || Error::Download {
             file: file_name.to_owned(),
@@ -411,13 +411,7 @@ impl OtaServiceInterface for OtaControllerImpl {
         self.gateway
             .download_url(&context, release, file_name)
             .await
-            .change_context_lazy(failed)?
-            .ok_or_else(|| {
-                Report::new(Error::NoDownloadAddress {
-                    file: file_name.to_owned(),
-                    release: release.to_owned(),
-                })
-            })
+            .change_context_lazy(failed)
     }
 
     async fn download_file(

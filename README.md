@@ -425,6 +425,7 @@ that continues it.
 rmra release download 2026.10.0 --board rp5 --type diskimage -o ~/images/
 rmra release download 2026.10.0 --artifact remora-hdc.raucb
 rmra release download 2026.10.0 --board rp5 --type rauc --url   # its address, nothing downloaded
+rmra release download 2026.10.0 --board rp5 --type rauc --curl  # the curl command, nothing downloaded
 ```
 
 Picks the artifact like `remora-etcher flash --release` does: by file name
@@ -446,6 +447,21 @@ rauc install "$(rmra release download 2026.10.0 --board rp5 --type rauc --url)"
 
 Whoever holds that address can fetch the artifact until it expires: hand
 it over as you would the artifact.
+
+When the platform serves the artifact itself (there is no signed address to
+hand out, and `--url` says so), `--curl` prints the `curl` command that
+fetches it instead -- resumable, retrying, with your credentials as headers --
+to run where the artifact is wanted, a device that cannot sign in itself:
+
+```
+rmra release download 2026.10.0 --board rp5 --type rauc --curl
+```
+
+That command holds your credentials, so anyone who reads it can act as you:
+`rmra` refuses to print it unless you pass `--allow-credential-leak`, to say
+that you accept to leak them into it. It is for one particular use (a device
+that cannot sign in): run the command at once and do not keep it (not in a
+script, a ticket, a shell history).
 
 ### Install an image on one device, over its channel
 

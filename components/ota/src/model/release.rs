@@ -54,6 +54,18 @@ pub fn tags(condition: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Where an artifact can be fetched from, and what the fetch must carry.
+///
+/// The platform sends a download on to a signed address when it stores the
+/// artifact elsewhere: the address alone is enough, for a while (`headers`
+/// is empty). When it serves the artifact itself, the address is its own
+/// and each request carries the caller's credentials as `headers`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadAddress {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+}
+
 /// Downloading one artifact of a release to a local file.
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {

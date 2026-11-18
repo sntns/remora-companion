@@ -4,8 +4,8 @@ use remora_context::model::ResolvedContext;
 
 use super::error::Result;
 use crate::model::{
-    Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary, Labels, LogEntry, Release,
-    ReleaseSummary,
+    Deployment, DeploymentFilter, DeploymentStatus, DeploymentSummary, DownloadAddress, Labels,
+    LogEntry, Release, ReleaseSummary,
 };
 
 /// The opening of an artifact upload.
@@ -123,15 +123,16 @@ pub trait OtaGatewayAdapter: Send + Sync {
         file_name: &str,
         offset: u64,
     ) -> Result<Box<dyn ArtifactChunks>>;
-    /// The address the platform sends a download of `file_name` of
-    /// `release` on to: a signed one, good for a while without
-    /// credentials. `None` when the platform serves the artifact itself.
+    /// Where a download of `file_name` of `release` can be fetched from:
+    /// the signed address the platform sends it on to, good for a while
+    /// without credentials, or, when the platform serves the artifact
+    /// itself, its own address and the credentials the request carries.
     async fn download_url(
         &self,
         context: &ResolvedContext,
         release: &str,
         file_name: &str,
-    ) -> Result<Option<String>>;
+    ) -> Result<DownloadAddress>;
 
     async fn create_deployment(
         &self,

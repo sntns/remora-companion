@@ -10,6 +10,8 @@ pub enum Error {
     Labels,
     #[error("not a terminal: pass --yes to deploy to devices picked by --selector")]
     NeedsYes,
+    #[error("this command would carry your credentials in clear: pass --allow-credential-leak to say you accept that")]
+    CredentialLeak,
     #[error("{0} of {1} deployments did not succeed")]
     Unsuccessful(usize, usize),
     #[error("{0} of {1} deployments could not be created or started")]
