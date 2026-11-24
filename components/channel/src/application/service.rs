@@ -6,7 +6,7 @@ use crate::{
     adapter::gateway::Channel,
     model::{
         ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate, OfflineLoginCode,
-        PreparedSsh, ScpRequest, SshRequest, SshRole,
+        PreparedSsh, ScpRequest, SftpRequest, SshRequest, SshRole,
     },
 };
 
@@ -34,7 +34,13 @@ pub trait ChannelServiceInterface: Send + Sync {
     /// remote operands must name the same device.
     async fn prepare_scp(&self, request: ScpRequest) -> Result<PreparedSsh>;
 
-    /// Runs a prepared ssh or scp session; returns the client's exit code.
+    /// [`Self::prepare_ssh`]'s counterpart for sftp: same checks, same
+    /// throwaway certified key and pinning, with the destination
+    /// (`[user@]DEVICE[:path]`) rewritten to the device's pinned name.
+    async fn prepare_sftp(&self, request: SftpRequest) -> Result<PreparedSsh>;
+
+    /// Runs a prepared ssh, scp or sftp session; returns the client's exit
+    /// code.
     /// The key material is on disk only while the client runs.
     async fn run_ssh(&self, prepared: PreparedSsh) -> Result<i32>;
 

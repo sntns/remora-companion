@@ -371,8 +371,36 @@ async fn rmra_ssh_runs_a_command_on_a_real_sshd() {
     .output()
     .await
     .unwrap();
+    // sftp, in batch mode: the destination as DEVICE:path.
+    let batch = dir.path().join("sftp-batch");
+    std::fs::write(
+        &batch,
+        format!("put {} sftp.bin\n", local.join("sub/file.bin").display()),
+    )
+    .unwrap();
+    let sftp = tokio::process::Command::new(env!("CARGO_BIN_EXE_rmra"))
+        .arg("sftp")
+        .args(["--ssh-option", "BatchMode=yes", "-b"])
+        .arg(&batch)
+        .arg(format!("{SERIAL}:{}", remote.display()))
+        .env("RMRA_CONFIG", &config)
+        .env_remove("RMRA_CONTEXT")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
     let _ = server.kill();
     let _ = server.wait();
+    assert_eq!(
+        sftp.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&sftp.stderr)
+    );
+    assert_eq!(
+        std::fs::read(remote.join("sftp.bin")).unwrap(),
+        std::fs::read(local.join("sub/file.bin")).unwrap()
+    );
     assert_eq!(
         upload.status.code(),
         Some(0),

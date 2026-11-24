@@ -7,4 +7,6 @@ mod service;
 
 pub use error::{Error, Result};
 pub use local::{run_local, LocalCommand};
-pub use service::{proxy_command, run, run_scp, run_ssh, Command, ScpArgs, SshArgs};
+pub use service::{
+    proxy_command, run, run_scp, run_sftp, run_ssh, Command, ScpArgs, SftpArgs, SshArgs,
+};

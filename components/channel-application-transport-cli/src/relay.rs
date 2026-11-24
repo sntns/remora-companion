@@ -78,6 +78,67 @@ pub(crate) async fn stdio(channel: Channel, device: &str) -> Result<()> {
         .unwrap_or_else(|_| Err(Report::new(Error::HangupGrace(HANGUP_GRACE.as_secs()))))
 }
 
+/// Joins a stream channel to a TCP connection until both directions have
+/// ended: what `channel forward` does with each connection it accepts. The
+/// client's end of input is a half-close, as for [`stdio`]; a client gone
+/// (reset, broken pipe) is a normal end.
+pub(crate) async fn socket(
+    channel: Channel,
+    stream: tokio::net::TcpStream,
+    device: &str,
+) -> Result<()> {
+    let Channel {
+        mut sender,
+        mut receiver,
+        ..
+    } = channel;
+    let (mut reader, mut writer) = stream.into_split();
+    let lost = || Error::Relay(device.to_owned());
+    let gone = |e: &std::io::Error| {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        )
+    };
+
+    let upstream = async move {
+        let mut buffer = vec![0; BUFFER];
+        loop {
+            let read = match reader.read(&mut buffer).await {
+                Ok(read) => read,
+                Err(e) if gone(&e) => 0,
+                Err(e) => return Err(Report::new(e).change_context(lost())),
+            };
+            if read == 0 {
+                return sender.close_write().await.change_context_lazy(lost);
+            }
+            sender
+                .send(buffer[..read].to_vec())
+                .await
+                .change_context_lazy(lost)?;
+        }
+    };
+
+    let downstream = async move {
+        while let Some(chunk) = receiver.recv().await.change_context_lazy(lost)? {
+            match writer.write_all(&chunk).await {
+                Ok(()) => {}
+                Err(e) if gone(&e) => return Ok(()),
+                Err(e) => return Err(Report::new(e).change_context(lost())),
+            }
+        }
+        // The device's end of output, passed on as the client's end of
+        // input; the client may already be gone.
+        let _ = writer.shutdown().await;
+        receiver.finished().await.change_context_lazy(lost)?;
+        Ok::<_, Report<Error>>(())
+    };
+
+    both_directions(upstream, downstream).await
+}
+
 /// Lets go of stdout once the device's end has finished, so whoever reads it
 /// sees its end.
 ///

@@ -93,6 +93,27 @@ pub struct ScpRequest {
     pub proxy_command: ProxyCommandBuilder,
 }
 
+/// Everything `sftp` needs from the operator. The device is not a field:
+/// it is the host of the destination, `[user@]DEVICE[:path]`, exactly as
+/// with plain sftp.
+pub struct SftpRequest {
+    pub over: Option<ContextOverride>,
+    pub role: SshRole,
+    /// The device account, when neither a `user@` destination nor the
+    /// role's default should decide it.
+    pub login: Option<String>,
+    /// Reach the device's sshd directly at this address (its local network
+    /// one) instead of through its channel, with a local certificate.
+    pub local: Option<String>,
+    /// `-o` options, placed after the pinning ones so they can't loosen them.
+    pub options: Vec<String>,
+    /// sftp's own arguments: options, then the destination.
+    pub arguments: Vec<String>,
+    /// The sftp client to run.
+    pub binary: PathBuf,
+    pub proxy_command: ProxyCommandBuilder,
+}
+
 /// A program and its arguments.
 #[derive(Debug, Clone)]
 pub struct SshCommand {

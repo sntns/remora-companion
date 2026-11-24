@@ -358,8 +358,8 @@ ProxyCommand and a known_hosts that trusts only the account's host
 authority. Nothing is written to `~/.ssh`, nothing listens on your machine,
 and the key material is removed when ssh exits. Arguments after the device
 go to ssh; `-J`, `-W`, `-F` and `-o ProxyCommand`/`ProxyJump` are refused
-since they would bypass the channel or the host pinning. Port forwarding,
-`scp` and `sftp` all work through ssh itself.
+since they would bypass the channel or the host pinning. Port forwarding
+works through ssh itself (`-L`); files have `rmra scp` and `rmra sftp`.
 
 ### Copy files to or from a device
 
@@ -375,14 +375,41 @@ channel or the pinning (`-J`, `-F`, `-S`, `-o ProxyCommand`/`ProxyJump`);
 `-v` is rmra's own, so pass scp's after `--`; scp's `-c` (cipher) is scp's,
 since rmra's `--context` goes before the command.
 
-`rmra channel open <device>` is the raw channel on stdin/stdout, for use as
-a ProxyCommand of your own.
+### sftp with a device
+
+```
+rmra sftp 525400C0FFEE
+rmra sftp -b commands.txt root@525400C0FFEE:/data
+```
+
+The same setup as `rmra scp`, for an sftp session: the destination is
+`[user@]DEVICE[:path]`, sftp's options pass through, except those that
+would bypass the channel or the pinning (`-J`, `-F`, `-S`, `-D`, `-o
+ProxyCommand`/`ProxyJump`).
+
+### Other profiles: VNC and the like
+
+```
+rmra channel forward 525400C0FFEE --profile vnc --listen 5900
+vncviewer localhost:5900
+```
+
+A device offers more than ssh when its access policy says so: each such
+service is a *profile* of its channel (`ssh`, `vnc`...), never a host and
+port. `channel forward` listens on a local port -- the loopback's, unless
+`--listen` names another address; a free one, printed, without it -- and
+opens a channel to the profile for each connection, until Ctrl-C. A
+profile the device doesn't offer fails that connection, said on stderr.
+
+`rmra channel open <device> [--profile …]` is the raw channel on
+stdin/stdout, for use as a ProxyCommand of your own.
 
 ### ssh on the device's local network
 
 ```
 rmra ssh 525400C0FFEE --local 192.168.1.20
 rmra scp --local 192.168.1.20 ./bundle.raucb 525400C0FFEE:/data/
+rmra sftp --local 192.168.1.20 525400C0FFEE
 ```
 
 `--local` reaches the device's sshd straight at that address instead of

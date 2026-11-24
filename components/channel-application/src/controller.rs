@@ -13,7 +13,7 @@ use remora_channel::{
     application::{ChannelServiceInterface, Error, Result},
     model::{
         ChannelKind, ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate,
-        OfflineLoginCode, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest,
+        OfflineLoginCode, PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SftpRequest,
         SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
     },
 };
@@ -353,6 +353,48 @@ impl ChannelServiceInterface for ChannelControllerImpl {
         Ok(PreparedSsh {
             context: session.context,
             device,
+            login,
+            host_key_alias: alias,
+            role: request.role,
+            command: SshCommand {
+                program: request.binary,
+                arguments,
+            },
+            keys: session.keys,
+        })
+    }
+
+    async fn prepare_sftp(&self, request: SftpRequest) -> Result<PreparedSsh> {
+        let split = arguments::split_sftp(&request.arguments)
+            .map_err(|reason| Report::new(Error::RefusedArgument(reason)))?;
+        check_options(&request.options)?;
+
+        let session = self
+            .certify(
+                request.over.as_ref(),
+                &split.host,
+                request.role,
+                &request.proxy_command,
+                request.local.as_deref(),
+                request.options,
+            )
+            .await?;
+        let login = split
+            .user
+            .or(request.login)
+            .unwrap_or_else(|| session.certified.user.clone());
+        let alias = session.certified.host_key_alias.clone();
+        let mut arguments = session.pinning;
+        arguments.extend(split.options);
+        arguments.push("--".to_owned());
+        arguments.push(match &split.path {
+            Some(path) => format!("{login}@{alias}:{path}"),
+            None => format!("{login}@{alias}"),
+        });
+
+        Ok(PreparedSsh {
+            context: session.context,
+            device: split.host,
             login,
             host_key_alias: alias,
             role: request.role,
@@ -848,6 +890,60 @@ mod tests {
                 "."
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn sftp_pins_the_device_it_is_given() {
+        let root = tempfile::tempdir().unwrap();
+        let gateway = Gateway::default();
+        let channel = controller(root.path(), gateway.clone()).await;
+        let sftp = |arguments: &[&str]| SftpRequest {
+            binary: "sftp".into(),
+            ..sftp_request(scp(arguments))
+        };
+
+        let prepared = channel
+            .prepare_sftp(sftp(&["-b", "batch", "525400C0FFEE:/data"]))
+            .await
+            .unwrap();
+        assert_eq!(prepared.device, "525400C0FFEE");
+        let args = &prepared.command.arguments;
+        assert!(args.contains(&"HostKeyAlias=525400c0ffee".to_owned()));
+        assert_eq!(
+            &args[args.len() - 4..],
+            ["-b", "batch", "--", "operator@525400c0ffee:/data"]
+        );
+
+        let prepared = channel
+            .prepare_sftp(sftp(&["root@525400C0FFEE"]))
+            .await
+            .unwrap();
+        assert_eq!(prepared.login, "root");
+        assert_eq!(
+            prepared.command.arguments.last().unwrap(),
+            "root@525400c0ffee"
+        );
+
+        // Refused before anything is certified.
+        let before = gateway.0.lock().unwrap().len();
+        assert!(channel
+            .prepare_sftp(sftp(&["-D", "x", "DEV"]))
+            .await
+            .is_err());
+        assert_eq!(gateway.0.lock().unwrap().len(), before);
+    }
+
+    fn sftp_request(scp: ScpRequest) -> SftpRequest {
+        SftpRequest {
+            over: scp.over,
+            role: scp.role,
+            login: scp.login,
+            local: scp.local,
+            options: scp.options,
+            arguments: scp.arguments,
+            binary: scp.binary,
+            proxy_command: scp.proxy_command,
+        }
     }
 
     #[tokio::test]

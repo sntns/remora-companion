@@ -74,6 +74,9 @@ enum Commands {
     /// Copy files to or from a device over scp, through its remora channel.
     Scp(remora_channel_application_transport_cli::ScpArgs),
 
+    /// An sftp session with a device, through its remora channel.
+    Sftp(remora_channel_application_transport_cli::SftpArgs),
+
     /// On site, at a device's local network or serial console: ssh
     /// certificates, console login codes, the console itself.
     #[command(subcommand)]
@@ -151,6 +154,7 @@ async fn run() {
         Commands::Channel(_)
             | Commands::Ssh(_)
             | Commands::Scp(_)
+            | Commands::Sftp(_)
             | Commands::Local(_)
             | Commands::Update(_)
             | Commands::Completion(_)
@@ -193,6 +197,10 @@ async fn run() {
             .await
             .unwrap_or_else(|report| fail(report, verbose, 255)),
         // scp's own convention: 1 for any failure.
+        // sftp's own convention too: 1 for any failure.
+        Commands::Sftp(args) => channel::run_sftp(args, &services.channel, over, verbose)
+            .await
+            .unwrap_or_else(|report| fail(report, verbose, 1)),
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(report, verbose, 1)),

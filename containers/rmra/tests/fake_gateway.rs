@@ -145,7 +145,7 @@ async fn open_channel(
         Ok(tenant) => tenant,
         Err((code, message)) => return text_error(code, message),
     };
-    if profile != "ssh" {
+    if profile != "ssh" && profile != "vnc" {
         return text_error(Code::InvalidArgument, "unknown profile");
     }
     // A device of the other tenant: only reachable as its role.
@@ -894,4 +894,62 @@ async fn contexts_of_a_previous_version_are_migrated_on_first_use() {
     let (code, _, stderr) = rmra.run(&["context", "migrate"], b"").await;
     assert_eq!(code, 0);
     assert!(stderr.contains("already in the current format"), "{stderr}");
+}
+
+/// `channel forward`: a local port, a channel per connection to it -- the
+/// way a VNC viewer reaches a device's `vnc` profile. A profile the device
+/// doesn't offer fails that connection only; the listener goes on.
+#[tokio::test]
+async fn a_local_port_forwards_to_a_device_profile() {
+    use tokio::io::AsyncReadExt;
+
+    let address = serve().await;
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+    let port = {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        probe.local_addr().unwrap().port()
+    };
+    let mut command = rmra.command(&[
+        "channel",
+        "forward",
+        "525400C0FFEE",
+        "--profile",
+        "vnc",
+        "--listen",
+        &port.to_string(),
+    ]);
+    command
+        .envs([
+            ("RMRA_ADDRESS", address.as_str()),
+            ("RMRA_TOKEN", TOKEN),
+            ("RMRA_PLAINTEXT", "1"),
+        ])
+        .kill_on_drop(true);
+    let _forward = command.spawn().unwrap();
+
+    let connect = || async {
+        for _ in 0..100 {
+            if let Ok(stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+                return stream;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("nothing listens on {port}");
+    };
+    for message in ["first viewer", "second viewer"] {
+        let mut stream = connect().await;
+        stream.write_all(message.as_bytes()).await.unwrap();
+        stream.shutdown().await.unwrap();
+        let mut answer = String::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            stream.read_to_string(&mut answer),
+        )
+        .await
+        .expect("the channel never ended")
+        .unwrap();
+        assert_eq!(answer, message.chars().rev().collect::<String>());
+    }
 }
