@@ -229,12 +229,12 @@ pub(crate) fn value(unit: Unit, value: f64) -> String {
     }
 }
 
-/// `10-02 07:32Z`: a chart's ends are days apart at most.
+/// `10-02 09:32` (local time): a chart's ends are days apart at most.
 pub(crate) fn short_time(time: SystemTime) -> String {
     let full = tui::timestamp(time);
-    match (full.get(5..16), full.ends_with('Z')) {
-        (Some(short), true) => format!("{short}Z"),
-        _ => full,
+    match full.get(5..16) {
+        Some(short) => format!("{short}{}", if full.ends_with('Z') { "Z" } else { "" }),
+        None => full,
     }
 }
 
@@ -431,8 +431,10 @@ mod tests {
         // The time axis under the plot, and its ends at its ends.
         assert!(chart[6].starts_with("    └───"), "{chart:#?}");
         assert_eq!(chart[6].chars().count(), 60);
-        assert!(chart[7].starts_with("     01-01 00:00Z "), "{chart:#?}");
-        assert!(chart[7].ends_with(" 01-01 01:40Z"), "{chart:#?}");
+        let start = format!("     {} ", short_time(at(0)));
+        assert!(chart[7].starts_with(&start), "{chart:#?}");
+        let end = format!(" {}", short_time(at(6000)));
+        assert!(chart[7].ends_with(&end), "{chart:#?}");
         assert_eq!(chart[7].chars().count(), 60);
         // The curve rises from the bottom left to the top right.
         let first = |row: &str| row.chars().position(is_braille);
@@ -524,6 +526,9 @@ mod tests {
         assert_eq!(value(Unit::BytesPerSecond, 1536.0), "1.5 KiB/s");
         assert_eq!(value(Unit::Dbm, -58.0), "-58 dBm");
         assert_eq!(value(Unit::Milliseconds, 52.4), "52 ms");
-        assert_eq!(short_time(at(1_790_000_000)), "09-21 14:13Z");
+        assert_eq!(
+            short_time(at(1_790_000_000)),
+            tui::timestamp(at(1_790_000_000))[5..16]
+        );
     }
 }

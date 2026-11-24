@@ -5,7 +5,7 @@ use remora_context::{application::ContextService, model::ContextOverride};
 use remora_device::{
     adapter::gateway::{self, DeviceGatewayAdapterService},
     application::{DeviceServiceInterface, Error, Result},
-    model::{Device, Labels},
+    model::{Device, FactoryDevice, Labels},
 };
 use tokio::{sync::Semaphore, task::JoinSet};
 
@@ -46,7 +46,11 @@ impl DeviceServiceInterface for DeviceControllerImpl {
         if !with_labels {
             return Ok(names
                 .into_iter()
-                .map(|name| Device { name, labels: None })
+                .map(|name| Device {
+                    name,
+                    labels: None,
+                    enrolled_at: None,
+                })
                 .collect());
         }
 
@@ -59,17 +63,17 @@ impl DeviceServiceInterface for DeviceControllerImpl {
             tasks.spawn(async move {
                 // The semaphore is never closed: a permit is always granted.
                 let _permit = permits.acquire_owned().await.ok();
-                let labels = gateway.labels(&context, &name).await;
-                (index, name, labels)
+                let device = gateway.get(&context, &name).await;
+                (index, name, device)
             });
         }
         let mut devices = Vec::with_capacity(tasks.len());
         while let Some(joined) = tasks.join_next().await {
-            let (index, name, labels) = joined.map_err(|e| {
-                Report::new(Error::List).attach(format!("a label fetch failed: {e}"))
+            let (index, name, device) = joined.map_err(|e| {
+                Report::new(Error::List).attach(format!("a device fetch failed: {e}"))
             })?;
-            let labels = match labels {
-                Ok(labels) => labels,
+            let device = match device {
+                Ok(device) => device,
                 // Deleted between the listing and now: it is no longer one
                 // of the account's devices, not a reason to fail the rest.
                 Err(report) if matches!(report.current_context(), gateway::Error::NotFound) => {
@@ -77,13 +81,7 @@ impl DeviceServiceInterface for DeviceControllerImpl {
                 }
                 Err(report) => return Err(report.change_context(Error::Get(name))),
             };
-            devices.push((
-                index,
-                Device {
-                    name,
-                    labels: Some(labels),
-                },
-            ));
+            devices.push((index, Device { name, ..device }));
         }
         devices.sort_by_key(|(index, _)| *index);
         Ok(devices.into_iter().map(|(_, device)| device).collect())
@@ -101,6 +99,82 @@ impl DeviceServiceInterface for DeviceControllerImpl {
             .map_err(|report| match report.current_context() {
                 gateway::Error::NotFound => report.change_context(Error::NotFound(name.to_owned())),
                 _ => report.change_context(Error::Delete(name.to_owned())),
+            })
+    }
+
+    async fn list_factory(
+        &self,
+        over: Option<&ContextOverride>,
+        labels: &Labels,
+        without_device: bool,
+    ) -> Result<Vec<FactoryDevice>> {
+        let context = self
+            .contexts
+            .resolve(over)
+            .await
+            .change_context(Error::Context)?;
+        let made = self
+            .gateway
+            .list_factory(&context, labels)
+            .await
+            .change_context(Error::ListFactory)?;
+        if !without_device {
+            return Ok(made);
+        }
+        // Every device, not those carrying `labels`: a factory record's
+        // labels are not its device's.
+        let enrolled: std::collections::HashSet<_> = self
+            .gateway
+            .list(&context, &Labels::new())
+            .await
+            .change_context(Error::List)?
+            .into_iter()
+            .collect();
+        Ok(made
+            .into_iter()
+            .filter(|device| !enrolled.contains(&device.name))
+            .collect())
+    }
+
+    async fn get_factory(
+        &self,
+        over: Option<&ContextOverride>,
+        name: &str,
+    ) -> Result<FactoryDevice> {
+        let context = self
+            .contexts
+            .resolve(over)
+            .await
+            .change_context(Error::Context)?;
+        self.gateway
+            .get_factory(&context, name)
+            .await
+            .map_err(|report| match report.current_context() {
+                gateway::Error::NotFound => {
+                    report.change_context(Error::FactoryNotFound(name.to_owned()))
+                }
+                _ => report.change_context(Error::GetFactory(name.to_owned())),
+            })
+    }
+
+    async fn delete_factory(
+        &self,
+        over: Option<&ContextOverride>,
+        name: &str,
+    ) -> Result<Vec<String>> {
+        let context = self
+            .contexts
+            .resolve(over)
+            .await
+            .change_context(Error::Context)?;
+        self.gateway
+            .delete_factory(&context, name)
+            .await
+            .map_err(|report| match report.current_context() {
+                gateway::Error::NotFound => {
+                    report.change_context(Error::FactoryNotFound(name.to_owned()))
+                }
+                _ => report.change_context(Error::DeleteFactory(name.to_owned())),
             })
     }
 }
@@ -162,40 +236,69 @@ mod tests {
             Ok(names)
         }
 
-        async fn labels(&self, context: &ResolvedContext, name: &str) -> gateway::Result<Labels> {
-            DeviceGatewayAdapterImpl.labels(context, name).await
+        async fn get(&self, context: &ResolvedContext, name: &str) -> gateway::Result<Device> {
+            DeviceGatewayAdapterImpl.get(context, name).await
         }
 
         async fn delete(&self, context: &ResolvedContext, name: &str) -> gateway::Result<()> {
             DeviceGatewayAdapterImpl.delete(context, name).await
         }
+
+        async fn list_factory(
+            &self,
+            context: &ResolvedContext,
+            labels: &Labels,
+        ) -> gateway::Result<Vec<FactoryDevice>> {
+            DeviceGatewayAdapterImpl.list_factory(context, labels).await
+        }
+
+        async fn get_factory(
+            &self,
+            context: &ResolvedContext,
+            name: &str,
+        ) -> gateway::Result<FactoryDevice> {
+            DeviceGatewayAdapterImpl.get_factory(context, name).await
+        }
+
+        async fn delete_factory(
+            &self,
+            context: &ResolvedContext,
+            name: &str,
+        ) -> gateway::Result<Vec<String>> {
+            DeviceGatewayAdapterImpl.delete_factory(context, name).await
+        }
     }
 
-    #[tokio::test]
-    async fn a_device_deleted_while_listing_is_left_out() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gateway, resolved) = TestGateway::serve().await;
+    /// The use case, logged in to `resolved`'s context through `adapter`.
+    async fn wired(
+        dir: &std::path::Path,
+        resolved: ResolvedContext,
+        adapter: impl DeviceGatewayAdapter + 'static,
+    ) -> DeviceControllerImpl {
         let contexts = ContextControllerImpl::new(
-            ContextStoreAdapterService::new(FileContextStoreImpl::new(dir.path())),
-            CredentialStoreAdapterService::new(FileCredentialStoreImpl::new(dir.path())),
+            ContextStoreAdapterService::new(FileContextStoreImpl::new(dir)),
+            CredentialStoreAdapterService::new(FileCredentialStoreImpl::new(dir)),
             PlatformSessionAdapterService::new(Platform),
         );
         contexts
-            .create(
-                resolved.context,
-                remora_context::model::RoleOverride::Keep,
-                false,
-            )
+            .create(resolved.context, RoleOverride::Keep, false)
             .await
             .unwrap();
         contexts
             .login(None, resolved.credentials, RoleOverride::Keep)
             .await
             .unwrap();
-        let devices = DeviceControllerImpl::new(
+        DeviceControllerImpl::new(
             ContextService::new(contexts),
-            DeviceGatewayAdapterService::new(DeletedAfterListing(gateway)),
-        );
+            DeviceGatewayAdapterService::new(adapter),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_device_deleted_while_listing_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gateway, resolved) = TestGateway::serve().await;
+        let devices = wired(dir.path(), resolved, DeletedAfterListing(gateway)).await;
 
         let listed = devices
             .list(None, &Labels::from([("board".into(), "rp5".into())]), true)
@@ -203,5 +306,47 @@ mod tests {
             .unwrap();
         let names: Vec<_> = listed.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["BROKEN", "DEV1"]);
+    }
+
+    #[tokio::test]
+    async fn factory_devices_without_a_device_are_those_not_enrolled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gateway, resolved) = TestGateway::serve().await;
+        {
+            let mut state = gateway.0.lock().unwrap();
+            // DEV3 enrolled; NEW1 and NEW2 not yet, NEW2 labelled.
+            for serial in ["DEV3", "NEW1", "NEW2"] {
+                state.factory_devices.insert(serial.into(), 1);
+                state
+                    .factory_labels
+                    .insert(serial.into(), [("batch".into(), "b7".into())].into());
+            }
+            state.factory_labels.remove("NEW1");
+        }
+        let devices = wired(dir.path(), resolved, DeviceGatewayAdapterImpl).await;
+        let names = |listed: Vec<FactoryDevice>| -> Vec<String> {
+            listed.into_iter().map(|device| device.name).collect()
+        };
+
+        let all = devices.list_factory(None, &Labels::new(), false).await;
+        assert_eq!(names(all.unwrap()), ["DEV3", "NEW1", "NEW2"]);
+        let pending = devices.list_factory(None, &Labels::new(), true).await;
+        assert_eq!(names(pending.unwrap()), ["NEW1", "NEW2"]);
+        // DEV3's device lacks `batch`: it still counts as enrolled.
+        let batch = Labels::from([("batch".into(), "b7".into())]);
+        let pending = devices.list_factory(None, &batch, true).await;
+        assert_eq!(names(pending.unwrap()), ["NEW2"]);
+
+        let report = devices.get_factory(None, "NOPE").await.unwrap_err();
+        assert!(matches!(
+            report.current_context(),
+            Error::FactoryNotFound(_)
+        ));
+        assert_eq!(
+            devices.delete_factory(None, "NEW1").await.unwrap(),
+            ["urn:test:certificate-NEW1-1"]
+        );
+        let pending = devices.list_factory(None, &Labels::new(), true).await;
+        assert_eq!(names(pending.unwrap()), ["NEW2"]);
     }
 }

@@ -206,6 +206,8 @@ cliclack = "0.5"
 clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
 console = "0.16"
 comfy-table = "7"
+# Local time for the dates the CLI shows (already built in, through jaq).
+jiff = "0.2"
 # rmra monitor: `graph` draws its charts into an off-screen buffer and
 # prints them (a command that prints and returns, piped or not); `watch`
 # is full screen, on the workspace's own crossterm.

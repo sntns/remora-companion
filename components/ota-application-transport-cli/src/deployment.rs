@@ -213,7 +213,7 @@ pub async fn run(
                     "device": deployment.target,
                     "status": deployment.status.as_str(),
                     "statusDetails": deployment.details,
-                    "updatedAt": deployment.updated_at.map(tui::timestamp),
+                    "updatedAt": deployment.updated_at.map(tui::timestamp_utc),
                     "labels": deployment.labels,
                     "logs": logs.iter().map(log_json).collect::<Vec<_>>(),
                 })),
@@ -572,7 +572,7 @@ fn log_json(entry: &LogEntry) -> serde_json::Value {
         "result": entry.result,
         "code": entry.code,
         "details": entry.details,
-        "recordedAt": entry.recorded_at.map(tui::timestamp),
+        "recordedAt": entry.recorded_at.map(tui::timestamp_utc),
         "progress": entry.progress.as_ref().map(|p| json!({
             "current": p.current, "max": p.max, "unit": p.unit, "speed": p.speed,
         })),

@@ -277,6 +277,14 @@ pub struct State {
     /// Assigned serials, with the account each was last assigned to, as
     /// asked (an id or a URN).
     pub factory_owners: BTreeMap<String, String>,
+    /// Manufactured serials' labels, for those that have some.
+    pub factory_labels: BTreeMap<String, Labels>,
+    /// When each serial was manufactured (RFC 3339), set on its first
+    /// signature; absent as for a record made before the platform kept it.
+    pub factory_created_at: BTreeMap<String, String>,
+    /// When each device was created (enrolled), RFC 3339; absent as for a
+    /// device created before the platform kept it.
+    pub device_created_at: BTreeMap<String, String>,
     /// The time series store: per bucket, then per `(resource, schema)`,
     /// the points in the order they were stored -- the last one is the
     /// shadow. Fill it with [`TestGateway::store_point`].
@@ -365,7 +373,14 @@ impl TestGateway {
                 "/remora/v1/device/{device_name}",
                 get(get_device).delete(delete_device),
             )
-            .route("/remora/v1/factory-device", post(create_factory_device))
+            .route(
+                "/remora/v1/factory-device",
+                get(list_factory_devices).post(create_factory_device),
+            )
+            .route(
+                "/remora/v1/factory-device/{device_name}",
+                get(get_factory_device).delete(delete_factory_device),
+            )
             .route(
                 "/remora/v1/factory-device/{device_name}/assignment",
                 post(assign_factory_device),
@@ -1085,6 +1100,7 @@ async fn get_device(
             resource: reference(&name),
             labels,
             certificates: vec![],
+            created_at: gateway.state().device_created_at.get(&name).cloned(),
         }),
     }))
 }
@@ -1156,6 +1172,11 @@ async fn create_factory_device(
         ));
     }
     *signed += 1;
+    let signed = *signed;
+    state
+        .factory_created_at
+        .entry(serial.clone())
+        .or_insert_with(|| model::timestamp(std::time::SystemTime::now()));
     Ok(Json(model::CreateFactoryDeviceResponse {
         // As the platform renders it: no `urn:` prefix.
         factory_device_name: format!("sntns:remora:test:{TENANT}:factory-device:{serial}"),
@@ -1181,20 +1202,11 @@ async fn assign_factory_device(
         return Err(rpc_error(Code::NotFound, "no such device was manufactured"));
     }
     let owner = &request.owner_account;
-    let urn = match owner {
-        owner if owner.starts_with("urn:") => owner.clone(),
-        owner
-            if !owner.is_empty()
-                && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') =>
-        {
-            format!("urn:sntns:iam:test:{owner}:account")
-        }
-        _ => {
-            return Err(rpc_error(
-                Code::InvalidArgument,
-                "owner-account must be an account id or URN",
-            ))
-        }
+    let Some(urn) = owner_urn(owner) else {
+        return Err(rpc_error(
+            Code::InvalidArgument,
+            "owner-account must be an account id or URN",
+        ));
     };
     state
         .factory_owners
@@ -1206,6 +1218,101 @@ async fn assign_factory_device(
             ..Default::default()
         }),
         voucher: format!("voucher {device_name}").into_bytes(),
+    }))
+}
+
+/// An account, an id or a URN, as its URN.
+fn owner_urn(owner: &str) -> Option<String> {
+    if owner.starts_with("urn:") {
+        Some(owner.to_owned())
+    } else if !owner.is_empty() && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        Some(format!("urn:sntns:iam:test:{owner}:account"))
+    } else {
+        None
+    }
+}
+
+fn owner_reference(state: &State, serial: &str) -> Option<ResourceReference> {
+    let urn = owner_urn(state.factory_owners.get(serial)?)?;
+    Some(ResourceReference {
+        urn,
+        ..Default::default()
+    })
+}
+
+/// The devices this account made, with their owners; filtered on their
+/// labels like the operational ones.
+async fn list_factory_devices(
+    Shared(gateway): Shared<TestGateway>,
+    RawQuery(query): RawQuery,
+) -> Answer<model::ListFactoryDevicesResponse> {
+    gateway.authenticated()?;
+    let wanted = query_labels(query.as_deref(), "factoryDeviceLabels");
+    let state = gateway.state();
+    let no_labels = Labels::new();
+    let summaries = state
+        .factory_devices
+        .keys()
+        .filter(|serial| {
+            let labels = state.factory_labels.get(*serial).unwrap_or(&no_labels);
+            wanted.iter().all(|(k, v)| labels.get(k) == Some(v))
+        })
+        .map(|serial| model::FactoryDeviceSummary {
+            resource: reference(serial),
+            owner: owner_reference(&state, serial),
+            created_at: state.factory_created_at.get(serial).cloned(),
+        })
+        .collect();
+    Ok(Json(model::ListFactoryDevicesResponse {
+        factory_device_summaries: summaries,
+    }))
+}
+
+async fn get_factory_device(
+    Shared(gateway): Shared<TestGateway>,
+    Path(serial): Path<String>,
+) -> Answer<model::GetFactoryDeviceResponse> {
+    gateway.authenticated()?;
+    let state = gateway.state();
+    let signed = *state
+        .factory_devices
+        .get(&serial)
+        .ok_or_else(|| not_found("factory device"))?;
+    Ok(Json(model::GetFactoryDeviceResponse {
+        factory_device: Some(model::FactoryDeviceDescriptor {
+            resource: reference(&serial),
+            labels: state
+                .factory_labels
+                .get(&serial)
+                .cloned()
+                .unwrap_or_default(),
+            certificate: reference(&format!("certificate-{serial}-{signed}")),
+            owner: owner_reference(&state, &serial),
+            created_at: state.factory_created_at.get(&serial).cloned(),
+        }),
+    }))
+}
+
+/// The factory record and its certificate; an operational device, if
+/// any, stays.
+async fn delete_factory_device(
+    Shared(gateway): Shared<TestGateway>,
+    Path(serial): Path<String>,
+) -> Answer<model::DeleteFactoryDeviceResponse> {
+    gateway.authenticated()?;
+    let mut state = gateway.state();
+    let signed = state
+        .factory_devices
+        .remove(&serial)
+        .ok_or_else(|| not_found("factory device"))?;
+    state.factory_owners.remove(&serial);
+    state.factory_labels.remove(&serial);
+    state.factory_created_at.remove(&serial);
+    Ok(Json(model::DeleteFactoryDeviceResponse {
+        factory_device_reference: reference(&serial),
+        revoked_certificate_references: reference(&format!("certificate-{serial}-{signed}"))
+            .into_iter()
+            .collect(),
     }))
 }
 

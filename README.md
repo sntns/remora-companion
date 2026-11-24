@@ -194,8 +194,42 @@ rmra device ls --label site=lyon
 rmra device ls -q                 # names only, one per line
 ```
 
-The account's devices and their labels (`--format json` for scripts). The
-same `--label key=value` pairs pick the targets of `rmra deploy --selector`.
+The account's devices, their labels and when each enrolled (`--format
+json` for scripts: `enrolledAt`). The same `--label key=value` pairs pick
+the targets of `rmra deploy --selector`. A date the platform has not
+recorded -- a device enrolled before it kept them -- is left blank (`null`).
+Tables show dates in the machine's local time; JSON keeps them in UTC
+(`2026-11-02 08:15:00Z`), the same wherever the script runs.
+
+```
+rmra device ls --with-factory-devices
+```
+
+Also lists the devices the account manufactured that have no device yet:
+made, but not enrolled. A `state` column tells them apart: `enrolled`, `not
+enrolled` (assigned to an account, not enrolled yet) or `in stock` (not
+assigned), and a `created` one says when each was manufactured, oldest
+first (those made before the platform kept the date at the top). In JSON,
+each entry then carries `enrolled` and `createdAt`, and those not enrolled
+carry their `owner`. With `--label`, factory devices are picked by
+their own factory labels.
+
+### Factory devices
+
+```
+rmra factory-device ls                    # what the account manufactured, oldest first
+rmra factory-device ls --without-device   # only those not enrolled yet
+rmra factory-device show 525400C0FFEE     # owner, when made, labels, factory certificate
+rmra factory-device rm 525400C0FFEE       # never shipped: delete it, revoke its certificate
+```
+
+A factory device is the record of a device the account manufactured
+(`remora-etcher factory`, or a provisioning station), under the same name
+-- the hardware serial -- as the device it becomes once it enrolls. `rm`
+deletes that record and revokes the certificate it was built with: the
+hardware can no longer enroll. It is meant for hardware that never shipped,
+not for a device changing hands; a device already enrolled stays. It asks
+for confirmation on a terminal, unless `--force` is given.
 
 ### Delete a device
 
@@ -245,7 +279,7 @@ and every point).
 presence  99.6% · 287 heartbeats, one every 5m · 1 silence of 45m
 │████████████████████████████████████████████████▓███████████████
 └────────────────────────────────────────────────────────────────
-11-13 13:14Z                                         11-14 13:14Z
+11-13 14:14                                           11-14 14:14
 
 load  now 0.21 · min 0.01 · avg 0.22 · max 2.02
 3.00│
@@ -255,7 +289,7 @@ load  now 0.21 · min 0.01 · avg 0.22 · max 2.02
     │                                              ⣿      ⢠
 0.00│⠣⢷⠢⠞⠶⠢⠞⠣⠶⡧⠿⠳⠷⡷⢦⠦⠟⠔⠒⢴⠦⢲⠦⠳⠦⠖⠷⠴⠚⠶⠢⠴⠾⠜⠖⠶⠖⢤⠟⠔⡼⠴⠙⠶⠲⠴⠊⡾⠾⠚⠶⠞⠷⠖⠴⠳⠔⠛⠦⠖⠔
     └─────────────────────────────────────────────────────────────
-     11-13 13:14Z                                     11-14 13:14Z
+     11-13 14:14                                       11-14 14:14
 ```
 
 The curves are braille line charts (ratatui's, printed: the command

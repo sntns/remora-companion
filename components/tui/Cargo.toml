@@ -14,6 +14,7 @@ cliclack.workspace = true
 console.workspace = true
 comfy-table.workspace = true
 error-stack.workspace = true
+jiff.workspace = true
 
 [dev-dependencies]
 thiserror.workspace = true
