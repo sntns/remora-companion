@@ -264,11 +264,6 @@ async fn lists_factory_devices_with_and_without_their_device() {
         serde_json::from_str(&run(&["device", "show", "DEV1", "--format", "json"]).await).unwrap();
     assert_eq!(bought["factory"], serde_json::Value::Null);
     run(&["device", "show", "DEV3"]).await;
-    // The former command, for scripts.
-    assert_eq!(
-        run(&["factory-device", "ls", "-q", "--without-device"]).await,
-        "NEW2\nNEW1\n"
-    );
     let listed: serde_json::Value =
         serde_json::from_str(&run(&["device", "factory", "ls", "--format", "json"]).await).unwrap();
     assert_eq!(listed[0]["createdAt"], serde_json::Value::Null);

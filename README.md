@@ -234,8 +234,6 @@ rmra device factory show 525400C0FFEE     # owner, when made, labels, factory ce
 rmra device factory rm 525400C0FFEE       # never shipped: delete it, revoke its certificate
 ```
 
-(`rmra factory-device …`, their former name, still works.)
-
 A factory device is the record of a device the account manufactured
 (`remora-etcher factory`, or a provisioning station), under the same name
 -- the hardware serial -- as the device it becomes once it enrolls. `rm`
