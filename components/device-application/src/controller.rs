@@ -87,6 +87,25 @@ impl DeviceServiceInterface for DeviceControllerImpl {
         Ok(devices.into_iter().map(|(_, device)| device).collect())
     }
 
+    async fn get(&self, over: Option<&ContextOverride>, name: &str) -> Result<Device> {
+        let context = self
+            .contexts
+            .resolve(over)
+            .await
+            .change_context(Error::Context)?;
+        self.gateway
+            .get(&context, name)
+            .await
+            .map(|device| Device {
+                name: name.to_owned(),
+                ..device
+            })
+            .map_err(|report| match report.current_context() {
+                gateway::Error::NotFound => report.change_context(Error::NotFound(name.to_owned())),
+                _ => report.change_context(Error::Get(name.to_owned())),
+            })
+    }
+
     async fn delete(&self, over: Option<&ContextOverride>, name: &str) -> Result<()> {
         let context = self
             .contexts

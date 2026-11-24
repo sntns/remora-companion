@@ -216,14 +216,25 @@ each entry then carries `enrolled` and `createdAt`, and those not enrolled
 carry their `owner`. With `--label`, factory devices are picked by
 their own factory labels.
 
+```
+rmra device show 525400C0FFEE
+```
+
+One device: its labels, when it enrolled, and, when the account
+manufactured it, its factory record (when made, factory labels and
+certificate); `--format json` puts that under `factory` (`null` for a
+device made elsewhere).
+
 ### Factory devices
 
 ```
-rmra factory-device ls                    # what the account manufactured, oldest first
-rmra factory-device ls --without-device   # only those not enrolled yet
-rmra factory-device show 525400C0FFEE     # owner, when made, labels, factory certificate
-rmra factory-device rm 525400C0FFEE       # never shipped: delete it, revoke its certificate
+rmra device factory ls                    # what the account manufactured, oldest first
+rmra device factory ls --without-device   # only those not enrolled yet
+rmra device factory show 525400C0FFEE     # owner, when made, labels, factory certificate
+rmra device factory rm 525400C0FFEE       # never shipped: delete it, revoke its certificate
 ```
+
+(`rmra factory-device …`, their former name, still works.)
 
 A factory device is the record of a device the account manufactured
 (`remora-etcher factory`, or a provisioning station), under the same name

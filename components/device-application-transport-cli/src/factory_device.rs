@@ -34,7 +34,9 @@ pub enum FactoryDeviceCommand {
     /// Show a manufactured device: its owner, labels and factory
     /// certificate.
     Show {
+        /// The device's name (its serial).
         name: String,
+        /// `table` for humans, `json` for scripts.
         #[arg(long, default_value = "table")]
         format: Format,
     },
@@ -44,6 +46,7 @@ pub enum FactoryDeviceCommand {
     /// it can no longer enroll. A device already enrolled stays.
     #[command(visible_alias = "rm")]
     Remove {
+        /// The devices' names (their serials).
         #[arg(required = true)]
         names: Vec<String>,
         /// Don't ask for confirmation.

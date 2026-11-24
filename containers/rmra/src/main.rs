@@ -59,13 +59,12 @@ enum Commands {
     #[command(subcommand)]
     Channel(remora_channel_application_transport_cli::Command),
 
-    /// List the account's devices, or delete them from the platform.
+    /// The account's devices, and those it manufactured (`device factory`).
     #[command(subcommand)]
     Device(remora_device_application_transport_cli::Command),
 
-    /// The devices the account manufactured: their factory records, the
-    /// ones not enrolled yet, deleting those of hardware that never shipped.
-    #[command(subcommand)]
+    /// Former name of `device factory`, kept for scripts.
+    #[command(subcommand, hide = true)]
     FactoryDevice(remora_device_application_transport_cli::FactoryDeviceCommand),
 
     /// What devices report of themselves (remora-monitord): their latest
