@@ -79,7 +79,8 @@ pub enum Command {
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
-        force: bool,
+        #[arg(short_alias = 'f', alias = "force")]
+        yes: bool,
     },
 
     /// Print what the device reported while updating.
@@ -244,9 +245,9 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Remove { names, force } => {
+        Command::Remove { names, yes } => {
             for name in names {
-                if !force && tui::interactive() {
+                if !yes && tui::interactive() {
                     let question = format!("Delete deployment {}?", tui::accent(&name));
                     if !tui::confirm(question)
                         .initial_value(false)

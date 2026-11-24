@@ -145,7 +145,8 @@ pub enum Command {
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
-        force: bool,
+        #[arg(short_alias = 'f', alias = "force")]
+        yes: bool,
     },
 }
 
@@ -353,9 +354,9 @@ pub async fn run(
             ));
             Ok(())
         }
-        Command::Remove { names, force } => {
+        Command::Remove { names, yes } => {
             for name in names {
-                if !force && tui::interactive() {
+                if !yes && tui::interactive() {
                     let question =
                         format!("Delete release {} and its artifacts?", tui::accent(&name));
                     if !tui::confirm(question)

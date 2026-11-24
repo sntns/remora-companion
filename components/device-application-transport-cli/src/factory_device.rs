@@ -48,7 +48,8 @@ pub enum FactoryDeviceCommand {
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
-        force: bool,
+        #[arg(short_alias = 'f', alias = "force")]
+        yes: bool,
     },
 }
 
@@ -162,9 +163,9 @@ pub async fn run_factory_device(
             }
             Ok(())
         }
-        FactoryDeviceCommand::Remove { names, force } => {
+        FactoryDeviceCommand::Remove { names, yes } => {
             for name in names {
-                if !force && tui::interactive() {
+                if !yes && tui::interactive() {
                     let question = format!(
                         "Delete factory device {} and revoke its factory certificate? It can \
                          no longer enroll.",
