@@ -3530,6 +3530,7 @@ version = "0.25.4"
 dependencies = [
  "clap",
  "error-stack",
+ "futures-util",
  "remora-completion",
  "remora-context",
  "remora-device",
@@ -4498,6 +4499,7 @@ dependencies = [
  "comfy-table",
  "console",
  "error-stack",
+ "jiff",
  "remora-progress",
  "thiserror 1.0.69",
  "tokio",

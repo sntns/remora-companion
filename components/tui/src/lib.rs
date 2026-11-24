@@ -24,7 +24,7 @@ pub use raw::{debug, raw_error};
 pub use report::{one_line, render_report};
 pub use spinner::Spinner;
 pub use table::Table;
-pub use time::{ago, timestamp};
+pub use time::{ago, timestamp, timestamp_utc};
 
 pub use cliclack::{confirm, input, password, select};
 use console::style;

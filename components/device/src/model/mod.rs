@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 /// A label map, sorted for stable output.
 pub type Labels = std::collections::BTreeMap<String, String>;
 
@@ -7,6 +9,28 @@ pub struct Device {
     pub name: String,
     /// `None` when not asked for (listing names only).
     pub labels: Option<Labels>,
+    /// When it was created in the account -- for a device that
+    /// bootstrapped, when it enrolled. `None` when not asked for, or not
+    /// recorded (a device older than the platform keeping it).
+    pub enrolled_at: Option<SystemTime>,
+}
+
+/// A device the account manufactured: its factory record, by the same
+/// name (the hardware serial) its operational one has once it enrolls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactoryDevice {
+    pub name: String,
+    /// The URN of the account it was assigned to; `None` while it is
+    /// still in stock.
+    pub owner: Option<String>,
+    /// `None` when not asked for (a listing).
+    pub labels: Option<Labels>,
+    /// The URN of the certificate it was built with (its IDevID); `None`
+    /// when not asked for (a listing).
+    pub certificate: Option<String>,
+    /// When it was manufactured; `None` when not recorded (a device older
+    /// than the platform keeping it).
+    pub created_at: Option<SystemTime>,
 }
 
 #[derive(Debug, thiserror::Error)]

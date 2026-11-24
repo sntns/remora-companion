@@ -63,6 +63,11 @@ enum Commands {
     #[command(subcommand)]
     Device(remora_device_application_transport_cli::Command),
 
+    /// The devices the account manufactured: their factory records, the
+    /// ones not enrolled yet, deleting those of hardware that never shipped.
+    #[command(subcommand)]
+    FactoryDevice(remora_device_application_transport_cli::FactoryDeviceCommand),
+
     /// What devices report of themselves (remora-monitord): their latest
     /// state, and their system metrics over time.
     #[command(subcommand)]
@@ -208,6 +213,15 @@ async fn run() {
         ),
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
+            verbose,
+        ),
+        Commands::FactoryDevice(command) => exit_on_error(
+            remora_device_application_transport_cli::run_factory_device(
+                command,
+                &services.device,
+                over,
+            )
+            .await,
             verbose,
         ),
         Commands::Monitor(command) => exit_on_error(

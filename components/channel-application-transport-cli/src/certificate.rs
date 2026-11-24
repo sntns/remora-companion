@@ -119,7 +119,7 @@ fn print(
             serde_json::to_string_pretty(&json!({
                 "certificate": certificate_path,
                 "known-hosts": known_hosts_path,
-                "valid-before": issued.valid_before.map(tui::timestamp),
+                "valid-before": issued.valid_before.map(tui::timestamp_utc),
                 "devices": issued.devices.iter().map(|device| json!({
                     "name": device.device,
                     "user": device.user,

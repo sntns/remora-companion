@@ -1057,7 +1057,7 @@ mod tests {
             .position(|line| line.starts_with("╭┤ last reported ├"))
             .expect(&text);
         assert!(
-            lines[list].contains("╮╭┤ system ├─┤ 1970-01-02 00:00:00Z ├"),
+            lines[list].contains(&format!("╮╭┤ system ├─┤ {} ├", tui::timestamp(at(86_400)))),
             "{text}"
         );
         assert!(
@@ -1088,8 +1088,10 @@ mod tests {
         assert!(titles.contains("╮╭┤ load ├─┤ 0.50 ├"), "{text}");
         assert!(titles.contains(" min 0% · avg 24% · max 49% ╮"), "{text}");
         assert!(text.contains("╭┤ memory ├─┤ 40% ├"), "{text}");
-        assert!(lines[38].starts_with("╰ 01-01 00:00Z ─"), "{text}");
-        assert!(lines[38].contains("─ 01-02 00:00Z ╯"), "{text}");
+        let start = format!("╰ {} ─", chart::short_time(at(0)));
+        assert!(lines[38].starts_with(&start), "{text}");
+        let end = format!("─ {} ╯", chart::short_time(at(86_400)));
+        assert!(lines[38].contains(&end), "{text}");
         let mut shades = colors_of(&terminal, "⣿");
         shades.dedup();
         assert!(shades.len() > 5, "{shades:?}");
@@ -1112,7 +1114,7 @@ mod tests {
         let (lines, _) = screen(&state, 120, 40);
         let text = lines.join("\n");
         assert!(
-            text.contains("╭┤ network ├─┤ 1970-01-01 23:55:00Z ├"),
+            text.contains(&format!("╭┤ network ├─┤ {} ├", tui::timestamp(at(86_100)))),
             "{text}"
         );
         assert!(

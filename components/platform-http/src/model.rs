@@ -375,6 +375,9 @@ pub struct DeviceDescriptor {
     pub resource: Option<ResourceReference>,
     pub labels: Labels,
     pub certificates: Vec<ResourceReference>,
+    /// When it was created in this account -- for a device that
+    /// bootstrapped, when it enrolled. Absent where not recorded.
+    pub created_at: Option<String>,
 }
 
 /// `GET /remora/v1/device/{device_name}`.
@@ -431,6 +434,53 @@ pub struct CreateFactoryDeviceResponse {
     pub server_certificate_authority_certificate: Vec<u8>,
     pub access_url: String,
     pub serial_number: String,
+}
+
+/// One row of `GET /remora/v1/factory-device`: a device this account
+/// manufactured, by its serial, and the account it was assigned to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FactoryDeviceSummary {
+    pub resource: Option<ResourceReference>,
+    /// Absent while the device is still in stock.
+    pub owner: Option<ResourceReference>,
+    /// When it was manufactured. Absent where not recorded.
+    pub created_at: Option<String>,
+}
+
+/// `GET /remora/v1/factory-device?factoryDeviceLabels[k]=v`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ListFactoryDevicesResponse {
+    pub factory_device_summaries: Vec<FactoryDeviceSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FactoryDeviceDescriptor {
+    pub resource: Option<ResourceReference>,
+    pub labels: Labels,
+    /// The IDevID the device was built with.
+    pub certificate: Option<ResourceReference>,
+    /// Absent while the device is still in stock.
+    pub owner: Option<ResourceReference>,
+    /// When it was manufactured. Absent where not recorded.
+    pub created_at: Option<String>,
+}
+
+/// `GET /remora/v1/factory-device/{device_name}`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GetFactoryDeviceResponse {
+    pub factory_device: Option<FactoryDeviceDescriptor>,
+}
+
+/// `DELETE /remora/v1/factory-device/{device_name}`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeleteFactoryDeviceResponse {
+    pub factory_device_reference: Option<ResourceReference>,
+    pub revoked_certificate_references: Vec<ResourceReference>,
 }
 
 /// `POST /remora/v1/factory-device/{device_name}/assignment`.

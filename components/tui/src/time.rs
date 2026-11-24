@@ -1,8 +1,21 @@
 use std::time::{Duration, SystemTime};
 
-/// `2026-10-02 07:32:10Z` (UTC). Formatted by hand: a civil date is a few
-/// lines of arithmetic, not worth a date-time dependency.
+/// `2026-10-02 09:32:10`, in the machine's time zone: what a person reads.
+/// Falls back to UTC (`Z`) when the time zone or the time can't be resolved.
 pub fn timestamp(time: SystemTime) -> String {
+    jiff::Timestamp::try_from(time)
+        .map(|at| {
+            at.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|_| timestamp_utc(time))
+}
+
+/// `2026-10-02 07:32:10Z` (UTC): the same on every machine, for what scripts
+/// read (`--format json`). Formatted by hand: a civil date is a few lines of
+/// arithmetic.
+pub fn timestamp_utc(time: SystemTime) -> String {
     let seconds = time
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -51,11 +64,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn formats_local_time() {
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000);
+        let expected = jiff::Timestamp::from_second(1_790_000_000)
+            .unwrap()
+            .to_zoned(jiff::tz::TimeZone::system())
+            .strftime("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        assert_eq!(timestamp(at), expected);
+    }
+
+    #[test]
     fn formats_utc() {
-        assert_eq!(timestamp(SystemTime::UNIX_EPOCH), "1970-01-01 00:00:00Z");
+        assert_eq!(
+            timestamp_utc(SystemTime::UNIX_EPOCH),
+            "1970-01-01 00:00:00Z"
+        );
         let leap = SystemTime::UNIX_EPOCH + Duration::from_secs(951_825_600); // 2000-02-29 12:00
-        assert_eq!(timestamp(leap), "2000-02-29 12:00:00Z");
+        assert_eq!(timestamp_utc(leap), "2000-02-29 12:00:00Z");
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000);
-        assert_eq!(timestamp(now), "2026-09-21 14:13:20Z");
+        assert_eq!(timestamp_utc(now), "2026-09-21 14:13:20Z");
     }
 }
