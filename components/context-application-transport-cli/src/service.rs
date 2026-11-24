@@ -35,22 +35,21 @@ pub enum Command {
     /// with --from, a login's role.
     #[command(after_help = "Examples:\n  \
         context create eu2 --use, then login\n  \
-        context create acme --from eu2 --role urn:sntns:iam:eu2:<tenant>:role:ops")]
+        context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops")]
     Create {
         name: String,
         /// Derive it from a logged-in context: that context's login (its
-        /// own, or the one it derives from) assuming --role -- e.g. one
+        /// own, or the one it derives from) assuming --assume-role -- e.g. one
         /// context per tenant from one login. Nothing is copied: logging
         /// the login in or out does it for both.
-        #[arg(long, value_name = "CONTEXT", requires = "role")]
+        #[arg(long, value_name = "CONTEXT", requires = "assume_role")]
         #[arg(conflicts_with_all = ["address", "plaintext", "server_name"])]
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         from: Option<String>,
         /// With --from: the IAM role its calls assume, a URN, possibly of
         /// another tenant. Verified with the platform now.
-        #[arg(long, visible_alias = "assume-role", value_name = "ROLE-URN")]
-        #[arg(requires = "from")]
-        role: Option<String>,
+        #[arg(long, value_name = "ROLE-URN", requires = "from")]
+        assume_role: Option<String>,
         /// The gateway, `host[:port]` or a URL (default: api.eu2.sntns.io).
         #[arg(long)]
         address: Option<String>,
@@ -80,15 +79,19 @@ pub enum Command {
         /// A new description; an empty one removes it.
         #[arg(long)]
         description: Option<String>,
-        /// A derived context's new role, a URN: verified with the platform.
-        #[arg(long, visible_alias = "assume-role", value_name = "ROLE-URN")]
-        role: Option<String>,
+        /// A derived context's new IAM role, a URN: verified with the
+        /// platform.
+        #[arg(long, value_name = "ROLE-URN")]
+        assume_role: Option<String>,
         /// A login's new gateway, `host[:port]` or a URL.
         #[arg(long)]
         address: Option<String>,
-        /// A login's plain HTTP (local development stacks only), on or off.
-        #[arg(long, value_name = "BOOL")]
-        plaintext: Option<bool>,
+        /// Make a login talk plain HTTP (local development stacks only).
+        #[arg(long, conflicts_with = "no_plaintext")]
+        plaintext: bool,
+        /// Make a login talk HTTPS again.
+        #[arg(long)]
+        no_plaintext: bool,
         /// The name to verify a login's gateway certificate against; an
         /// empty one: the address's host.
         #[arg(long)]
@@ -113,8 +116,10 @@ pub enum Command {
         #[arg(required = true)]
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         names: Vec<String>,
-        /// Don't ask for confirmation, and remove a login's derived
-        /// contexts with it.
+        /// Don't ask for confirmation.
+        #[arg(short, long)]
+        yes: bool,
+        /// Remove a login with the contexts derived from it, without asking.
         #[arg(short, long)]
         force: bool,
     },
@@ -173,7 +178,7 @@ pub async fn run(
         Command::Create {
             name,
             from: Some(source),
-            role: Some(role),
+            assume_role: Some(role),
             description,
             force,
             make_current,
@@ -212,8 +217,12 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Create { from: Some(_), .. } | Command::Create { role: Some(_), .. } => {
-            unreachable!("clap requires --from and --role together")
+        Command::Create { from: Some(_), .. }
+        | Command::Create {
+            assume_role: Some(_),
+            ..
+        } => {
+            unreachable!("clap requires --from and --assume-role together")
         }
         Command::Create {
             name,
@@ -265,9 +274,10 @@ pub async fn run(
         Command::Update {
             name,
             description,
-            role,
+            assume_role,
             address,
             plaintext,
+            no_plaintext,
             server_name,
         } => {
             let name = match name {
@@ -277,9 +287,9 @@ pub async fn run(
             let update = ContextUpdate {
                 description,
                 address,
-                plaintext,
+                plaintext: (plaintext || no_plaintext).then_some(plaintext),
                 server_name,
-                role,
+                role: assume_role,
             };
             if update == ContextUpdate::default() {
                 return Err(Report::new(Error::Usage(
@@ -341,7 +351,7 @@ pub async fn run(
             tui::success(format!("Now using context {}", tui::accent(&name)));
             Ok(())
         }
-        Command::Remove { names, force } => remove(service, names, force).await,
+        Command::Remove { names, yes, force } => remove(service, names, yes, force).await,
         Command::Rename { from, to } => {
             service.rename(&from, &to).await.map_err(context_error)?;
             tui::success(format!(
@@ -396,7 +406,14 @@ pub async fn migrate_on_start(service: &ContextService) {
     }
 }
 
-async fn remove(service: &ContextService, names: Vec<String>, force: bool) -> Result<()> {
+/// `yes` skips the confirmation; `force` also removes a login's derived
+/// contexts, which a confirmation that names them does too.
+async fn remove(
+    service: &ContextService,
+    names: Vec<String>,
+    yes: bool,
+    force: bool,
+) -> Result<()> {
     let mut gone = Vec::new();
     for name in names {
         // Gone already, as derived from a login removed before it.
@@ -418,7 +435,7 @@ async fn remove(service: &ContextService, names: Vec<String>, force: bool) -> Re
             .map(|other| other.context.name)
             .collect();
         let mut cascade = force;
-        if !force && tui::interactive() {
+        if !yes && !force && tui::interactive() {
             let mut question = format!("Remove context {}", tui::accent(&name));
             if summary.context.endpoint().is_some() && summary.credentials.is_some() {
                 question.push_str(" and its stored credentials");

@@ -62,7 +62,7 @@ pub fn hint<C>(report: &Report<C>, program: &str) -> Option<String> {
         }
         ContextError::NotDerived(login) => format!(
             "derive a context acting as a role with \
-             `{program} context create <name> --from {login} --role <role-urn>`"
+             `{program} context create <name> --from {login} --assume-role <role-urn>`"
         ),
         ContextError::NoEndpoint(_, login) => {
             format!("change it with `{program} context update {login} --address …`")

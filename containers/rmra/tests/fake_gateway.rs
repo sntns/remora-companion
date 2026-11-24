@@ -358,7 +358,13 @@ async fn login_whoami_and_a_channel_on_stdio() {
     let (code, _, stderr) = rmra
         .run(
             &[
-                "context", "create", "as-admin", "--from", "local", "--role", admin,
+                "context",
+                "create",
+                "as-admin",
+                "--from",
+                "local",
+                "--assume-role",
+                admin,
             ],
             b"",
         )
@@ -426,7 +432,10 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .await;
     assert_eq!(code, 2);
     let (code, _, stderr) = rmra
-        .run(&["context", "update", "local", "--role", OPS_ROLE], b"")
+        .run(
+            &["context", "update", "local", "--assume-role", OPS_ROLE],
+            b"",
+        )
         .await;
     assert_eq!(code, 1);
     assert!(stderr.contains("logs in as itself"), "{stderr}");
@@ -438,7 +447,10 @@ async fn login_whoami_and_a_channel_on_stdio() {
 
     // A refused new role changes nothing.
     let (code, _, stderr) = rmra
-        .run(&["context", "update", "as-ops", "--role", admin], b"")
+        .run(
+            &["context", "update", "as-ops", "--assume-role", admin],
+            b"",
+        )
         .await;
     assert_eq!(code, 1);
     assert!(stderr.contains("role permission denied"), "{stderr}");
@@ -460,6 +472,8 @@ async fn login_whoami_and_a_channel_on_stdio() {
 
     // The login can't go while a context derives from it, unless --force
     // takes them all.
+    let (code, _, stderr) = rmra.run(&["context", "rm", "-y", "local"], b"").await;
+    assert_eq!(code, 1, "--yes only skips the question: {stderr}");
     let (code, _, stderr) = rmra.run(&["context", "rm", "local"], b"").await;
     assert_eq!(code, 1);
     assert!(

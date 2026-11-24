@@ -82,10 +82,10 @@ The role is verified with the platform when the context is created.
 rmra context create eu2 --use && rmra login   # a login: acts as itself
 
 # one context per tenant from that one login:
-rmra context create acme --from eu2 --role urn:sntns:iam:eu2:<tenant>:role:ops
-rmra context create beta --from eu2 --role urn:sntns:iam:eu2:<other>:role:ops
+rmra context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops
+rmra context create beta --from eu2 --assume-role urn:sntns:iam:eu2:<other>:role:ops
 rmra -c acme whoami                           # ada acting as ops @ acme
-rmra context update acme --role urn:sntns:iam:eu2:<tenant>:role:admin
+rmra context update acme --assume-role urn:sntns:iam:eu2:<tenant>:role:admin
 ```
 
 A derived context copies nothing: its gateway and credentials are its
@@ -231,19 +231,19 @@ A factory device is the record of a device the account manufactured
 deletes that record and revokes the certificate it was built with: the
 hardware can no longer enroll. It is meant for hardware that never shipped,
 not for a device changing hands; a device already enrolled stays. It asks
-for confirmation on a terminal, unless `--force` is given.
+for confirmation on a terminal, unless `--yes` (`-y`) is given.
 
 ### Delete a device
 
 ```
 rmra device rm 525400C0FFEE
-rmra device rm -f 525400C0FFEE 525400C0FFEF   # no confirmation
+rmra device rm -y 525400C0FFEE 525400C0FFEF   # no confirmation
 ```
 
 Deletes the device from the platform: its operational record only. Its
 factory record stays, so the device can enroll again. Until it does, it is
 no longer one of the account's devices and cannot reach the platform. It asks
-for confirmation on a terminal, unless `--force` is given.
+for confirmation on a terminal, unless `--yes` (`-y`) is given.
 
 ### See what a device reports of itself
 
