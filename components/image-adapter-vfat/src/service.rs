@@ -10,6 +10,49 @@ use remora_image::adapter::{
     vfat::{Error, Result, VfatAdapter},
 };
 
+/// A FAT filesystem mounted from a window of an image file.
+type Fat = fatfs::FileSystem<fatfs::StdIoWrapper<WindowedFile>, LocalTime>;
+
+/// Dates the files and directories written: the machine's local time, as
+/// FAT has no time zone -- what fatfs's chrono provider did, without chrono
+/// (unmaintained). Without a provider, fatfs stamps 1980-01-01.
+#[derive(Debug, Clone, Copy, Default)]
+struct LocalTime;
+
+impl LocalTime {
+    fn now() -> jiff::civil::DateTime {
+        jiff::Zoned::now().datetime()
+    }
+
+    fn date(now: jiff::civil::DateTime) -> fatfs::Date {
+        // FAT dates start in 1980; a clock set earlier gets that floor.
+        fatfs::Date::new(
+            now.year().clamp(1980, 2107) as u16,
+            now.month() as u16,
+            now.day() as u16,
+        )
+    }
+}
+
+impl fatfs::TimeProvider for LocalTime {
+    fn get_current_date(&self) -> fatfs::Date {
+        Self::date(Self::now())
+    }
+
+    fn get_current_date_time(&self) -> fatfs::DateTime {
+        let now = Self::now();
+        fatfs::DateTime::new(
+            Self::date(now),
+            fatfs::Time::new(
+                now.hour() as u16,
+                now.minute() as u16,
+                now.second() as u16,
+                (now.subsec_nanosecond() / 1_000_000) as u16,
+            ),
+        )
+    }
+}
+
 /// `Read`/`Write`/`Seek` over `[offset, offset + size)` of a larger file, so
 /// `fatfs` can mount that range directly — the vfat analogue of
 /// `remora-image-adapter-ext4`'s `WindowedFileDevice`, just against
@@ -90,11 +133,7 @@ fn image_len(image: &Path) -> std::result::Result<u64, Error> {
     remora_block_io::len_of(image).map_err(|e| Error::Io(image.to_path_buf(), e))
 }
 
-fn mount_window(
-    image: &Path,
-    offset: u64,
-    size: u64,
-) -> std::result::Result<fatfs::FileSystem<fatfs::StdIoWrapper<WindowedFile>>, Error> {
+fn mount_window(image: &Path, offset: u64, size: u64) -> std::result::Result<Fat, Error> {
     let image_len = image_len(image)?;
     let window_end = offset.checked_add(size).filter(|&end| end <= image_len);
     if window_end.is_none() {
@@ -107,7 +146,8 @@ fn mount_window(
     }
 
     let windowed = WindowedFile::open_rw(image, offset, size)?;
-    let fs = fatfs::FileSystem::new(windowed, fatfs::FsOptions::new()).map_err(Error::Fat)?;
+    let fs = fatfs::FileSystem::new(windowed, fatfs::FsOptions::new().time_provider(LocalTime))
+        .map_err(Error::Fat)?;
     Ok(fs)
 }
 
@@ -443,6 +483,42 @@ mod tests {
         );
     }
 
+    /// Files written carry today's date, as with fatfs's chrono provider:
+    /// without one, fatfs would stamp them 1980-01-01.
+    #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires mkfs.vfat, a Linux-only dev tool"
+    )]
+    fn files_written_are_dated_now() {
+        let path = temp_image(16 * 1024 * 1024);
+        Command::new("mkfs.vfat")
+            .arg(&path)
+            .status()
+            .expect("mkfs.vfat not available");
+        let before = LocalTime::now().date();
+        write_file(&path, 0, 16 * 1024 * 1024, "/config", b"dated", 0o644).unwrap();
+        let after = LocalTime::now().date();
+
+        let fs = mount_window(&path, 0, 16 * 1024 * 1024).unwrap();
+        let entry = fs
+            .root_dir()
+            .iter()
+            .map(|entry| entry.unwrap())
+            .find(|entry| entry.file_name() == "config")
+            .unwrap();
+        let modified = entry.modified().date;
+        let date = jiff::civil::date(
+            modified.year as i16,
+            modified.month as i8,
+            modified.day as i8,
+        );
+        assert!(
+            before <= date && date <= after,
+            "{date} not in [{before}, {after}]"
+        );
+    }
+
     #[test]
     fn refuses_a_window_past_the_end_of_the_file() {
         let path = temp_image(1024);
@@ -452,9 +528,7 @@ mod tests {
         }
     }
 
-    fn describe(
-        result: std::result::Result<fatfs::FileSystem<fatfs::StdIoWrapper<WindowedFile>>, Error>,
-    ) -> String {
+    fn describe(result: std::result::Result<Fat, Error>) -> String {
         match result {
             Ok(_) => "Ok(..)".to_string(),
             Err(e) => format!("Err({e})"),

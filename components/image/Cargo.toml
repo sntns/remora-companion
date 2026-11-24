@@ -19,7 +19,10 @@ serde.workspace = true
 # access, and duplicating them would just be busywork with no isolation
 # benefit (the actual DI seam is the *port trait*, not the value shape).
 am-fs-ext4 = "0.4"
-fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }
+# Without the default `chrono` feature (chrono is unmaintained,
+# RUSTSEC-2026-0543): remora-image-adapter-vfat dates the files it writes
+# through its own jiff TimeProvider instead.
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e", default-features = false, features = ["std", "alloc", "lfn", "unicode", "log_level_trace"] }
 
 [dev-dependencies]
 serde_json.workspace = true

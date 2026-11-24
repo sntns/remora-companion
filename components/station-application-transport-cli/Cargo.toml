@@ -19,7 +19,7 @@ error-stack.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 yaml_serde.workspace = true
-humantime.workspace = true
+remora-time = { path = "../time" }
 tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]

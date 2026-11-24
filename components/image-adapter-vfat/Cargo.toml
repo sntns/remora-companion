@@ -10,4 +10,8 @@ publish.workspace = true
 remora-block-io = { path = "../block-io" }
 remora-image = { path = "../image" }
 error-stack.workspace = true
-fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e" }
+jiff.workspace = true
+# Without the default `chrono` feature (chrono is unmaintained,
+# RUSTSEC-2026-0543): remora-image-adapter-vfat dates the files it writes
+# through its own jiff TimeProvider instead.
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "c4b88477b22ca7e5131fbd8891f62a5deaa88e6e", default-features = false, features = ["std", "alloc", "lfn", "unicode", "log_level_trace"] }

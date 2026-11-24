@@ -62,14 +62,14 @@ pub enum Command {
         /// status` lists a device's).
         document: String,
         /// Those reported this far back: `30m`, `24h`, `7d`.
-        #[arg(long, value_parser = humantime::parse_duration, conflicts_with = "from")]
+        #[arg(long, value_parser = remora_time::parse_duration, conflicts_with = "from")]
         since: Option<Duration>,
         /// Those reported from then on: `2026-11-14T08:00:00Z`.
-        #[arg(long, value_name = "TIME", value_parser = humantime::parse_rfc3339_weak)]
+        #[arg(long, value_name = "TIME", value_parser = time_arg)]
         from: Option<SystemTime>,
         /// Those reported until then, not until now; with `--since` or
         /// `--from`.
-        #[arg(long, value_name = "TIME", value_parser = humantime::parse_rfc3339_weak)]
+        #[arg(long, value_name = "TIME", value_parser = time_arg)]
         to: Option<SystemTime>,
         /// Print what this jq filter makes of the JSON instead:
         /// `.document.cpu`, `.[] | select(.document.state != "ok")`.
@@ -84,7 +84,7 @@ pub enum Command {
         #[command(flatten)]
         target: Target,
         /// How far back: `30m`, `24h`, `7d`.
-        #[arg(long, default_value = "24h", value_parser = humantime::parse_duration)]
+        #[arg(long, default_value = "24h", value_parser = remora_time::parse_duration)]
         since: Duration,
         /// Only these, by the start of their name (`presence`, `cpu`,
         /// `disk`); repeatable.
@@ -103,10 +103,10 @@ pub enum Command {
         #[command(flatten)]
         target: Target,
         /// How far back: `30m`, `24h`, `7d`; changed with a key once in.
-        #[arg(long, default_value = "24h", value_parser = humantime::parse_duration)]
+        #[arg(long, default_value = "24h", value_parser = remora_time::parse_duration)]
         since: Duration,
         /// How often to read the platform again.
-        #[arg(long, default_value = "1m", value_parser = humantime::parse_duration)]
+        #[arg(long, default_value = "1m", value_parser = remora_time::parse_duration)]
         every: Duration,
         /// The document shown in detail to start with: `network`,
         /// `processes`... (`system` otherwise); changed with a key once in.
@@ -266,7 +266,7 @@ pub async fn run(
                     tui::info(format!(
                         "Nothing to draw: {} reported nothing in the last {}.",
                         tui::accent(&target.device),
-                        humantime::format_duration(since)
+                        remora_time::format_duration(since)
                     ))
                 }
                 GraphFormat::Chart => {
@@ -278,7 +278,7 @@ pub async fn run(
                     println!(
                         "{} {}",
                         tui::accent(&target.device),
-                        tui::dim(format!("· last {}", humantime::format_duration(since)))
+                        tui::dim(format!("· last {}", remora_time::format_duration(since)))
                     );
                     if let Some(presence) = &presence {
                         println!();
@@ -381,8 +381,14 @@ fn print_filtered(value: &Value, jq: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `--from`/`--to`: an RFC 3339 time, UTC when no offset is given.
+fn time_arg(text: &str) -> std::result::Result<SystemTime, String> {
+    remora_time::parse_time(text)
+        .ok_or_else(|| format!("{text:?} is not a time like 2026-11-14T08:00:00Z"))
+}
+
 fn rfc3339(time: SystemTime) -> String {
-    humantime::format_rfc3339_seconds(time).to_string()
+    remora_time::format_seconds(time)
 }
 
 fn document_json(document: &Document) -> Value {
@@ -430,7 +436,7 @@ pub(crate) fn summary(document: &Document, now: SystemTime) -> String {
         let plain = fields().filter_map(|(key, value)| match value {
             // A date says little in a summary: the document's own is in
             // the table already.
-            Value::String(text) if humantime::parse_rfc3339_weak(text).is_ok() => None,
+            Value::String(text) if remora_time::parse_time(text).is_some() => None,
             Value::String(text) => Some(format!("{key}={text}")),
             Value::Bool(_) | Value::Number(_) => Some(format!("{key}={value}")),
             _ => None,

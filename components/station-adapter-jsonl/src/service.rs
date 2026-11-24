@@ -217,7 +217,7 @@ fn to_line(entry: &JournalEntry, ts: SystemTime) -> Line {
         },
     };
     Line {
-        ts: Some(humantime::format_rfc3339_millis(ts).to_string()),
+        ts: Some(remora_time::format_millis(ts)),
         claim_id: entry.claim_id.to_string(),
         event,
     }

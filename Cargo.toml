@@ -69,6 +69,7 @@ members = [
     "components/claim-adapter-http",
     "components/platform-http",
     "components/tui",
+    "components/time",
     "components/completion",
     "components/context",
     "components/context-application",
@@ -166,7 +167,6 @@ serde_json = "1"
 # its durations and journal timestamps.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 yaml_serde = "0.10"
-humantime = "2"
 
 # HTTP client of remora-update-adapter-github (release feed, installers).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -26,7 +26,7 @@ pub struct ResourceReference {
 
 /// A `google.protobuf.Timestamp`'s JSON as a time.
 pub fn time_of(timestamp: Option<&str>) -> Option<SystemTime> {
-    humantime::parse_rfc3339_weak(timestamp?).ok()
+    remora_time::parse_time(timestamp?)
 }
 
 /// A time as a `google.protobuf.Timestamp`'s JSON.
@@ -35,7 +35,7 @@ pub fn timestamp(time: SystemTime) -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    humantime::format_rfc3339(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)).to_string()
+    remora_time::format_seconds(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
 }
 
 /// int64 fields: a JSON string out, a string or a number in.

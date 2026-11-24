@@ -274,7 +274,7 @@ json` for scripts (`status`: the documents in full; `graph`: the silences
 and every point).
 
 ```
-525400C0FFEE · last 1day
+525400C0FFEE · last 1d
 
 presence  99.6% · 287 heartbeats, one every 5m · 1 silence of 45m
 │████████████████████████████████████████████████▓███████████████

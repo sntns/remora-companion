@@ -13,6 +13,6 @@ error-stack.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 # A document is JSON whose shape is its provider's, on the device: kept as
-# it came. humantime reads the date a device stamped it with.
+# it came. remora-time reads the date a device stamped it with.
 serde_json.workspace = true
-humantime.workspace = true
+remora-time = { path = "../time" }

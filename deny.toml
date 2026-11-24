@@ -28,6 +28,12 @@ ignore = [
     "RUSTSEC-2026-0391",
     "RUSTSEC-2026-0398",
     "RUSTSEC-2026-0403",
+    # am-fs-core was renamed rust-fs-core, and every am-fs-core version
+    # yanked with it: a rename, not a defect. It comes from our ext4 fork
+    # (github.com/sntns/rust-fs-ext4, branch remora-etcher), which still
+    # asks for am-fs-core ^0.2; moving the fork to rust-fs-core (0.5, a new
+    # API) drops this.
+    { crate = "am-fs-core@0.2.2", reason = "renamed rust-fs-core; awaits our rust-fs-ext4 fork moving to it" },
 ]
 
 [licenses]
