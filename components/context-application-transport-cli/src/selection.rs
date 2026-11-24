@@ -1,5 +1,5 @@
 use clap::{parser::ValueSource, FromArgMatches};
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use remora_completion::Candidate;
 use remora_context::{
     application::ContextService,
@@ -24,11 +24,10 @@ pub const CONTEXT_ENV: &str = "RMRA_CONTEXT";
 pub const ADDRESS_ENV: &str = "RMRA_ADDRESS";
 pub const TOKEN_ENV: &str = "RMRA_TOKEN";
 /// ...and, optionally, the role it acts as (a URN), plaintext for a local
-/// development stack, a PEM certificate authority file and the name to
-/// verify the gateway's certificate against -- `context create`'s options.
+/// development stack and the name to verify the gateway's certificate
+/// against -- `context create`'s options.
 pub const ASSUME_ROLE_ENV: &str = "RMRA_ASSUME_ROLE";
 pub const PLAINTEXT_ENV: &str = "RMRA_PLAINTEXT";
-pub const CA_FILE_ENV: &str = "RMRA_CA_FILE";
 pub const SERVER_NAME_ENV: &str = "RMRA_SERVER_NAME";
 
 /// The name a context defined by the environment goes by: shown only, it
@@ -89,13 +88,7 @@ fn choose(
 /// The context `vars` define, if they do. Empty variables count as unset.
 fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedContext>> {
     let Some(token) = vars(TOKEN_ENV) else {
-        let rest = [
-            ADDRESS_ENV,
-            ASSUME_ROLE_ENV,
-            PLAINTEXT_ENV,
-            CA_FILE_ENV,
-            SERVER_NAME_ENV,
-        ];
+        let rest = [ADDRESS_ENV, ASSUME_ROLE_ENV, PLAINTEXT_ENV, SERVER_NAME_ENV];
         return match rest.into_iter().find(|name| vars(name).is_some()) {
             Some(name) => Err(usage(format!(
                 "{name} is set without {TOKEN_ENV}, which defines the context"
@@ -120,18 +113,12 @@ fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedCon
             )))
         }
     };
-    // Stored contexts keep a CA's PEM itself, so does this one.
-    let mut authorities = Vec::new();
-    if let Some(path) = vars(CA_FILE_ENV).map(std::path::PathBuf::from) {
-        authorities.push(std::fs::read_to_string(&path).change_context(Error::ReadFile(path))?);
-    }
     Ok(Some(DefinedContext {
         name: DEFINED_NAME.to_owned(),
         endpoint: Endpoint {
             address,
             tls: Tls {
                 disabled,
-                authorities,
                 server_name: vars(SERVER_NAME_ENV),
             },
         },
@@ -263,16 +250,12 @@ mod tests {
 
     #[test]
     fn the_environment_defines_a_whole_context() {
-        let ca = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(ca.path(), "-----BEGIN CERTIFICATE-----\n").unwrap();
-        let path = ca.path().to_str().unwrap();
         let role = "urn:sntns:iam:eu2:acme:role:factory";
         let env = [
             (ADDRESS_ENV, "gateway:50051"),
             (TOKEN_ENV, "s3cret"),
             (ASSUME_ROLE_ENV, role),
             (PLAINTEXT_ENV, "True"),
-            (CA_FILE_ENV, path),
             (SERVER_NAME_ENV, "api.example"),
         ];
         let over = choose(None, vars(&env)).unwrap().unwrap();
@@ -285,7 +268,6 @@ mod tests {
         assert_eq!(endpoint.address, "gateway:50051");
         assert_eq!(defined.role.as_deref(), Some(role));
         assert!(endpoint.tls.disabled);
-        assert_eq!(endpoint.tls.authorities, ["-----BEGIN CERTIFICATE-----\n"]);
         assert_eq!(endpoint.tls.server_name.as_deref(), Some("api.example"));
         assert!(
             matches!(&defined.credentials.secret, Secret::AccessKey { token } if token == "s3cret")
@@ -325,17 +307,5 @@ mod tests {
         };
         assert!(with(ASSUME_ROLE_ENV, "ops").contains("role URN"));
         assert!(with(PLAINTEXT_ENV, "maybe").contains("true or false"));
-        let missing = choose(
-            None,
-            vars(&[
-                (ADDRESS_ENV, "a:1"),
-                (TOKEN_ENV, "t"),
-                (CA_FILE_ENV, "/nonexistent/ca.pem"),
-            ]),
-        );
-        assert!(matches!(
-            missing.unwrap_err().current_context(),
-            Error::ReadFile(_)
-        ));
     }
 }

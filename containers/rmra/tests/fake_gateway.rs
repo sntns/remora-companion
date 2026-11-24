@@ -235,7 +235,6 @@ impl Rmra {
             .env_remove("RMRA_TOKEN")
             .env_remove("RMRA_ASSUME_ROLE")
             .env_remove("RMRA_PLAINTEXT")
-            .env_remove("RMRA_CA_FILE")
             .env_remove("RMRA_SERVER_NAME")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

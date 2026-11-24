@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use remora_context::{
     application::{ContextService, Error as ContextError},
     model::{
@@ -45,7 +43,7 @@ pub enum Command {
         /// context per tenant from one login. Nothing is copied: logging
         /// the login in or out does it for both.
         #[arg(long, value_name = "CONTEXT", requires = "role")]
-        #[arg(conflicts_with_all = ["address", "plaintext", "ca_files", "server_name"])]
+        #[arg(conflicts_with_all = ["address", "plaintext", "server_name"])]
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         from: Option<String>,
         /// With --from: the IAM role its calls assume, a URN, possibly of
@@ -61,11 +59,6 @@ pub enum Command {
         /// Talk plain HTTP (local development stacks only).
         #[arg(long)]
         plaintext: bool,
-        /// A PEM certificate authority to trust for this gateway, on top of
-        /// the system's; repeatable.
-        #[arg(long = "ca-file", value_name = "PEM")]
-        #[arg(value_hint = clap::ValueHint::FilePath)]
-        ca_files: Vec<PathBuf>,
         /// Verify the gateway's certificate against this name instead of
         /// the address's host.
         #[arg(long)]
@@ -96,14 +89,6 @@ pub enum Command {
         /// A login's plain HTTP (local development stacks only), on or off.
         #[arg(long, value_name = "BOOL")]
         plaintext: Option<bool>,
-        /// The PEM certificate authorities a login trusts, on top of the
-        /// system's, replacing its own; repeatable.
-        #[arg(long = "ca-file", value_name = "PEM", conflicts_with = "no_ca_files")]
-        #[arg(value_hint = clap::ValueHint::FilePath)]
-        ca_files: Vec<PathBuf>,
-        /// Trust only the system's certificate authorities.
-        #[arg(long = "no-ca-files")]
-        no_ca_files: bool,
         /// The name to verify a login's gateway certificate against; an
         /// empty one: the address's host.
         #[arg(long)]
@@ -235,7 +220,6 @@ pub async fn run(
             address,
             description,
             plaintext,
-            ca_files,
             server_name,
             force,
             make_current,
@@ -245,7 +229,6 @@ pub async fn run(
                 address: address.unwrap_or_else(|| DEFAULT_ADDRESS.to_owned()),
                 tls: Tls {
                     disabled: plaintext,
-                    authorities: read_authorities(ca_files)?,
                     server_name,
                 },
             };
@@ -285,26 +268,16 @@ pub async fn run(
             role,
             address,
             plaintext,
-            ca_files,
-            no_ca_files,
             server_name,
         } => {
             let name = match name {
                 Some(name) => name,
                 None => selected_name(service, over).await?,
             };
-            let authorities = if no_ca_files {
-                Some(Vec::new())
-            } else if ca_files.is_empty() {
-                None
-            } else {
-                Some(read_authorities(ca_files)?)
-            };
             let update = ContextUpdate {
                 description,
                 address,
                 plaintext,
-                authorities,
                 server_name,
                 role,
             };
@@ -421,13 +394,6 @@ pub async fn migrate_on_start(service: &ContextService) {
     for change in &migration.changes {
         tui::step(change);
     }
-}
-
-fn read_authorities(paths: Vec<PathBuf>) -> Result<Vec<String>> {
-    paths
-        .into_iter()
-        .map(|path| std::fs::read_to_string(&path).change_context(Error::ReadFile(path)))
-        .collect()
 }
 
 async fn remove(service: &ContextService, names: Vec<String>, force: bool) -> Result<()> {

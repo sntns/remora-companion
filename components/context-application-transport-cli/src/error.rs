@@ -13,8 +13,6 @@ pub enum Error {
     Prompt,
     #[error("failed to read the secret from stdin")]
     Stdin,
-    #[error("failed to read {0}")]
-    ReadFile(std::path::PathBuf),
     #[error("{0}")]
     Usage(String),
 }

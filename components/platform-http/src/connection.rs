@@ -22,8 +22,6 @@ pub struct Connection {
 pub struct Tls {
     /// Plain HTTP, for a gateway on a local development stack only.
     pub disabled: bool,
-    /// Extra PEM authorities to trust on top of the system and webpki roots.
-    pub authorities: Vec<String>,
     /// The name to verify the server certificate against, when it is not
     /// the address's host. It is the name requested too (the platform's
     /// ingress routes by `Host`); the address is still where to connect.
@@ -55,7 +53,6 @@ impl Connection {
             address: endpoint.address.clone(),
             tls: Tls {
                 disabled: tls.disabled,
-                authorities: tls.authorities.clone(),
                 server_name: tls.server_name.clone(),
             },
             credentials: credentials.map(|credentials| {

@@ -171,7 +171,6 @@ disk:
 | `RMRA_ADDRESS` | the gateway, `host[:port]` (or with `http://`/`https://`) — `api.eu2.sntns.io` by default |
 | `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN |
 | `RMRA_PLAINTEXT` | `true` for plain HTTP (local development stacks only) |
-| `RMRA_CA_FILE` | a PEM certificate authority to trust, on top of the system's |
 | `RMRA_SERVER_NAME` | the name to verify the gateway's certificate against |
 
 ```
@@ -556,7 +555,7 @@ ls|create|update|use|rename|rm|migrate`. A context created or logged in with one
 usable with the other; `-c`/`RMRA_CONTEXT` select one, before the command.
 
 `RMRA_ADDRESS` and `RMRA_TOKEN` (plus the optional `RMRA_ASSUME_ROLE`,
-`RMRA_PLAINTEXT`, `RMRA_CA_FILE`, `RMRA_SERVER_NAME`) define a context
+`RMRA_PLAINTEXT`, `RMRA_SERVER_NAME`) define a context
 from the environment alone, exactly as for rmra (see [Without a stored
 context](#without-a-stored-context-ci-and-containers)): nothing stored, nothing
 written. E.g. a CI job manufacturing devices from a batch recipe with a

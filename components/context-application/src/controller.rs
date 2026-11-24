@@ -342,9 +342,6 @@ impl ContextServiceInterface for ContextControllerImpl {
                 if let Some(plaintext) = update.plaintext {
                     endpoint.tls.disabled = plaintext;
                 }
-                if let Some(authorities) = update.authorities {
-                    endpoint.tls.authorities = authorities;
-                }
                 if let Some(server_name) = update.server_name {
                     endpoint.tls.server_name = Some(server_name).filter(|s| !s.is_empty());
                 }

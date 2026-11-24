@@ -126,9 +126,6 @@ pub struct Tls {
     /// Plaintext, for a local development stack only.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
-    /// Extra PEM certificate authorities to trust, on top of the system's.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub authorities: Vec<String>,
     /// The name to verify the gateway's certificate against, when it is not
     /// the address's host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,8 +248,6 @@ pub struct ContextUpdate {
     /// A login's only.
     pub address: Option<String>,
     pub plaintext: Option<bool>,
-    /// Replaces the extra certificate authorities (empty: none).
-    pub authorities: Option<Vec<String>>,
     /// An empty one removes it.
     pub server_name: Option<String>,
     /// A derived context's only: verified with the platform first.
@@ -262,10 +257,7 @@ pub struct ContextUpdate {
 impl ContextUpdate {
     /// Whether it changes the endpoint, which only a login has.
     pub fn touches_endpoint(&self) -> bool {
-        self.address.is_some()
-            || self.plaintext.is_some()
-            || self.authorities.is_some()
-            || self.server_name.is_some()
+        self.address.is_some() || self.plaintext.is_some() || self.server_name.is_some()
     }
 }
 
