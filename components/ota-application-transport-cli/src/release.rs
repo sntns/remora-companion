@@ -320,7 +320,7 @@ pub async fn run(
                 artifact_lines(
                     &release,
                     &picked,
-                    context.as_ref().map(|c| c.context.name.as_str()),
+                    context.as_ref().map(|c| c.name.as_str()),
                     &path,
                 ),
             );

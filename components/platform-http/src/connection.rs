@@ -35,24 +35,24 @@ impl Connection {
     /// the role the invocation resolved to (if any): what every adapter
     /// acting for the operator uses.
     pub fn for_resolved(resolved: &remora_context::model::ResolvedContext) -> Self {
-        Self::for_context(
-            &resolved.context,
+        Self::for_endpoint(
+            &resolved.endpoint,
             Some(&resolved.credentials),
             resolved.role.as_ref().map(|role| role.urn.as_str()),
         )
     }
 
-    /// How to reach `context`'s gateway, authenticated as `credentials`,
-    /// assuming `role` (a role URN) when given.
-    pub fn for_context(
-        context: &remora_context::model::Context,
+    /// How to reach the gateway at `endpoint`, authenticated as
+    /// `credentials`, assuming `role` (a role URN) when given.
+    pub fn for_endpoint(
+        endpoint: &remora_context::model::Endpoint,
         credentials: Option<&remora_context::model::Credentials>,
         role: Option<&str>,
     ) -> Self {
         use remora_context::model::Secret;
-        let tls = &context.endpoint.tls;
+        let tls = &endpoint.tls;
         Self {
-            address: context.endpoint.address.clone(),
+            address: endpoint.address.clone(),
             tls: Tls {
                 disabled: tls.disabled,
                 authorities: tls.authorities.clone(),

@@ -144,7 +144,7 @@ impl ChannelControllerImpl {
                     .change_context_lazy(|| Error::Certify(device.to_owned()))?;
                 let proxy_command = proxy_command(&ProxyTarget {
                     context: (context.selection != Selection::Defined)
-                        .then_some(context.context.name.as_str()),
+                        .then_some(context.name.as_str()),
                     device,
                 });
                 (
@@ -209,7 +209,7 @@ impl ChannelControllerImpl {
             certified.known_hosts.clone(),
         );
         Ok(Session {
-            context: context.context.name,
+            context: context.name,
             certified,
             pinning,
             keys,
@@ -517,7 +517,7 @@ mod tests {
             platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
             store::ContextStoreAdapterService,
         },
-        model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
+        model::{Credentials, Endpoint, Principal, Secret},
     };
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
@@ -528,7 +528,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PlatformSessionAdapter for Platform {
-        async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
+        async fn whoami(&self, _: &Endpoint, _: &Credentials) -> platform::Result<Principal> {
             Ok(Principal {
                 user_urn: "urn:user:ada".into(),
                 user_name: "ada".into(),
@@ -538,7 +538,7 @@ mod tests {
 
         async fn acting_account(
             &self,
-            _: &Context,
+            _: &Endpoint,
             _: &Credentials,
             _: &str,
         ) -> platform::Result<Option<String>> {
@@ -669,21 +669,7 @@ mod tests {
         );
         use remora_context::application::ContextServiceInterface;
         contexts
-            .create(
-                Context {
-                    name: "eu2".into(),
-                    description: None,
-                    endpoint: Endpoint {
-                        address: "gateway:50051".into(),
-                        tls: Tls::default(),
-                    },
-                    roles: Default::default(),
-                    assumed_role: None,
-                    login: None,
-                },
-                remora_context::model::RoleOverride::Keep,
-                false,
-            )
+            .create("eu2", None, Endpoint::new("gateway:50051"), false)
             .await
             .unwrap();
         contexts
@@ -692,7 +678,6 @@ mod tests {
                 Credentials {
                     secret: Secret::AccessKey { token: "t".into() },
                 },
-                remora_context::model::RoleOverride::Keep,
             )
             .await
             .unwrap();

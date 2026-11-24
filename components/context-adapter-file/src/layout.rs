@@ -26,13 +26,18 @@ pub fn default_root() -> PathBuf {
 }
 
 /// ```text
-/// <root>/config.json                     {"currentContext": "eu2"}
-/// <root>/contexts/<name>/meta.json       the context (no secrets)
-/// <root>/contexts/<name>/credentials.json  0600, written by `rmra login`
+/// <root>/config.json          {"version": 2, "currentContext": "eu2", "contexts": {…}}
+/// <root>/credentials.json     0600: each login's credentials, by context name
+/// <root>/.lock                held while a change is being made
 /// ```
 ///
-/// A context's directory holds both stores' files: each store removes only
-/// its own, and the directory goes with the last of them.
+/// What the previous layout left, until migrated (see `migrate`):
+///
+/// ```text
+/// <root>/config.json                         {"currentContext": "eu2"}
+/// <root>/contexts/<name>/meta.json           the context (no secrets)
+/// <root>/contexts/<name>/credentials.json    0600
+/// ```
 #[derive(Debug, Clone)]
 pub(crate) struct Layout {
     pub root: PathBuf,
@@ -43,20 +48,30 @@ impl Layout {
         self.root.join("config.json")
     }
 
-    pub fn contexts(&self) -> PathBuf {
+    pub fn credentials(&self) -> PathBuf {
+        self.root.join("credentials.json")
+    }
+
+    pub fn lock(&self) -> PathBuf {
+        self.root.join(".lock")
+    }
+
+    /// The previous layout's directory of contexts.
+    pub fn legacy_contexts(&self) -> PathBuf {
         self.root.join("contexts")
     }
 
-    pub fn context_dir(&self, name: &str) -> PathBuf {
-        self.contexts().join(name)
-    }
-
-    pub fn meta(&self, name: &str) -> PathBuf {
-        self.context_dir(name).join("meta.json")
-    }
-
-    pub fn credentials(&self, name: &str) -> PathBuf {
-        self.context_dir(name).join("credentials.json")
+    /// Where a migration keeps the previous layout: `backup-v1`, or the
+    /// first `backup-v1-<n>` free.
+    pub fn backup(&self) -> PathBuf {
+        let first = self.root.join("backup-v1");
+        if !first.exists() {
+            return first;
+        }
+        (2..)
+            .map(|n| self.root.join(format!("backup-v1-{n}")))
+            .find(|dir| !dir.exists())
+            .expect("some backup name is free")
     }
 }
 
@@ -65,32 +80,6 @@ pub(crate) fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
-/// Removes a file; whether there was one.
-pub(crate) fn remove_file(path: &Path) -> io::Result<bool> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e),
-    }
-}
-
-/// Removes a directory once nothing is left in it: a context's directory
-/// holds both stores' files, and goes with the last of them.
-pub(crate) fn remove_dir_if_empty(dir: &Path) -> io::Result<()> {
-    match fs::remove_dir(dir) {
-        Ok(()) => Ok(()),
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
-            ) =>
-        {
-            Ok(())
-        }
         Err(e) => Err(e),
     }
 }
@@ -125,7 +114,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8], secret: bool) -> io::Resul
     })
 }
 
-fn create_private_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]

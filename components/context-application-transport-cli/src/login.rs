@@ -3,10 +3,7 @@ use std::io::Read;
 use error_stack::{Report, ResultExt};
 use remora_context::{
     application::ContextService,
-    model::{
-        is_role_urn, Context, ContextOverride, Credentials, Endpoint, Principal, RoleOverride,
-        Secret, Tls,
-    },
+    model::{ContextKind, ContextOverride, Credentials, Endpoint, Principal, Secret},
 };
 use remora_tui as tui;
 
@@ -27,46 +24,18 @@ pub struct LoginArgs {
     /// Log in with an access key, reading its token from stdin.
     #[arg(long)]
     token_stdin: bool,
-    #[command(flatten)]
-    role: RoleArgs,
 }
 
 #[derive(clap::Args)]
 pub struct LogoutArgs {}
 
-/// The role a context is set to act as: on `login` and `context create`
-/// only, since which role a context acts as is part of the context, never
-/// a choice of each command.
-#[derive(clap::Args, Debug, Default)]
-pub struct RoleArgs {
-    /// Make the context act as this IAM role: an alias of its roles
-    /// (`context role ls`) or a role URN, possibly of another tenant.
-    #[arg(long, value_name = "ROLE")]
-    #[arg(add = remora_completion::values(remora_completion::Kind::Role))]
-    assume_role: Option<String>,
-    /// Make the context act as the login itself, even if it assumed a role.
-    #[arg(long, conflicts_with = "assume_role")]
-    no_assume_role: bool,
-}
-
-impl RoleArgs {
-    pub fn choice(&self) -> RoleOverride {
-        if self.no_assume_role {
-            return RoleOverride::Drop;
-        }
-        match self.assume_role.clone().filter(|role| !role.is_empty()) {
-            Some(role) => RoleOverride::Assume(role),
-            None => RoleOverride::Keep,
-        }
-    }
-}
-
 #[derive(clap::Args)]
 pub struct WhoamiArgs {}
 
 /// `<bin> login`: verify credentials with the selected context's platform,
-/// then store them. With no flags it is a guided prompt -- including, on a
-/// first run, creating the context to log in to. `program` is the running
+/// then store them -- for its login: its own, or the one it derives from.
+/// With no flags it is a guided prompt -- including, on a first run,
+/// creating the context to log in to. `program` is the running
 /// binary's name, for the prompt's title.
 pub async fn run_login(
     args: LoginArgs,
@@ -89,14 +58,14 @@ pub async fn run_login(
     let name = match service.selected(over).await.map_err(context_error)? {
         Some((name, selection)) => {
             let context = service.inspect(&name).await.map_err(context_error)?.context;
+            let target = match &context.kind {
+                ContextKind::Login { endpoint } => endpoint.address.clone(),
+                ContextKind::Derived(derivation) => format!("the login of {}", derivation.from),
+            };
             tui::step(format!(
                 "Context {} {}",
                 tui::accent(&name),
-                tui::dim(format!(
-                    "{} · {}",
-                    context.endpoint.address,
-                    describe_selection(selection)
-                ))
+                tui::dim(format!("{target} · {}", describe_selection(selection)))
             ));
             name
         }
@@ -126,39 +95,37 @@ pub async fn run_login(
     };
     let credentials = Credentials { secret };
 
-    // Which role the context acts as: --assume-role / --no-assume-role, else
-    // asked when a human is there, else whatever the context already says.
-    let role = match args.role.choice() {
-        RoleOverride::Keep if interactive => prompt_role(service, &target).await?,
-        role => role,
-    };
-
     let spinner = tui::Spinner::start("Verifying with the platform");
-    match service.login(Some(&target), credentials, role).await {
-        Ok((name, principal, assumed)) => {
-            let acting = match &assumed {
-                Some((role, account)) => format!(
-                    " {} {}",
-                    tui::dim("acting as"),
-                    tui::accent(match account {
-                        Some(account) => format!("{} @ {account}", role.display_name()),
-                        None => role.display_name().to_owned(),
-                    })
-                ),
-                None => String::new(),
+    match service.login(Some(&target), credentials).await {
+        Ok((login, principal)) => {
+            spinner.done(format!("Logged in as {}", describe_principal(&principal)));
+            let derived: Vec<_> = service
+                .list()
+                .await
+                .map_err(context_error)?
+                .into_iter()
+                .filter(|summary| {
+                    summary
+                        .context
+                        .derivation()
+                        .is_some_and(|derivation| derivation.from == login)
+                })
+                .map(|summary| summary.context.name)
+                .collect();
+            let shared = if derived.is_empty() {
+                String::new()
+            } else {
+                format!(", also used by {}", derived.join(", "))
             };
-            spinner.done(format!(
-                "Logged in as {}{acting}",
-                describe_principal(&principal)
-            ));
-            if let Some((_, None)) = &assumed {
-                tui::warning("This role may not read its account: assumed all the same.");
-            }
             if interactive {
                 tui::outro(format!(
-                    "Credentials{} stored for context {}",
-                    if assumed.is_some() { " and role" } else { "" },
-                    tui::accent(&name)
+                    "Credentials stored for context {}{shared}",
+                    tui::accent(&login)
+                ));
+            } else if login != name || !derived.is_empty() {
+                tui::info(format!(
+                    "Credentials stored for context {}{shared}",
+                    tui::accent(&login)
                 ));
             }
             Ok(())
@@ -168,63 +135,6 @@ pub async fn run_login(
             Err(context_error(report))
         }
     }
-}
-
-/// Asks which role the context should act as: the login itself, one of the
-/// context's roles, or another role by URN. Defaults to what the context
-/// already does -- also when that is a role it has no alias for.
-async fn prompt_role(service: &ContextService, target: &ContextOverride) -> Result<RoleOverride> {
-    #[derive(Clone, PartialEq, Eq)]
-    enum Choice {
-        Myself,
-        Alias(String),
-        Urn(String),
-        Other,
-    }
-    let (_, roles, assumed) = service.roles(Some(target)).await.map_err(context_error)?;
-    let mut select = tui::select("Act as")
-        .item(Choice::Myself, "Myself", "the login's own account, no role")
-        .initial_value(match &assumed {
-            Some(role) => match &role.alias {
-                Some(alias) => Choice::Alias(alias.clone()),
-                None => Choice::Urn(role.urn.clone()),
-            },
-            None => Choice::Myself,
-        });
-    if let Some(role) = assumed.as_ref().filter(|role| role.alias.is_none()) {
-        select = select.item(
-            Choice::Urn(role.urn.clone()),
-            &role.urn,
-            "the role it acts as",
-        );
-    }
-    for role in &roles {
-        select = select.item(Choice::Alias(role.alias.clone()), &role.alias, &role.urn);
-    }
-    select = select.item(
-        Choice::Other,
-        "Another role…",
-        "by its URN, e.g. a role of another tenant",
-    );
-    Ok(match select.interact().map_err(prompt_error)? {
-        Choice::Myself => RoleOverride::Drop,
-        Choice::Alias(alias) => RoleOverride::Assume(alias),
-        Choice::Urn(urn) => RoleOverride::Assume(urn),
-        Choice::Other => {
-            let urn: String = tui::input("Role URN")
-                .placeholder("urn:sntns:iam:…:role:…")
-                .validate(|urn: &String| {
-                    if is_role_urn(urn) {
-                        Ok(())
-                    } else {
-                        Err("a role URN looks like urn:…:role:…")
-                    }
-                })
-                .interact()
-                .map_err(prompt_error)?;
-            RoleOverride::Assume(urn)
-        }
-    })
 }
 
 pub async fn run_logout(
@@ -260,19 +170,23 @@ pub async fn run_whoami(
             describe_principal(&principal),
             tui::dim("acting as"),
             tui::accent(match account {
-                Some(account) => format!("{} @ {account}", role.display_name()),
-                None => role.display_name().to_owned(),
+                Some(account) => format!("{} @ {account}", role.short_name()),
+                None => role.short_name().to_owned(),
             })
         ),
         _ => describe_principal(&principal),
     };
     spinner.done(headline);
+    let login = if resolved.login == resolved.name {
+        resolved.credentials.kind().to_string()
+    } else {
+        format!("{}, of {}", resolved.credentials.kind(), resolved.login)
+    };
     let mut body = format!(
-        "context   {} ({})\ngateway   {}\nlogin     {}\nuser      {}",
-        resolved.context.name,
+        "context   {} ({})\ngateway   {}\nlogin     {login}\nuser      {}",
+        resolved.name,
         describe_selection(resolved.selection),
-        resolved.context.endpoint.address,
-        resolved.credentials.kind(),
+        resolved.endpoint.address,
         principal.user_urn,
     );
     if let Some(account) = &principal.account_name {
@@ -302,21 +216,7 @@ async fn first_context(service: &ContextService) -> Result<String> {
         .interact()
         .map_err(prompt_error)?;
     service
-        .create(
-            Context {
-                name: name.clone(),
-                description: None,
-                endpoint: Endpoint {
-                    address,
-                    tls: Tls::default(),
-                },
-                roles: Default::default(),
-                assumed_role: None,
-                login: None,
-            },
-            RoleOverride::Keep,
-            false,
-        )
+        .create(&name, None, Endpoint::new(address), false)
         .await
         .map_err(context_error)?;
     service.use_context(&name).await.map_err(context_error)?;

@@ -14,19 +14,17 @@ async fn lists_devices_with_their_labels() {
         .device_created_at
         .insert("DEV1".into(), "2026-11-02T08:15:00Z".into());
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 
@@ -86,19 +84,17 @@ async fn lists_devices_with_their_labels() {
 async fn removes_a_device() {
     let (gateway, resolved) = TestGateway::serve().await;
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 
@@ -154,19 +150,17 @@ async fn lists_factory_devices_with_and_without_their_device() {
             .insert("DEV3".into(), "2026-10-15T09:00:00Z".into());
     }
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 

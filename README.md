@@ -72,36 +72,33 @@ around an ssh session; `RMRA_NO_UPDATE_CHECK=1` (or
 
 ### Act as a role, e.g. in another tenant
 
-A context is a login *and* the IAM role it acts as -- possibly a role of
-another tenant, which a login may assume when it has the
+A context is either a **login**, which always acts as itself, or a context
+**derived** from a login, in which that login assumes an IAM role --
+possibly a role of another tenant, which a login may assume when it has the
 `iam::assume-role` permission on it and the role's trust policy allows it.
-The role is decided when logging in, and verified with the platform
-together with the credentials: a refused role refuses the login.
+The role is verified with the platform when the context is created.
 
 ```
-rmra login                                    # interactive: also asks "Act as"
-rmra login --assume-role urn:sntns:iam:eu2:<tenant>:role:ops --token-stdin
-rmra login --no-assume-role --token-stdin     # back to the login's own account
+rmra context create eu2 --use && rmra login   # a login: acts as itself
 
-# a base context, declined per role -- e.g. one context per tenant:
-rmra context create eu2 --use && rmra login
-rmra context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops
-rmra context create beta --from eu2 --assume-role urn:sntns:iam:eu2:<other>:role:ops
+# one context per tenant from that one login:
+rmra context create acme --from eu2 --role urn:sntns:iam:eu2:<tenant>:role:ops
+rmra context create beta --from eu2 --role urn:sntns:iam:eu2:<other>:role:ops
 rmra -c acme whoami                           # ada acting as ops @ acme
+rmra context update acme --role urn:sntns:iam:eu2:<tenant>:role:admin
 ```
 
-A declined context (`--from`) takes its base's endpoint and role aliases,
-and shares its login: logging in or out of any context of the group does it
-for all (`context ls` shows `via eu2`), and the base can't be removed while
-declined contexts use it. Its role is verified when it's created.
+A derived context copies nothing: its gateway and credentials are its
+login's at every call, so logging the login in or out does it for all the
+contexts derived from it (`context ls` shows them under their login, `via
+eu2`). Deriving from a derived context derives from its login. A login
+can't be removed while contexts derive from it, unless `context rm --force`
+removes them too.
 
-From then on every call of the context (devices, OTA, `ssh`/`scp`, whose
-channel is opened as the very role the key was certified for) acts in the
-role's account. Roles can also be named and switched without logging in
-again (`rmra context role add <alias> <urn>`, `rmra context role assume
-<alias>`, `rmra context role drop`). The role is always the context's: no
-command takes a role of its own -- for another role, use (or `--from`
-create) another context.
+From then on every call of a derived context (devices, OTA, `ssh`/`scp`,
+whose channel is opened as the very role the key was certified for) acts in
+the role's account. The role is always the context's: no command takes a
+role of its own -- for another role, create another context.
 
 ### Shell completion
 
@@ -147,14 +144,20 @@ rmra context rename staging preprod
 
 `--context`/`-c` comes before the command (`rmra -c eu2 ssh …`), not after
 it. A renamed context keeps its login, its role, its being current, and the
-contexts declined from it.
+contexts derived from it.
 
 Contexts live in `~/.config/rmra` (`%APPDATA%\rmra` on Windows; override
-with `RMRA_CONFIG`): `contexts/<name>/meta.json` for the endpoint,
-`contexts/<name>/credentials.json` (mode 0600) for the login, kept apart so
-`context inspect`/`ls` never print a secret. Credentials are stored in the
-clear for now, like the `sntns` CLI's own configuration; an OS-keyring
-store is planned.
+with `RMRA_CONFIG`): every context in `config.json`, every login's
+credentials in `credentials.json` (mode 0600), kept apart so `context
+inspect`/`ls` never print a secret. Credentials are stored in the clear for
+now, like the `sntns` CLI's own configuration.
+
+Contexts stored by a version before 0.27 (one `contexts/<name>/` directory
+each) are moved to this format by the installers, or else by the first
+command run, which says so: a context that assumed a role becomes derived
+from the login it duplicated (or from its own login, split off as
+`<name>.login`), and the previous files are kept in `backup-v1/`. `rmra
+context migrate --dry-run` shows what it would change.
 
 ### Without a stored context: CI and containers
 
@@ -166,7 +169,7 @@ disk:
 |---|---|
 | `RMRA_TOKEN` | an access key's token — required |
 | `RMRA_ADDRESS` | the gateway, `host[:port]` (or with `http://`/`https://`) — `api.eu2.sntns.io` by default |
-| `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN (there are no aliases) |
+| `RMRA_ASSUME_ROLE` | the role every call assumes: a role URN |
 | `RMRA_PLAINTEXT` | `true` for plain HTTP (local development stacks only) |
 | `RMRA_CA_FILE` | a PEM certificate authority to trust, on top of the system's |
 | `RMRA_SERVER_NAME` | the name to verify the gateway's certificate against |
@@ -181,8 +184,8 @@ It goes by `env` and wins over the current context; `--context` still names
 a stored one over it. `RMRA_ADDRESS` without `RMRA_TOKEN` (or the reverse),
 or `RMRA_CONTEXT` set as well, is a usage error rather than a guess at
 which identity you meant. `context ls` lists it first, marked as from the
-environment; `login`, `logout`, `context create|use|rename|rm` and `context
-role add|rm|assume|drop` refuse to run while it is the one selected (with
+environment; `login`, `logout` and `context create|update|use|rename|rm`
+refuse to run while it is the one selected (with
 `--context`, they work on that stored context as usual). The role is not
 checked up front: a role the token may not assume fails the first call.
 
@@ -548,8 +551,8 @@ result — takes `--format json` for scripts.
 ### Contexts
 
 The same contexts as rmra's, in the same place, with the same commands:
-`remora-etcher login`, `whoami`, `logout`, `context ls|create|use|rename|rm`
-and `context role …`. A context created or logged in with one binary is
+`remora-etcher login`, `whoami`, `logout` and `context
+ls|create|update|use|rename|rm|migrate`. A context created or logged in with one binary is
 usable with the other; `-c`/`RMRA_CONTEXT` select one, before the command.
 
 `RMRA_ADDRESS` and `RMRA_TOKEN` (plus the optional `RMRA_ASSUME_ROLE`,

@@ -50,8 +50,8 @@ enum Commands {
     /// Show whom the selected context is logged in as.
     Whoami(remora_context_application_transport_cli::WhoamiArgs),
 
-    /// Manage contexts: named platform endpoints, docker-context style, and
-    /// the IAM role each acts as.
+    /// Manage contexts, docker-context style: logins to a platform, and
+    /// contexts derived from them that assume an IAM role.
     #[command(subcommand)]
     Context(remora_context_application_transport_cli::Command),
 
@@ -134,6 +134,19 @@ async fn run() {
     let over = over.as_ref();
 
     let services = bootstrap::wire().await;
+
+    // Contexts a previous version stored, moved to the current format
+    // before anything reads them -- said so, except on ssh's terminal
+    // (`channel open` is its ProxyCommand) and where `context migrate`
+    // says it itself. The store does it silently otherwise.
+    if !matches!(
+        options.command,
+        Commands::Channel(_)
+            | Commands::Completion(_)
+            | Commands::Context(remora_context_application_transport_cli::Command::Migrate { .. })
+    ) {
+        remora_context_application_transport_cli::migrate_on_start(&services.context).await;
+    }
 
     // The update notice, after the command: never around a session --
     // `channel open` is ssh's ProxyCommand, its stderr ssh's terminal --

@@ -1,5 +1,5 @@
 //! The values remora-etcher's dynamic completion offers (see
-//! remora-completion): contexts and roles (the same as rmra's), local
+//! remora-completion): contexts (the same as rmra's), local
 //! disks, for the arguments naming a flash target, and releases, for
 //! `flash --release`. Paths complete on their own.
 //!
@@ -18,10 +18,7 @@ const FRESH: Duration = Duration::from_secs(60);
 const PATIENCE: Duration = Duration::from_secs(3);
 
 pub fn provide(kind: Kind) -> Vec<Candidate> {
-    if !matches!(
-        kind,
-        Kind::Disk | Kind::Context | Kind::Role | Kind::Release
-    ) {
+    if !matches!(kind, Kind::Disk | Kind::Context | Kind::Release) {
         return Vec::new();
     }
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -35,11 +32,6 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
         use remora_context_application_transport_cli as context;
         match kind {
             Kind::Context => return context::complete_contexts(&services.context).await,
-            Kind::Role => {
-                use clap::CommandFactory;
-                let over = context::context_on_command_line(crate::Options::command());
-                return context::complete_roles(&services.context, over.as_ref()).await;
-            }
             Kind::Release => return releases(&services).await,
             _ => {}
         }
@@ -82,8 +74,8 @@ async fn releases(services: &bootstrap::Services) -> Vec<Candidate> {
         return Vec::new();
     };
     let scope = match &resolved.role {
-        Some(role) => format!("{}.as-{}", resolved.context.name, role.urn),
-        None => resolved.context.name.clone(),
+        Some(role) => format!("{}.as-{}", resolved.name, role.urn),
+        None => resolved.name.clone(),
     };
     let cache = Cache::new("remora-etcher", &scope, Kind::Release);
     if let Some(cached) = cache.fresh(FRESH) {

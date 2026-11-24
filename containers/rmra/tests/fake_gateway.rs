@@ -352,50 +352,60 @@ async fn login_whoami_and_a_channel_on_stdio() {
          Unavailable: the device went away\r\n"
     );
 
-    // Roles: another tenant's role, remembered, verified, then assumed by
-    // the context -- every command, the ssh ProxyCommand's channel open
-    // included.
+    // Roles: a context derived from the login, assuming another tenant's
+    // role -- verified first, then assumed by every command, the ssh
+    // ProxyCommand's channel open included. A refused role creates nothing.
+    let admin = "urn:sntns:iam:local:other:role:admin";
     let (code, _, stderr) = rmra
         .run(
             &[
-                "context",
-                "role",
-                "add",
-                "ops",
-                "urn:sntns:iam:local:other:role:ops",
-            ],
-            b"",
-        )
-        .await;
-    assert_eq!(code, 0, "{stderr}");
-    let (code, _, stderr) = rmra
-        .run(
-            &[
-                "context",
-                "role",
-                "assume",
-                "urn:sntns:iam:local:other:role:admin",
+                "context", "create", "as-admin", "--from", "local", "--role", admin,
             ],
             b"",
         )
         .await;
     assert_eq!(code, 1);
     assert!(stderr.contains("role permission denied"), "{stderr}");
-    let (code, _, stderr) = rmra.run(&["context", "role", "assume", "ops"], b"").await;
+    let (_, stdout, _) = rmra.run(&["context", "ls", "--quiet"], b"").await;
+    assert!(!stdout.contains("as-admin"), "{stdout}");
+    let (code, _, stderr) = rmra
+        .run(
+            &[
+                "context",
+                "create",
+                "as-ops",
+                "--from",
+                "local",
+                "--assume-role",
+                OPS_ROLE,
+            ],
+            b"",
+        )
+        .await;
     assert_eq!(code, 0, "{stderr}");
-    assert!(stderr.contains("other"), "{stderr}");
+    assert!(stderr.contains("acting as ops @ other"), "{stderr}");
 
-    let (code, _, stderr) = rmra.run(&["whoami"], b"").await;
+    let (code, _, stderr) = rmra.run(&["-c", "as-ops", "whoami"], b"").await;
     assert_eq!(code, 0, "{stderr}");
     assert!(
         stderr.contains("acting as") && stderr.contains("ops @ other"),
         "{stderr}"
     );
-    let (_, stdout, _) = rmra.run(&["context", "inspect"], b"").await;
-    assert!(stdout.contains("\"assumedRole\": \"ops\""), "{stdout}");
+    let (_, stdout, _) = rmra.run(&["context", "inspect", "as-ops"], b"").await;
+    assert!(stdout.contains("\"from\": \"local\""), "{stdout}");
+    assert!(stdout.contains(OPS_ROLE), "{stdout}");
+    assert!(!stdout.contains("endpoint"), "nothing copied: {stdout}");
+    let (_, stdout, _) = rmra.run(&["context", "ls"], b"").await;
+    assert!(
+        stdout.contains("└ as-ops") && stdout.contains("via local"),
+        "{stdout}"
+    );
 
     let (code, stdout, stderr) = rmra
-        .run(&["channel", "open", "OTHERDEV", "--quiet"], b"as the role")
+        .run(
+            &["-c", "as-ops", "channel", "open", "OTHERDEV", "--quiet"],
+            b"as the role",
+        )
         .await;
     assert_eq!((code, stdout.as_str()), (0, "elor eht sa"), "{stderr}");
     // The role is the context's, never a command's; the context is chosen
@@ -408,135 +418,33 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .await;
     assert_eq!(code, 2);
     let (code, _, _) = rmra
-        .run(&["channel", "open", "OTHERDEV", "-c", "local"], b"")
+        .run(&["channel", "open", "OTHERDEV", "-c", "as-ops"], b"")
         .await;
     assert_eq!(code, 2);
-
-    let (code, _, _) = rmra.run(&["context", "role", "drop"], b"").await;
-    assert_eq!(code, 0);
+    // Nor is it the login's: that one acts as itself, always.
+    let (code, _, _) = rmra
+        .run(&["login", "--assume-role", OPS_ROLE, "--token-stdin"], b"")
+        .await;
+    assert_eq!(code, 2);
+    let (code, _, stderr) = rmra
+        .run(&["context", "update", "local", "--role", OPS_ROLE], b"")
+        .await;
+    assert_eq!(code, 1);
+    assert!(stderr.contains("logs in as itself"), "{stderr}");
     let (code, _, stderr) = rmra
         .run(&["channel", "open", "OTHERDEV", "--quiet"], b"")
         .await;
     assert_eq!(code, 255);
     assert!(stderr.contains("device not found"), "{stderr}");
 
-    // The role as part of the context, decided at login: a context created
-    // to act as another tenant's role, verified when it logs in; a refused
-    // role refuses the whole login and changes nothing.
+    // A refused new role changes nothing.
     let (code, _, stderr) = rmra
-        .run(
-            &[
-                "context",
-                "create",
-                "other-ops",
-                "--address",
-                &address,
-                "--plaintext",
-                "--assume-role",
-                OPS_ROLE,
-            ],
-            b"",
-        )
-        .await;
-    assert_eq!(code, 0, "{stderr}");
-    let login = format!("{TOKEN}\n");
-    let (code, _, stderr) = rmra
-        .run(
-            &["-c", "other-ops", "login", "--token-stdin"],
-            login.as_bytes(),
-        )
-        .await;
-    assert_eq!(code, 0, "{stderr}");
-    assert!(
-        stderr.contains("acting as") && stderr.contains("@ other"),
-        "{stderr}"
-    );
-    let (code, _, stderr) = rmra
-        .run(
-            &[
-                "-c",
-                "other-ops",
-                "login",
-                "--assume-role",
-                "urn:sntns:iam:local:other:role:admin",
-                "--token-stdin",
-            ],
-            login.as_bytes(),
-        )
+        .run(&["context", "update", "as-ops", "--role", admin], b"")
         .await;
     assert_eq!(code, 1);
     assert!(stderr.contains("role permission denied"), "{stderr}");
-    let (_, stdout, _) = rmra
-        .run(&["-c", "other-ops", "context", "inspect"], b"")
-        .await;
-    assert!(
-        stdout.contains(OPS_ROLE),
-        "a refused login changed the role: {stdout}"
-    );
-    let (code, _, stderr) = rmra
-        .run(
-            &[
-                "-c",
-                "other-ops",
-                "login",
-                "--no-assume-role",
-                "--token-stdin",
-            ],
-            login.as_bytes(),
-        )
-        .await;
-    assert_eq!(code, 0, "{stderr}");
-    let (_, stdout, _) = rmra
-        .run(&["-c", "other-ops", "context", "inspect"], b"")
-        .await;
-    assert!(!stdout.contains("assumedRole"), "{stdout}");
-
-    // A base context declined per role: `context create --from`, sharing
-    // the base's single login; a refused role creates nothing.
-    let (code, _, stderr) = rmra
-        .run(
-            &[
-                "context",
-                "create",
-                "as-admin",
-                "--from",
-                "local",
-                "--assume-role",
-                "urn:sntns:iam:local:other:role:admin",
-            ],
-            b"",
-        )
-        .await;
-    assert_eq!(code, 1);
-    assert!(stderr.contains("role permission denied"), "{stderr}");
-    let (code, _, stderr) = rmra
-        .run(
-            &[
-                "context",
-                "create",
-                "as-ops",
-                "--from",
-                "local",
-                "--assume-role",
-                "ops",
-            ],
-            b"",
-        )
-        .await;
-    assert_eq!(code, 0, "{stderr}");
-    assert!(
-        stderr.contains("acting as") && stderr.contains("@ other"),
-        "{stderr}"
-    );
-    let (code, stdout, stderr) = rmra
-        .run(
-            &["-c", "as-ops", "channel", "open", "OTHERDEV", "--quiet"],
-            b"declined",
-        )
-        .await;
-    assert_eq!((code, stdout.as_str()), (0, "denilced"), "{stderr}");
-    let (_, stdout, _) = rmra.run(&["context", "ls"], b"").await;
-    assert!(stdout.contains("via local"), "{stdout}");
+    let (_, stdout, _) = rmra.run(&["context", "inspect", "as-ops"], b"").await;
+    assert!(stdout.contains(OPS_ROLE), "{stdout}");
 
     // Renamed, it keeps its login and role.
     let (code, _, stderr) = rmra
@@ -551,10 +459,15 @@ async fn login_whoami_and_a_channel_on_stdio() {
         .await;
     assert_eq!((code, stdout.as_str()), (0, "demaner"), "{stderr}");
 
-    let (code, _, stderr) = rmra.run(&["context", "rm", "-f", "local"], b"").await;
+    // The login can't go while a context derives from it, unless --force
+    // takes them all.
+    let (code, _, stderr) = rmra.run(&["context", "rm", "local"], b"").await;
     assert_eq!(code, 1);
-    assert!(stderr.contains("tenant-ops"), "{stderr}");
-    let (code, _, _) = rmra.run(&["context", "rm", "-f", "tenant-ops"], b"").await;
+    assert!(
+        stderr.contains("tenant-ops") && stderr.contains("context rm --force local"),
+        "{stderr}"
+    );
+    let (code, _, _) = rmra.run(&["context", "rm", "tenant-ops"], b"").await;
     assert_eq!(code, 0);
 
     let (code, _, _) = rmra.run(&["logout"], b"").await;
@@ -658,7 +571,7 @@ async fn a_context_defined_by_the_environment() {
     for args in [
         &["login", "--token-stdin"][..],
         &["logout"],
-        &["context", "role", "drop"],
+        &["context", "update", "--description", "x"],
         &["context", "create", "x", "--address", "a:1"],
     ] {
         let (code, _, stderr) = rmra.run_with(args, &env, b"token\n").await;
@@ -909,4 +822,63 @@ async fn the_console_answers_the_login_challenge() {
         .unwrap();
     assert!(status.success());
     drop((master, terminal));
+}
+
+/// Contexts a previous version stored -- one directory each, a copy of a
+/// login assuming a role -- moved to the current format by the first
+/// command, which says so, keeping a backup; derived from the login they
+/// copied, their copy of its credentials gone.
+#[tokio::test]
+async fn contexts_of_a_previous_version_are_migrated_on_first_use() {
+    let rmra = Rmra {
+        config: tempfile::tempdir().unwrap(),
+    };
+    let root = rmra.config.path();
+    let token = format!(r#"{{"kind":"access-key","token":"{TOKEN}"}}"#);
+    for (name, meta) in [
+        (
+            "eu2",
+            r#"{"name":"eu2","endpoint":{"address":"api.example"}}"#.to_owned(),
+        ),
+        (
+            "eu2-ops",
+            format!(
+                r#"{{"name":"eu2","endpoint":{{"address":"https://api.example"}},"assumedRole":"{OPS_ROLE}"}}"#
+            ),
+        ),
+    ] {
+        let dir = root.join("contexts").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("meta.json"), meta).unwrap();
+        std::fs::write(dir.join("credentials.json"), &token).unwrap();
+    }
+    std::fs::write(root.join("config.json"), r#"{"currentContext":"eu2-ops"}"#).unwrap();
+
+    let (code, _, stderr) = rmra.run(&["context", "migrate", "--dry-run"], b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.contains("eu2-ops: derives from eu2"), "{stderr}");
+    assert!(
+        root.join("contexts").exists(),
+        "a dry run changed something"
+    );
+
+    let (code, stdout, stderr) = rmra.run(&["context", "ls"], b"").await;
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("Contexts moved to the current format"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("backup-v1"), "{stderr}");
+    assert!(stdout.contains("└ eu2-ops *"), "{stdout}");
+    assert!(root.join("backup-v1/contexts/eu2-ops/meta.json").exists());
+    assert!(!root.join("contexts").exists());
+    let credentials = std::fs::read_to_string(root.join("credentials.json")).unwrap();
+    assert_eq!(credentials.matches(TOKEN).count(), 1, "{credentials}");
+
+    // Once only.
+    let (_, _, stderr) = rmra.run(&["context", "ls"], b"").await;
+    assert!(!stderr.contains("current format"), "{stderr}");
+    let (code, _, stderr) = rmra.run(&["context", "migrate"], b"").await;
+    assert_eq!(code, 0);
+    assert!(stderr.contains("already in the current format"), "{stderr}");
 }

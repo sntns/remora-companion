@@ -930,7 +930,7 @@ mod tests {
             store::ContextStoreAdapterService,
         },
         application::ContextServiceInterface,
-        model::{Context, Credentials, Principal},
+        model::{Credentials, Endpoint, Principal},
     };
     use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
     use remora_context_application::ContextControllerImpl;
@@ -952,7 +952,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PlatformSessionAdapter for Platform {
-        async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
+        async fn whoami(&self, _: &Endpoint, _: &Credentials) -> platform::Result<Principal> {
             Ok(Principal {
                 user_urn: "urn:user:ada".into(),
                 user_name: "ada".into(),
@@ -962,7 +962,7 @@ mod tests {
 
         async fn acting_account(
             &self,
-            _: &Context,
+            _: &Endpoint,
             _: &Credentials,
             _: &str,
         ) -> platform::Result<Option<String>> {
@@ -1044,19 +1044,11 @@ mod tests {
             PlatformSessionAdapterService::new(Platform),
         );
         contexts
-            .create(
-                resolved.context.clone(),
-                remora_context::model::RoleOverride::Keep,
-                false,
-            )
+            .create(&resolved.name, None, resolved.endpoint.clone(), false)
             .await
             .unwrap();
         contexts
-            .login(
-                None,
-                resolved.credentials.clone(),
-                remora_context::model::RoleOverride::Keep,
-            )
+            .login(None, resolved.credentials.clone())
             .await
             .unwrap();
         let contexts = ContextService::new(contexts);

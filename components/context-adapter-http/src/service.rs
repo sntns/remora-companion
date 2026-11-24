@@ -1,7 +1,7 @@
 use error_stack::{Report, ResultExt};
 use remora_context::{
     adapter::platform::{Error, PlatformSessionAdapter, Result},
-    model::{Context, Credentials, Principal},
+    model::{Credentials, Endpoint, Principal},
 };
 use remora_platform_http::{model, status_summary, Code, Connection, Gateway, Status};
 
@@ -13,10 +13,10 @@ pub struct PlatformSessionAdapterImpl;
 
 #[async_trait::async_trait]
 impl PlatformSessionAdapter for PlatformSessionAdapterImpl {
-    async fn whoami(&self, context: &Context, credentials: &Credentials) -> Result<Principal> {
+    async fn whoami(&self, endpoint: &Endpoint, credentials: &Credentials) -> Result<Principal> {
         // As the login itself, never a role: the current user describes
         // the principal, and an assumed role's principal is no user.
-        let gateway = Gateway::new(&Connection::for_context(context, Some(credentials), None))
+        let gateway = Gateway::new(&Connection::for_endpoint(endpoint, Some(credentials), None))
             .await
             .change_context(Error::Unreachable)?;
 
@@ -46,12 +46,12 @@ impl PlatformSessionAdapter for PlatformSessionAdapterImpl {
 
     async fn acting_account(
         &self,
-        context: &Context,
+        endpoint: &Endpoint,
         credentials: &Credentials,
         role: &str,
     ) -> Result<Option<String>> {
-        let gateway = Gateway::new(&Connection::for_context(
-            context,
+        let gateway = Gateway::new(&Connection::for_endpoint(
+            endpoint,
             Some(credentials),
             Some(role),
         ))
@@ -175,20 +175,13 @@ mod tests {
         .await
     }
 
-    fn context(address: String) -> Context {
-        Context {
-            name: "local".into(),
-            description: None,
-            endpoint: Endpoint {
-                address,
-                tls: Tls {
-                    disabled: true,
-                    ..Tls::default()
-                },
+    fn context(address: String) -> Endpoint {
+        Endpoint {
+            address,
+            tls: Tls {
+                disabled: true,
+                ..Tls::default()
             },
-            roles: Default::default(),
-            assumed_role: None,
-            login: None,
         }
     }
 

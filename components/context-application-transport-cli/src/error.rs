@@ -59,9 +59,16 @@ pub fn hint<C>(report: &Report<C>, program: &str) -> Option<String> {
             "unset {ADDRESS_ENV} and {TOKEN_ENV} to use the stored contexts, or name one with \
              `{program} --context <name> …`"
         ),
-        ContextError::UnknownRole(alias) => format!(
-            "add it with `{program} context role add {alias} <role-urn>`, or give the role's URN"
+        ContextError::InUse(login, _) => {
+            format!("remove them first, or all at once with `{program} context rm --force {login}`")
+        }
+        ContextError::NotDerived(login) => format!(
+            "derive a context acting as a role with \
+             `{program} context create <name> --from {login} --role <role-urn>`"
         ),
+        ContextError::NoEndpoint(_, login) => {
+            format!("change it with `{program} context update {login} --address …`")
+        }
         _ => return None,
     })
 }

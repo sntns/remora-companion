@@ -1,11 +1,11 @@
 use super::error::Result;
-use crate::model::{Context, Credentials, Principal};
+use crate::model::{Credentials, Endpoint, Principal};
 
 /// The platform's view of a set of credentials: whom they authenticate as.
 /// What `rmra login` checks before storing anything, and `rmra whoami`.
 #[async_trait::async_trait]
 pub trait PlatformSessionAdapter: Send + Sync {
-    async fn whoami(&self, context: &Context, credentials: &Credentials) -> Result<Principal>;
+    async fn whoami(&self, endpoint: &Endpoint, credentials: &Credentials) -> Result<Principal>;
 
     /// Assumes `role` (a role URN) as the login, and says which account
     /// that acts in: `Some(name)`, or `None` when the role may not read its
@@ -14,7 +14,7 @@ pub trait PlatformSessionAdapter: Send + Sync {
     /// role's trust policy doesn't allow it).
     async fn acting_account(
         &self,
-        context: &Context,
+        endpoint: &Endpoint,
         credentials: &Credentials,
         role: &str,
     ) -> Result<Option<String>>;

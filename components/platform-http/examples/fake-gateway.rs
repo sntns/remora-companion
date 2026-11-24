@@ -12,7 +12,7 @@ async fn main() {
     println!(
         "rmra context create fake --address {} --plaintext --use \
          && echo t | rmra login --token-stdin",
-        context.context.endpoint.address
+        context.endpoint.address
     );
     tokio::signal::ctrl_c().await.unwrap();
 }

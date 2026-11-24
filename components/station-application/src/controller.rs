@@ -1157,7 +1157,7 @@ impl StationServiceInterface for StationControllerImpl {
         let mut state = shared.state.lock().await;
         replay(&mut state, entries);
         let summary = StationSummary {
-            context: resolved.context.name.clone(),
+            context: resolved.name.clone(),
             restored: state.claims.len(),
             awaiting_label: state.queue.len(),
             tick: (config.presence_timeout / 4)
@@ -1166,7 +1166,7 @@ impl StationServiceInterface for StationControllerImpl {
         let (journal, writes) = mpsc::unbounded_channel();
         let running = Running {
             over,
-            context: resolved.context.name,
+            context: resolved.name,
             journal,
             config,
         };

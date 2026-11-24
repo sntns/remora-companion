@@ -4,7 +4,7 @@ use remora_completion::Candidate;
 use remora_context::{
     application::ContextService,
     model::{
-        is_role_urn, Context, ContextOverride, Credentials, DefinedContext, Endpoint, Secret,
+        is_role_urn, ContextKind, ContextOverride, Credentials, DefinedContext, Endpoint, Secret,
         Selection, Tls,
     },
 };
@@ -104,12 +104,10 @@ fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedCon
         };
     };
     let address = vars(ADDRESS_ENV).unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
-    // Its role can only be a URN: an alias needs a stored context's roles.
-    let assumed_role = vars(ASSUME_ROLE_ENV);
-    if let Some(role) = assumed_role.as_deref().filter(|role| !is_role_urn(role)) {
+    let role = vars(ASSUME_ROLE_ENV);
+    if let Some(role) = role.as_deref().filter(|role| !is_role_urn(role)) {
         return Err(usage(format!(
-            "{ASSUME_ROLE_ENV} must be a role URN (urn:…:role:…), not {role:?}: \
-             a context defined by the environment has no role aliases"
+            "{ASSUME_ROLE_ENV} must be a role URN (urn:…:role:…), not {role:?}"
         )));
     }
     let disabled = match vars(PLAINTEXT_ENV).map(|value| value.to_ascii_lowercase()) {
@@ -128,24 +126,19 @@ fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedCon
         authorities.push(std::fs::read_to_string(&path).change_context(Error::ReadFile(path))?);
     }
     Ok(Some(DefinedContext {
-        context: Context {
-            name: DEFINED_NAME.to_owned(),
-            description: None,
-            endpoint: Endpoint {
-                address,
-                tls: Tls {
-                    disabled,
-                    authorities,
-                    server_name: vars(SERVER_NAME_ENV),
-                },
+        name: DEFINED_NAME.to_owned(),
+        endpoint: Endpoint {
+            address,
+            tls: Tls {
+                disabled,
+                authorities,
+                server_name: vars(SERVER_NAME_ENV),
             },
-            roles: Default::default(),
-            assumed_role,
-            login: None,
         },
         credentials: Credentials {
             secret: Secret::AccessKey { token },
         },
+        role,
     }))
 }
 
@@ -187,31 +180,18 @@ pub async fn complete_contexts(service: &ContextService) -> Vec<Candidate> {
         .unwrap_or_default()
         .into_iter()
         .map(|summary| {
-            let mut help = summary.context.endpoint.address.clone();
+            let mut help = match &summary.context.kind {
+                ContextKind::Login { endpoint } => endpoint.address.clone(),
+                ContextKind::Derived(derivation) => format!(
+                    "{} as {}",
+                    derivation.from,
+                    remora_context::model::short_role_name(&derivation.role)
+                ),
+            };
             if summary.current {
                 help.push_str(" (current)");
             }
             Candidate::new(summary.context.name).help(help)
-        })
-        .collect()
-}
-
-/// Completion values: the selected context's role aliases.
-pub async fn complete_roles(
-    service: &ContextService,
-    over: Option<&ContextOverride>,
-) -> Vec<Candidate> {
-    let Ok((_, roles, _)) = service.roles(over).await else {
-        return Vec::new();
-    };
-    roles
-        .into_iter()
-        .map(|role| {
-            let mut help = role.urn;
-            if role.assumed {
-                help.push_str(" (assumed)");
-            }
-            Candidate::new(role.alias).help(help)
         })
         .collect()
 }
@@ -301,18 +281,12 @@ mod tests {
             (DEFINED_NAME, Selection::Defined)
         );
         let defined = over.defined.unwrap();
-        let context = &defined.context;
-        assert_eq!(context.endpoint.address, "gateway:50051");
-        assert_eq!(context.assumed_role.as_deref(), Some(role));
-        assert!(context.endpoint.tls.disabled);
-        assert_eq!(
-            context.endpoint.tls.authorities,
-            ["-----BEGIN CERTIFICATE-----\n"]
-        );
-        assert_eq!(
-            context.endpoint.tls.server_name.as_deref(),
-            Some("api.example")
-        );
+        let endpoint = &defined.endpoint;
+        assert_eq!(endpoint.address, "gateway:50051");
+        assert_eq!(defined.role.as_deref(), Some(role));
+        assert!(endpoint.tls.disabled);
+        assert_eq!(endpoint.tls.authorities, ["-----BEGIN CERTIFICATE-----\n"]);
+        assert_eq!(endpoint.tls.server_name.as_deref(), Some("api.example"));
         assert!(
             matches!(&defined.credentials.secret, Secret::AccessKey { token } if token == "s3cret")
         );
@@ -324,7 +298,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            token_only.defined.unwrap().context.endpoint.address,
+            token_only.defined.unwrap().endpoint.address,
             DEFAULT_ADDRESS
         );
 
@@ -349,7 +323,7 @@ mod tests {
             env.push((name, value));
             usage_of(choose(None, vars(&env)))
         };
-        assert!(with(ASSUME_ROLE_ENV, "ops").contains("no role aliases"));
+        assert!(with(ASSUME_ROLE_ENV, "ops").contains("role URN"));
         assert!(with(PLAINTEXT_ENV, "maybe").contains("true or false"));
         let missing = choose(
             None,

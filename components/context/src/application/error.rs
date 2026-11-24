@@ -17,16 +17,16 @@ pub enum Error {
     NotLoggedIn(String),
     #[error("failed to verify the credentials with the platform")]
     Verify,
-    #[error("no role {0:?} in this context")]
-    UnknownRole(String),
     #[error("{0:?} is not a role URN (urn:…:role:…)")]
     InvalidRoleUrn(String),
-    #[error("role alias {0:?} already exists")]
-    RoleExists(String),
     #[error("failed to assume role {0}")]
     Assume(String),
-    #[error("contexts {1} use the login of {0:?}: remove them first")]
+    #[error("contexts {1} derive from {0:?}")]
     InUse(String, String),
+    #[error("context {0:?} logs in as itself: it has no role to change")]
+    NotDerived(String),
+    #[error("context {0:?} derives from {1:?}, whose endpoint it uses: change that one's")]
+    NoEndpoint(String, String),
     #[error("context {0:?} is defined for this run only, not stored: there is nothing to change")]
     Defined(String),
     #[error("failed to access the context store")]

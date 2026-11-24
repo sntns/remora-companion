@@ -301,7 +301,7 @@ fn image_lines(
                 remora_tui::accent(&artifact.release)
             );
             if let Some(remote) = remote {
-                let mut context = format!("context {}", remote.context.name);
+                let mut context = format!("context {}", remote.name);
                 if let Some(role) = &remote.role {
                     context.push_str(&format!(" as {}", role.display_name()));
                 }
