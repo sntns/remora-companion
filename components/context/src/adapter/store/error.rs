@@ -6,6 +6,10 @@ pub enum Error {
     Write(std::path::PathBuf),
     #[error("{0} is not a valid context file")]
     Parse(std::path::PathBuf),
+    #[error("failed to lock {0}")]
+    Lock(std::path::PathBuf),
+    #[error("failed to migrate the contexts stored in {0}")]
+    Migrate(std::path::PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, error_stack::Report<Error>>;

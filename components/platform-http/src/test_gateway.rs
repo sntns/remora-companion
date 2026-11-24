@@ -38,9 +38,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use remora_context::model::{
-    Context, Credentials, Endpoint, ResolvedContext, Secret, Selection, Tls,
-};
+use remora_context::model::{Credentials, Endpoint, ResolvedContext, Secret, Selection, Tls};
 
 use crate::{
     model::{self, artifact_upload, channel, Labels, ResourceReference},
@@ -132,19 +130,14 @@ pub async fn serve_router(router: Router) -> String {
 /// A context for a gateway at `address`: plaintext, an access key.
 pub fn context(address: String, token: &str) -> ResolvedContext {
     ResolvedContext {
-        context: Context {
-            name: "test".into(),
-            description: None,
-            endpoint: Endpoint {
-                address,
-                tls: Tls {
-                    disabled: true,
-                    ..Tls::default()
-                },
+        name: "test".into(),
+        login: "test".into(),
+        endpoint: Endpoint {
+            address,
+            tls: Tls {
+                disabled: true,
+                ..Tls::default()
             },
-            roles: Default::default(),
-            assumed_role: None,
-            login: None,
         },
         credentials: Credentials {
             secret: Secret::AccessKey {

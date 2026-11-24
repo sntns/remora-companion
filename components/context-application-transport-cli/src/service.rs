@@ -1,16 +1,16 @@
-use std::path::PathBuf;
-
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use remora_context::{
-    application::ContextService,
-    model::{Context, ContextOverride, ContextSummary, DefinedContext, Endpoint, Selection, Tls},
+    application::{ContextService, Error as ContextError},
+    model::{
+        describe_role, short_role_name, Context, ContextKind, ContextOverride, ContextSummary,
+        ContextUpdate, DefinedContext, Endpoint, Selection, Tls,
+    },
 };
 use remora_tui as tui;
 use serde::Serialize;
 
 use crate::{
     error::{context_error, prompt_error, Error, Result},
-    login::RoleArgs,
     selection::TOKEN_ENV,
 };
 
@@ -19,7 +19,8 @@ pub const DEFAULT_ADDRESS: &str = "api.eu2.sntns.io";
 
 #[derive(clap::Subcommand)]
 pub enum Command {
-    /// List contexts; the current one is marked with `*`.
+    /// List contexts, each login followed by the contexts derived from it;
+    /// the current one is marked with `*`.
     #[command(visible_alias = "ls")]
     List {
         /// `table` for humans, `json` for scripts.
@@ -30,19 +31,25 @@ pub enum Command {
         quiet: bool,
     },
 
-    /// Create a context: a named gateway endpoint to log in to.
+    /// Create a context: a login to a gateway, which acts as itself, or,
+    /// with --from, a login's role.
     #[command(after_help = "Examples:\n  \
         context create eu2 --use, then login\n  \
         context create acme --from eu2 --assume-role urn:sntns:iam:eu2:<tenant>:role:ops")]
     Create {
         name: String,
-        /// Decline an existing, logged-in context: its endpoint and role
-        /// aliases, and its login itself -- shared, so logging in or out of
-        /// either does it for both. With --assume-role, one context per role
-        /// (e.g. per tenant) from one login; the role is verified now.
-        #[arg(long, value_name = "CONTEXT", conflicts_with_all = ["address", "plaintext", "ca_files", "server_name"])]
+        /// Derive it from a logged-in context: that context's login (its
+        /// own, or the one it derives from) assuming --assume-role -- e.g. one
+        /// context per tenant from one login. Nothing is copied: logging
+        /// the login in or out does it for both.
+        #[arg(long, value_name = "CONTEXT", requires = "assume_role")]
+        #[arg(conflicts_with_all = ["address", "plaintext", "server_name"])]
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
         from: Option<String>,
+        /// With --from: the IAM role its calls assume, a URN, possibly of
+        /// another tenant. Verified with the platform now.
+        #[arg(long, value_name = "ROLE-URN", requires = "from")]
+        assume_role: Option<String>,
         /// The gateway, `host[:port]` or a URL (default: api.eu2.sntns.io).
         #[arg(long)]
         address: Option<String>,
@@ -51,23 +58,44 @@ pub enum Command {
         /// Talk plain HTTP (local development stacks only).
         #[arg(long)]
         plaintext: bool,
-        /// A PEM certificate authority to trust for this gateway, on top of
-        /// the system's; repeatable.
-        #[arg(long = "ca-file", value_name = "PEM")]
-        #[arg(value_hint = clap::ValueHint::FilePath)]
-        ca_files: Vec<PathBuf>,
         /// Verify the gateway's certificate against this name instead of
         /// the address's host.
         #[arg(long)]
         server_name: Option<String>,
-        /// Replace an existing context of that name (its login is kept).
+        /// Replace an existing context of that name (a login keeps its
+        /// credentials and the contexts derived from it).
         #[arg(long)]
         force: bool,
         /// Also make it the current context.
         #[arg(long = "use")]
         make_current: bool,
-        #[command(flatten)]
-        role: RoleArgs,
+    },
+
+    /// Change a context's settings (default: the selected context): a
+    /// login's gateway, a derived context's role.
+    Update {
+        #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
+        name: Option<String>,
+        /// A new description; an empty one removes it.
+        #[arg(long)]
+        description: Option<String>,
+        /// A derived context's new IAM role, a URN: verified with the
+        /// platform.
+        #[arg(long, value_name = "ROLE-URN")]
+        assume_role: Option<String>,
+        /// A login's new gateway, `host[:port]` or a URL.
+        #[arg(long)]
+        address: Option<String>,
+        /// Make a login talk plain HTTP (local development stacks only).
+        #[arg(long, conflicts_with = "no_plaintext")]
+        plaintext: bool,
+        /// Make a login talk HTTPS again.
+        #[arg(long)]
+        no_plaintext: bool,
+        /// The name to verify a login's gateway certificate against; an
+        /// empty one: the address's host.
+        #[arg(long)]
+        server_name: Option<String>,
     },
 
     /// Show contexts' settings as JSON (default: the selected context).
@@ -90,11 +118,14 @@ pub enum Command {
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
+        yes: bool,
+        /// Remove a login with the contexts derived from it, without asking.
+        #[arg(short, long)]
         force: bool,
     },
 
-    /// Rename a context; its login, the contexts declined from it, and
-    /// its being current follow.
+    /// Rename a context; its login, the contexts derived from it, and its
+    /// being current follow.
     #[command(visible_alias = "mv")]
     Rename {
         #[arg(add = remora_completion::values(remora_completion::Kind::Context))]
@@ -105,10 +136,14 @@ pub enum Command {
     /// Print the selected context's name.
     Show,
 
-    /// Manage the IAM roles the selected context's login may assume, e.g.
-    /// in another tenant, and which one it acts as.
-    #[command(subcommand)]
-    Role(crate::role::Command),
+    /// Bring contexts stored by a previous version to the current format.
+    /// Done on its own on first use and by the installers; a backup of the
+    /// previous files is kept.
+    Migrate {
+        /// Only say what would change.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -131,6 +166,7 @@ pub async fn run(
     if matches!(
         command,
         Command::Create { .. }
+            | Command::Update { name: None, .. }
             | Command::Use { .. }
             | Command::Remove { .. }
             | Command::Rename { .. }
@@ -141,101 +177,75 @@ pub async fn run(
         Command::List { format, quiet } => list(service, over, format, quiet, program).await,
         Command::Create {
             name,
-            from: Some(base),
+            from: Some(source),
+            assume_role: Some(role),
             description,
             force,
             make_current,
-            role,
             ..
         } => {
-            let role = role.choice();
             let spinner = tui::Spinner::start(format!(
-                "Declining {} into {}",
-                tui::accent(&base),
-                tui::accent(&name)
+                "Assuming {} with the login of {}",
+                tui::accent(short_role_name(&role)),
+                tui::accent(&source)
             ));
-            let (principal, assumed) =
-                match service.derive(&base, &name, description, role, force).await {
-                    Ok(done) => done,
-                    Err(report) => {
-                        spinner.fail(format!("Could not create {}", tui::accent(&name)));
-                        return Err(context_error(report));
-                    }
-                };
-            let acting = match &assumed {
-                Some((role, account)) => format!(
-                    "acting as {}",
-                    tui::accent(match account {
-                        Some(account) => format!("{} @ {account}", role.display_name()),
-                        None => role.display_name().to_owned(),
-                    })
-                ),
-                None => "as the login itself".to_owned(),
+            let (principal, role) = match service
+                .derive(&source, &name, description, &role, force)
+                .await
+            {
+                Ok(done) => done,
+                Err(report) => {
+                    spinner.fail(format!("Could not create {}", tui::accent(&name)));
+                    return Err(context_error(report));
+                }
             };
             spinner.done(format!(
-                "Created context {} from {} {}",
+                "Created context {} {}",
                 tui::accent(&name),
-                tui::accent(&base),
                 tui::dim(format!(
-                    "· {} {acting}",
-                    if principal.user_name.is_empty() {
-                        principal.user_urn.clone()
-                    } else {
-                        principal.user_name.clone()
-                    }
+                    "· {} acting as {}",
+                    describe_user(&principal),
+                    role.display_name()
                 ))
             ));
+            if role.account.is_none() {
+                tui::warning("This role may not read its account: assumed all the same.");
+            }
             if make_current {
                 service.use_context(&name).await.map_err(context_error)?;
                 tui::info(format!("Now using {}", tui::accent(&name)));
             }
             Ok(())
         }
+        Command::Create { from: Some(_), .. }
+        | Command::Create {
+            assume_role: Some(_),
+            ..
+        } => {
+            unreachable!("clap requires --from and --assume-role together")
+        }
         Command::Create {
             name,
-            from: None,
             address,
             description,
             plaintext,
-            ca_files,
             server_name,
             force,
             make_current,
-            role,
+            ..
         } => {
-            let address = address.unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
-            let mut authorities = Vec::new();
-            for path in ca_files {
-                authorities
-                    .push(std::fs::read_to_string(&path).change_context(Error::ReadFile(path))?);
-            }
-            let context = Context {
-                name: name.clone(),
-                description,
-                endpoint: Endpoint {
-                    address,
-                    tls: Tls {
-                        disabled: plaintext,
-                        authorities,
-                        server_name,
-                    },
+            let endpoint = Endpoint {
+                address: address.unwrap_or_else(|| DEFAULT_ADDRESS.to_owned()),
+                tls: Tls {
+                    disabled: plaintext,
+                    server_name,
                 },
-                roles: Default::default(),
-                // Settled by the service, from `role` and what it replaces.
-                assumed_role: None,
-                login: None,
             };
-            let address = context.endpoint.address.clone();
+            let address = endpoint.address.clone();
             service
-                .create(context, role.choice(), force)
+                .create(&name, description, endpoint, force)
                 .await
                 .map_err(context_error)?;
-            let role = service
-                .inspect(&name)
-                .await
-                .map_err(context_error)?
-                .context
-                .assumed_role;
             if make_current {
                 service.use_context(&name).await.map_err(context_error)?;
             }
@@ -244,17 +254,71 @@ pub async fn run(
                 tui::accent(&name),
                 tui::dim(format!("→ {address}"))
             ));
-            if let Some(role) = role {
-                tui::info(format!("It acts as role {}", tui::accent(role)));
-            }
             if make_current {
                 tui::info(format!("Now using {}", tui::accent(&name)));
             }
-            tui::step(format!(
-                "Log in with {}",
-                tui::accent(login_hint(program, &name, make_current))
-            ));
+            let logged_in = service
+                .inspect(&name)
+                .await
+                .map_err(context_error)?
+                .credentials
+                .is_some();
+            if !logged_in {
+                tui::step(format!(
+                    "Log in with {}",
+                    tui::accent(login_hint(program, &name, make_current))
+                ));
+            }
             Ok(())
+        }
+        Command::Update {
+            name,
+            description,
+            assume_role,
+            address,
+            plaintext,
+            no_plaintext,
+            server_name,
+        } => {
+            let name = match name {
+                Some(name) => name,
+                None => selected_name(service, over).await?,
+            };
+            let update = ContextUpdate {
+                description,
+                address,
+                plaintext: (plaintext || no_plaintext).then_some(plaintext),
+                server_name,
+                role: assume_role,
+            };
+            if update == ContextUpdate::default() {
+                return Err(Report::new(Error::Usage(
+                    "nothing to change: pass a setting to update (see --help)".into(),
+                )));
+            }
+            let spinner = update.role.as_ref().map(|role| {
+                tui::Spinner::start(format!("Assuming {}", tui::accent(short_role_name(role))))
+            });
+            match service.update(&name, update).await {
+                Ok(role) => {
+                    let message = format!("Updated context {}", tui::accent(&name));
+                    match (spinner, role) {
+                        (Some(spinner), Some(role)) => spinner.done(format!(
+                            "{message} {}",
+                            tui::dim(format!("· acting as {}", role.display_name()))
+                        )),
+                        (Some(spinner), None) => spinner.done(message),
+                        (None, _) => tui::success(message),
+                    }
+                    Ok(())
+                }
+                Err(report) => {
+                    if let Some(spinner) = spinner {
+                        spinner.fail(format!("Could not update {}", tui::accent(&name)));
+                    }
+                    Err(context_error(report))
+                }
+            }
         }
         Command::Inspect { names } => {
             let names = if names.is_empty() {
@@ -287,29 +351,7 @@ pub async fn run(
             tui::success(format!("Now using context {}", tui::accent(&name)));
             Ok(())
         }
-        Command::Remove { names, force } => {
-            for name in names {
-                let summary = service.inspect(&name).await.map_err(context_error)?;
-                if !force && tui::interactive() {
-                    let mut question = format!("Remove context {}", tui::accent(&name));
-                    if summary.credentials.is_some() {
-                        question.push_str(" and its stored credentials");
-                    }
-                    question.push('?');
-                    if !tui::confirm(question)
-                        .initial_value(false)
-                        .interact()
-                        .map_err(prompt_error)?
-                    {
-                        tui::info(format!("Kept {}", tui::accent(&name)));
-                        continue;
-                    }
-                }
-                service.remove(&name).await.map_err(context_error)?;
-                tui::success(format!("Removed context {}", tui::accent(&name)));
-            }
-            Ok(())
-        }
+        Command::Remove { names, yes, force } => remove(service, names, yes, force).await,
         Command::Rename { from, to } => {
             service.rename(&from, &to).await.map_err(context_error)?;
             tui::success(format!(
@@ -323,13 +365,151 @@ pub async fn run(
             println!("{}", selected_name(service, over).await?);
             Ok(())
         }
-        Command::Role(command) => crate::role::run(command, service, over, program).await,
+        Command::Migrate { dry_run } => {
+            match service.migrate(dry_run).await.map_err(context_error)? {
+                None => tui::info("Contexts are already in the current format"),
+                Some(migration) => {
+                    for change in &migration.changes {
+                        tui::step(change);
+                    }
+                    match &migration.backup {
+                        None => tui::info("Dry run: nothing changed"),
+                        Some(backup) => tui::success(format!(
+                            "Contexts migrated {}",
+                            tui::dim(format!("· previous files kept in {}", backup.display()))
+                        )),
+                    }
+                }
+            }
+            Ok(())
+        }
     }
+}
+
+/// Brings contexts stored by a previous version to the current format
+/// before a command runs, and says so when it did. Silent otherwise, and
+/// on failure: the command then meets the problem itself.
+pub async fn migrate_on_start(service: &ContextService) {
+    let Ok(Some(migration)) = service.migrate(false).await else {
+        return;
+    };
+    let backup = migration
+        .backup
+        .map(|backup| format!(" · previous files kept in {}", backup.display()))
+        .unwrap_or_default();
+    tui::info(format!(
+        "Contexts moved to the current format{}",
+        tui::dim(backup)
+    ));
+    for change in &migration.changes {
+        tui::step(change);
+    }
+}
+
+/// `yes` skips the confirmation; `force` also removes a login's derived
+/// contexts, which a confirmation that names them does too.
+async fn remove(
+    service: &ContextService,
+    names: Vec<String>,
+    yes: bool,
+    force: bool,
+) -> Result<()> {
+    let mut gone = Vec::new();
+    for name in names {
+        // Gone already, as derived from a login removed before it.
+        if gone.contains(&name) {
+            continue;
+        }
+        let summary = service.inspect(&name).await.map_err(context_error)?;
+        let derived: Vec<_> = service
+            .list()
+            .await
+            .map_err(context_error)?
+            .into_iter()
+            .filter(|other| {
+                other
+                    .context
+                    .derivation()
+                    .is_some_and(|derivation| derivation.from == name)
+            })
+            .map(|other| other.context.name)
+            .collect();
+        let mut cascade = force;
+        if !yes && !force && tui::interactive() {
+            let mut question = format!("Remove context {}", tui::accent(&name));
+            if summary.context.endpoint().is_some() && summary.credentials.is_some() {
+                question.push_str(" and its stored credentials");
+            }
+            if !derived.is_empty() {
+                question.push_str(&format!(
+                    ", with the contexts derived from it ({})",
+                    derived.join(", ")
+                ));
+            }
+            question.push('?');
+            if !tui::confirm(question)
+                .initial_value(false)
+                .interact()
+                .map_err(prompt_error)?
+            {
+                tui::info(format!("Kept {}", tui::accent(&name)));
+                continue;
+            }
+            cascade = true;
+        }
+        let removed = service
+            .remove(&name, cascade)
+            .await
+            .map_err(context_error)?;
+        for removed in removed {
+            tui::success(format!("Removed context {}", tui::accent(&removed)));
+            gone.push(removed);
+        }
+    }
+    Ok(())
 }
 
 /// The context the invocation defines, if it does.
 fn defined(over: Option<&ContextOverride>) -> Option<&DefinedContext> {
     over.and_then(|over| over.defined.as_ref())
+}
+
+/// The order `ls` shows contexts in: each login, then the contexts derived
+/// from it; any derived from a login that's gone, last.
+fn tree(contexts: Vec<ContextSummary>) -> Vec<(ContextSummary, bool)> {
+    let (logins, derived): (Vec<_>, Vec<_>) = contexts
+        .into_iter()
+        .partition(|summary| summary.context.endpoint().is_some());
+    let mut derived: Vec<_> = derived.into_iter().map(Some).collect();
+    let mut ordered = Vec::new();
+    for login in logins {
+        let name = login.context.name.clone();
+        ordered.push((login, false));
+        for slot in derived.iter_mut() {
+            if slot
+                .as_ref()
+                .and_then(|summary| summary.context.derivation())
+                .is_some_and(|derivation| derivation.from == name)
+            {
+                ordered.push((slot.take().expect("just checked"), true));
+            }
+        }
+    }
+    ordered.extend(
+        derived
+            .into_iter()
+            .flatten()
+            .map(|summary| (summary, false)),
+    );
+    ordered
+}
+
+fn describe_address(endpoint: &Endpoint) -> String {
+    let mut address = endpoint.address.clone();
+    if endpoint.tls.disabled {
+        address.push_str(" (plaintext)");
+    }
+    address
 }
 
 async fn list(
@@ -373,53 +553,56 @@ async fn list(
             ));
         }
         Format::Table => {
-            let mut table = tui::Table::new(["name", "address", "login", "role", "description"]);
+            let mut table = tui::Table::new(["name", "gateway", "login", "role", "description"]);
             if let Some(defined) = defined {
-                let context = &defined.context;
-                let mut address = context.endpoint.address.clone();
-                if context.endpoint.tls.disabled {
-                    address.push_str(" (plaintext)");
-                }
                 table.row(
                     [
-                        format!("{} *", context.name),
-                        address,
+                        format!("{} *", defined.name),
+                        describe_address(&defined.endpoint),
                         format!("{} (environment)", defined.credentials.kind()),
-                        context
-                            .assumed_role
-                            .clone()
-                            .unwrap_or_else(|| "—".to_owned()),
+                        defined
+                            .role
+                            .as_deref()
+                            .map_or_else(|| "—".to_owned(), |role| describe_role(role, None)),
                         format!("defined by {TOKEN_ENV}, not stored"),
                     ],
                     true,
                 );
             }
-            for summary in &contexts {
-                let name = if summary.current {
-                    format!("{} *", summary.context.name)
+            for (summary, nested) in tree(contexts) {
+                let context = &summary.context;
+                let mut name = if nested {
+                    format!("└ {}", context.name)
                 } else {
-                    summary.context.name.clone()
+                    context.name.clone()
                 };
-                let mut address = summary.context.endpoint.address.clone();
-                if summary.context.endpoint.tls.disabled {
-                    address.push_str(" (plaintext)");
+                if summary.current {
+                    name.push_str(" *");
                 }
+                let (gateway, login, role) = match &context.kind {
+                    ContextKind::Login { endpoint } => (
+                        describe_address(endpoint),
+                        summary
+                            .credentials
+                            .map_or_else(|| "—".to_owned(), |kind| kind.to_string()),
+                        "—".to_owned(),
+                    ),
+                    ContextKind::Derived(derivation) => (
+                        String::new(),
+                        match summary.credentials {
+                            Some(_) => format!("via {}", derivation.from),
+                            None => format!("via {} (logged out)", derivation.from),
+                        },
+                        describe_role(&derivation.role, derivation.account.as_deref()),
+                    ),
+                };
                 table.row(
                     [
                         name,
-                        address,
-                        match (&summary.context.login, summary.credentials) {
-                            (Some(base), Some(_)) => format!("via {base}"),
-                            (Some(base), None) => format!("via {base} (logged out)"),
-                            (None, Some(kind)) => kind.to_string(),
-                            (None, None) => "—".to_owned(),
-                        },
-                        summary
-                            .context
-                            .assumed_role
-                            .clone()
-                            .unwrap_or_else(|| "—".to_owned()),
-                        summary.context.description.clone().unwrap_or_default(),
+                        gateway,
+                        login,
+                        role,
+                        context.description.clone().unwrap_or_default(),
                     ],
                     summary.current,
                 );
@@ -437,6 +620,14 @@ async fn selected_name(service: &ContextService, over: Option<&ContextOverride>)
     }
 }
 
+fn describe_user(principal: &remora_context::model::Principal) -> String {
+    if principal.user_name.is_empty() {
+        principal.user_urn.clone()
+    } else {
+        principal.user_name.clone()
+    }
+}
+
 /// The service's own refusal to change a context the invocation defines
 /// (`over`), for the commands that change stored contexts without
 /// selecting one (`context create`, `use`...): while the environment
@@ -444,7 +635,7 @@ async fn selected_name(service: &ContextService, over: Option<&ContextOverride>)
 pub(crate) fn refuse_defined(over: Option<&ContextOverride>) -> Result<()> {
     match over {
         Some(over) if over.defined.is_some() => Err(context_error(Report::new(
-            remora_context::application::Error::Defined(over.name.clone()),
+            ContextError::Defined(over.name.clone()),
         ))),
         _ => Ok(()),
     }
@@ -453,7 +644,7 @@ pub(crate) fn refuse_defined(over: Option<&ContextOverride>) -> Result<()> {
 /// The service's own "no context" failure, for when the transport is the
 /// one finding there's none: it reads, and is hinted, alike.
 pub(crate) fn no_context() -> Report<Error> {
-    context_error(Report::new(remora_context::application::Error::NoContext))
+    context_error(Report::new(ContextError::NoContext))
 }
 
 fn login_hint(program: &str, name: &str, current: bool) -> String {
@@ -476,14 +667,16 @@ pub(crate) fn describe_selection(selection: Selection) -> &'static str {
 }
 
 /// `context inspect`'s JSON: the stored context plus what isn't in it.
-/// Never any secret -- only the kind of credentials, under a key of its own
-/// (the context's `login` is the context whose login it shares).
-/// A context the environment defines reads as one, marked `environment`.
+/// Never any secret -- only the kind of its login's credentials. A context
+/// the environment defines reads as a login, marked `environment`, with
+/// the role it assumes.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Inspected {
     #[serde(flatten)]
     context: Context,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
     current: bool,
     credentials: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -494,6 +687,7 @@ impl From<ContextSummary> for Inspected {
     fn from(summary: ContextSummary) -> Self {
         Self {
             context: summary.context,
+            role: None,
             current: summary.current,
             credentials: summary.credentials.map(|kind| kind.to_string()),
             environment: false,
@@ -504,7 +698,8 @@ impl From<ContextSummary> for Inspected {
 impl Inspected {
     fn from_defined(defined: &DefinedContext) -> Self {
         Self {
-            context: defined.context.clone(),
+            context: Context::login(defined.name.clone(), defined.endpoint.clone()),
+            role: defined.role.clone(),
             current: true,
             credentials: Some(defined.credentials.kind().to_string()),
             environment: true,
@@ -514,31 +709,62 @@ impl Inspected {
 
 #[cfg(test)]
 mod tests {
-    use remora_context::model::{CredentialKind, Endpoint, Tls};
+    use remora_context::model::{CredentialKind, Derivation};
 
     use super::*;
 
-    #[test]
-    fn inspected_names_each_key_once() {
-        let inspected = Inspected::from(ContextSummary {
-            context: Context {
-                name: "acme".into(),
-                description: None,
-                endpoint: Endpoint {
-                    address: "gateway:50051".into(),
-                    tls: Tls::default(),
-                },
-                roles: Default::default(),
-                assumed_role: None,
-                login: Some("eu2".into()),
-            },
+    fn summary(context: Context) -> ContextSummary {
+        ContextSummary {
+            context,
             current: false,
             credentials: Some(CredentialKind::AccessKey),
-        });
-        let json = serde_json::to_string(&inspected).unwrap();
-        assert_eq!(json.matches("\"login\"").count(), 1, "{json}");
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(value["login"], "eu2");
+        }
+    }
+
+    fn derived(name: &str, from: &str) -> Context {
+        Context {
+            name: name.into(),
+            description: None,
+            kind: ContextKind::Derived(Derivation {
+                from: from.into(),
+                role: "urn:sntns:iam:eu2:t:role:ops".into(),
+                account: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn inspected_shows_a_derived_context_without_an_endpoint() {
+        let inspected = Inspected::from(summary(derived("acme", "eu2")));
+        let value: serde_json::Value =
+            serde_json::to_value(&inspected).expect("contexts serialize");
+        assert_eq!(value["name"], "acme");
+        assert_eq!(value["from"], "eu2");
         assert_eq!(value["credentials"], "access key");
+        assert!(value.get("endpoint").is_none(), "{value}");
+    }
+
+    #[test]
+    fn ls_nests_derived_contexts_under_their_login() {
+        let order: Vec<_> = tree(vec![
+            summary(derived("acme", "eu2")),
+            summary(Context::login("dev", Endpoint::new("dev"))),
+            summary(derived("orphan", "gone")),
+            summary(Context::login("eu2", Endpoint::new("eu2"))),
+            summary(derived("zeta", "eu2")),
+        ])
+        .into_iter()
+        .map(|(summary, nested)| (summary.context.name, nested))
+        .collect();
+        assert_eq!(
+            order,
+            [
+                ("dev".into(), false),
+                ("eu2".into(), false),
+                ("acme".into(), true),
+                ("zeta".into(), true),
+                ("orphan".into(), false),
+            ]
+        );
     }
 }

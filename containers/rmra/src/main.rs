@@ -50,8 +50,8 @@ enum Commands {
     /// Show whom the selected context is logged in as.
     Whoami(remora_context_application_transport_cli::WhoamiArgs),
 
-    /// Manage contexts: named platform endpoints, docker-context style, and
-    /// the IAM role each acts as.
+    /// Manage contexts, docker-context style: logins to a platform, and
+    /// contexts derived from them that assume an IAM role.
     #[command(subcommand)]
     Context(remora_context_application_transport_cli::Command),
 
@@ -59,14 +59,9 @@ enum Commands {
     #[command(subcommand)]
     Channel(remora_channel_application_transport_cli::Command),
 
-    /// List the account's devices, or delete them from the platform.
+    /// The account's devices, and those it manufactured (`device factory`).
     #[command(subcommand)]
     Device(remora_device_application_transport_cli::Command),
-
-    /// The devices the account manufactured: their factory records, the
-    /// ones not enrolled yet, deleting those of hardware that never shipped.
-    #[command(subcommand)]
-    FactoryDevice(remora_device_application_transport_cli::FactoryDeviceCommand),
 
     /// What devices report of themselves (remora-monitord): their latest
     /// state, and their system metrics over time.
@@ -78,6 +73,9 @@ enum Commands {
 
     /// Copy files to or from a device over scp, through its remora channel.
     Scp(remora_channel_application_transport_cli::ScpArgs),
+
+    /// An sftp session with a device, through its remora channel.
+    Sftp(remora_channel_application_transport_cli::SftpArgs),
 
     /// On site, at a device's local network or serial console: ssh
     /// certificates, console login codes, the console itself.
@@ -135,6 +133,19 @@ async fn run() {
 
     let services = bootstrap::wire().await;
 
+    // Contexts a previous version stored, moved to the current format
+    // before anything reads them -- said so, except on ssh's terminal
+    // (`channel open` is its ProxyCommand) and where `context migrate`
+    // says it itself. The store does it silently otherwise.
+    if !matches!(
+        options.command,
+        Commands::Channel(_)
+            | Commands::Completion(_)
+            | Commands::Context(remora_context_application_transport_cli::Command::Migrate { .. })
+    ) {
+        remora_context_application_transport_cli::migrate_on_start(&services.context).await;
+    }
+
     // The update notice, after the command: never around a session --
     // `channel open` is ssh's ProxyCommand, its stderr ssh's terminal --
     // nor for updating itself.
@@ -143,6 +154,7 @@ async fn run() {
         Commands::Channel(_)
             | Commands::Ssh(_)
             | Commands::Scp(_)
+            | Commands::Sftp(_)
             | Commands::Local(_)
             | Commands::Update(_)
             | Commands::Completion(_)
@@ -185,6 +197,10 @@ async fn run() {
             .await
             .unwrap_or_else(|report| fail(report, verbose, 255)),
         // scp's own convention: 1 for any failure.
+        // sftp's own convention too: 1 for any failure.
+        Commands::Sftp(args) => channel::run_sftp(args, &services.channel, over, verbose)
+            .await
+            .unwrap_or_else(|report| fail(report, verbose, 1)),
         Commands::Scp(args) => channel::run_scp(args, &services.channel, over, verbose)
             .await
             .unwrap_or_else(|report| fail(report, verbose, 1)),
@@ -213,15 +229,6 @@ async fn run() {
         ),
         Commands::Device(command) => exit_on_error(
             remora_device_application_transport_cli::run(command, &services.device, over).await,
-            verbose,
-        ),
-        Commands::FactoryDevice(command) => exit_on_error(
-            remora_device_application_transport_cli::run_factory_device(
-                command,
-                &services.device,
-                over,
-            )
-            .await,
             verbose,
         ),
         Commands::Monitor(command) => exit_on_error(

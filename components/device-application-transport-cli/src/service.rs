@@ -9,7 +9,10 @@ use remora_device::{
 use remora_tui as tui;
 use serde_json::json;
 
-use crate::error::{device_error, prompt_error, Error, Result};
+use crate::{
+    error::{device_error, prompt_error, Error, Result},
+    factory_device::{run_factory_device, FactoryDeviceCommand},
+};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -34,6 +37,17 @@ pub enum Command {
         quiet: bool,
     },
 
+    /// Show a device: its labels, when it enrolled, and, when the account
+    /// manufactured it, its factory record.
+    Show {
+        /// The device's name (its serial).
+        #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
+        name: String,
+        /// `table` for humans, `json` for scripts.
+        #[arg(long, default_value = "table")]
+        format: Format,
+    },
+
     /// Delete devices from the platform: their operational record only --
     /// the factory one stays, so a device can enroll again.
     #[command(visible_alias = "rm")]
@@ -43,8 +57,15 @@ pub enum Command {
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
-        force: bool,
+        #[arg(short_alias = 'f', alias = "force")]
+        yes: bool,
     },
+
+    /// The devices the account manufactured: their factory records, the
+    /// ones not enrolled yet, deleting those of hardware that never
+    /// shipped.
+    #[command(subcommand)]
+    Factory(FactoryDeviceCommand),
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -145,9 +166,11 @@ pub async fn run(
             }
             Ok(())
         }
-        Command::Remove { names, force } => {
+        Command::Show { name, format } => show(service, over, &name, format).await,
+        Command::Factory(command) => run_factory_device(command, service, over).await,
+        Command::Remove { names, yes } => {
             for name in names {
-                if !force && tui::interactive() {
+                if !yes && tui::interactive() {
                     let question = format!(
                         "Delete device {} from the platform? It loses its access until it \
                          enrolls again.",
@@ -168,6 +191,61 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// `device show`: the device, and its factory record when the account
+/// manufactured it -- a device made elsewhere, or a principal that may not
+/// read factory records, shows without one.
+async fn show(
+    service: &DeviceService,
+    over: Option<&ContextOverride>,
+    name: &str,
+    format: Format,
+) -> Result<()> {
+    let (device, factory) =
+        futures_util::join!(service.get(over, name), service.get_factory(over, name));
+    let device = device.map_err(device_error)?;
+    let factory = factory.ok();
+    match format {
+        Format::Json => print_json(&json!({
+            "name": device.name,
+            "labels": device.labels,
+            "enrolledAt": device.enrolled_at.map(tui::timestamp_utc),
+            "factory": factory.as_ref().map(|f| json!({
+                "owner": f.owner,
+                "labels": f.labels,
+                "certificate": f.certificate,
+                "createdAt": f.created_at.map(tui::timestamp_utc),
+            })),
+        })),
+        Format::Table => {
+            let mut lines = Vec::new();
+            if let Some(enrolled_at) = device.enrolled_at {
+                lines.push(format!("enrolled      {}", tui::timestamp(enrolled_at)));
+            }
+            let labels = labels_line(device.labels.iter().flatten());
+            if !labels.is_empty() {
+                lines.push(format!("labels        {labels}"));
+            }
+            if let Some(factory) = &factory {
+                if let Some(created_at) = factory.created_at {
+                    lines.push(format!("manufactured  {}", tui::timestamp(created_at)));
+                }
+                if let Some(certificate) = &factory.certificate {
+                    lines.push(format!("certificate   {certificate}"));
+                }
+                let labels = labels_line(factory.labels.iter().flatten());
+                if !labels.is_empty() {
+                    lines.push(format!("factory       {labels}"));
+                }
+            }
+            tui::note(
+                format!("Device {}", tui::accent(&device.name)),
+                lines.join("\n"),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// A line of `rmra device ls`: a device (and when it was manufactured,

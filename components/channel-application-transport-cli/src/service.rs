@@ -4,7 +4,8 @@ use error_stack::ResultExt;
 use remora_channel::{
     application::ChannelService,
     model::{
-        PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SshRequest, SshRole, SSH_PROFILE,
+        PreparedSsh, ProxyCommandBuilder, ProxyTarget, ScpRequest, SftpRequest, SshRequest,
+        SshRole, SSH_PROFILE,
     },
 };
 use remora_context::model::ContextOverride;
@@ -24,7 +25,8 @@ pub enum Command {
         /// The device's name (its serial).
         #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
         device: String,
-        /// What to open: the profile a policy grants, never a host and port.
+        /// What to open on the device: the profile a policy grants (`ssh`,
+        /// `vnc`...), never a host and port.
         #[arg(long, default_value = SSH_PROFILE)]
         profile: String,
         /// Say nothing once the channel is open (ssh passes a
@@ -33,12 +35,25 @@ pub enum Command {
         quiet: bool,
     },
 
-    /// Log into a device's sshd through its ssh channel (same as `rmra ssh`).
-    Ssh(SshArgs),
-
-    /// Copy files to or from a device through its ssh channel (same as
-    /// `rmra scp`).
-    Scp(ScpArgs),
+    /// Forward a local TCP port to a profile of a device: each connection
+    /// to the port opens a channel on the device -- e.g. a VNC viewer to
+    /// its `vnc` profile. Runs until Ctrl-C.
+    #[command(after_help = "Example:\n  \
+        rmra channel forward 525400C0FFEE --profile vnc --listen 5900\n  \
+        vncviewer localhost:5900")]
+    Forward {
+        /// The device's name (its serial).
+        #[arg(add = remora_completion::values(remora_completion::Kind::Device))]
+        device: String,
+        /// What to open on the device: the profile a policy grants (`ssh`,
+        /// `vnc`...), never a host and port.
+        #[arg(long)]
+        profile: String,
+        /// Where to listen: a port, or an address and port. Loopback unless
+        /// an address says otherwise; by default, a free port, printed.
+        #[arg(long, value_name = "[ADDRESS:]PORT", default_value = "0")]
+        listen: String,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -121,6 +136,44 @@ pub struct ScpArgs {
     arguments: Vec<String>,
 }
 
+#[derive(clap::Args)]
+#[command(after_help = "Examples:\n  \
+    rmra sftp 525400C0FFEE\n  \
+    rmra sftp -b commands.txt root@525400C0FFEE:/data")]
+pub struct SftpArgs {
+    /// The role to be on the device; each is its own IAM action.
+    #[arg(long, value_enum, default_value = "user")]
+    role: Role,
+    /// The device account, when neither a `user@` destination nor the
+    /// role's default should decide it.
+    #[arg(long)]
+    user: Option<String>,
+    /// Connect directly to the device at this address on its local network
+    /// (its sshd, with a local certificate) instead of through its channel.
+    #[arg(long, value_name = "ADDRESS")]
+    local: Option<String>,
+    /// An ssh -o option; repeatable.
+    #[arg(long = "ssh-option", value_name = "OPTION")]
+    ssh_options: Vec<String>,
+    /// The sftp client to run.
+    #[arg(long = "sftp", default_value = "sftp", value_name = "PATH")]
+    #[arg(value_hint = clap::ValueHint::ExecutablePath)]
+    binary: PathBuf,
+    /// sftp's own arguments: options (-b, -r, -l ...), then the device,
+    /// written [user@]DEVICE[:path]. `-v` is rmra's own --verbose; for
+    /// sftp's, pass it after `--`. -J, -F, -S, -D and -o
+    /// ProxyCommand/ProxyJump are refused: they would bypass the channel or
+    /// the host pinning.
+    #[arg(
+        required = true,
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "SFTP ARGS"
+    )]
+    #[arg(add = remora_completion::scp_operand())]
+    arguments: Vec<String>,
+}
+
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub(crate) enum Role {
     User,
@@ -171,8 +224,87 @@ pub async fn run(
                 Err(report) => Err(report),
             }
         }
-        Command::Ssh(args) => run_ssh(args, service, over, verbose).await,
-        Command::Scp(args) => run_scp(args, service, over, verbose).await,
+        Command::Forward {
+            device,
+            profile,
+            listen,
+        } => forward(service, over, device, profile, &listen).await,
+    }
+}
+
+/// `channel forward`: a local listener, a channel per connection it
+/// accepts, until Ctrl-C. A connection the device refuses (a profile it
+/// doesn't offer) is said and closed; the listener goes on.
+async fn forward(
+    service: &ChannelService,
+    over: Option<&ContextOverride>,
+    device: String,
+    profile: String,
+    listen: &str,
+) -> Result<i32> {
+    // A bare port is the loopback's: what listens is reachable as you.
+    let address = if listen.chars().all(|c| c.is_ascii_digit()) {
+        format!("127.0.0.1:{listen}")
+    } else {
+        listen.to_owned()
+    };
+    let listener = tokio::net::TcpListener::bind(&address)
+        .await
+        .change_context_lazy(|| Error::Listen(address.clone()))?;
+    let local = listener
+        .local_addr()
+        .change_context_lazy(|| Error::Listen(address.clone()))?;
+    tui::success(format!(
+        "Forwarding {} to {} {}",
+        tui::accent(local.to_string()),
+        tui::accent(&device),
+        tui::dim(format!("· profile {profile} · Ctrl-C to stop"))
+    ));
+    if !local.ip().is_loopback() {
+        tui::warning(format!(
+            "{} is not the loopback: whoever reaches it reaches {device}'s {profile} as you.",
+            local.ip()
+        ));
+    }
+
+    let over = over.cloned();
+    let interrupted = tokio::signal::ctrl_c();
+    tokio::pin!(interrupted);
+    loop {
+        let (stream, peer) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(accepted) => accepted,
+                Err(e) => {
+                    tui::warning(format!("Could not accept a connection: {e}"));
+                    continue;
+                }
+            },
+            _ = &mut interrupted => return Ok(0),
+        };
+        let (service, over, device, profile) = (
+            service.clone(),
+            over.clone(),
+            device.clone(),
+            profile.clone(),
+        );
+        tokio::spawn(async move {
+            let _ = stream.set_nodelay(true);
+            let channel = match service.open(over.as_ref(), &device, &profile).await {
+                Ok(channel) => channel,
+                Err(report) => {
+                    tui::warning(format!(
+                        "{peer}: {}",
+                        tui::one_line(&channel_error(report), false)
+                    ));
+                    return;
+                }
+            };
+            tui::info(format!("{peer} connected"));
+            match relay::socket(channel, stream, &device).await {
+                Ok(()) => tui::info(format!("{peer} disconnected")),
+                Err(report) => tui::warning(format!("{peer}: {}", tui::one_line(&report, false))),
+            }
+        });
     }
 }
 
@@ -242,6 +374,32 @@ pub async fn run_scp(
     let spinner = certifying("the device", role);
     let prepared = service
         .prepare_scp(ScpRequest {
+            over: over.cloned(),
+            role,
+            login: args.user,
+            local: args.local,
+            options: args.ssh_options,
+            arguments: args.arguments,
+            binary: args.binary,
+            proxy_command: proxy_command()?,
+        })
+        .await;
+    run_prepared(service, prepared, spinner, verbose).await
+}
+
+/// `rmra sftp`: an sftp session with a device, `[user@]DEVICE[:path]` as
+/// the destination, through its channel with a throwaway certified key --
+/// `rmra ssh`'s setup for sftp. Returns sftp's exit code.
+pub async fn run_sftp(
+    args: SftpArgs,
+    service: &ChannelService,
+    over: Option<&ContextOverride>,
+    verbose: bool,
+) -> Result<i32> {
+    let role = args.role.into();
+    let spinner = certifying("the device", role);
+    let prepared = service
+        .prepare_sftp(SftpRequest {
             over: over.cloned(),
             role,
             login: args.user,

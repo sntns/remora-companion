@@ -41,8 +41,9 @@ enum Commands {
     /// Show whom the selected context is logged in as.
     Whoami(remora_context_application_transport_cli::WhoamiArgs),
 
-    /// Manage contexts: named platform endpoints, docker-context style, and
-    /// the IAM role each acts as. Shared with rmra.
+    /// Manage contexts, docker-context style: logins to a platform, and
+    /// contexts derived from them that assume an IAM role.
+    /// Shared with rmra.
     #[command(subcommand)]
     Context(remora_context_application_transport_cli::Command),
 
@@ -161,6 +162,17 @@ async fn run(options: Options, over: Option<ContextOverride>) -> i32 {
     let verbose = options.verbose > 0;
     let services = bootstrap::wire().await;
     let over = over.as_ref();
+
+    // Contexts a previous version stored, moved to the current format
+    // before anything reads them -- said so, except where `context
+    // migrate` says it itself. The store does it silently otherwise.
+    if !matches!(
+        options.command,
+        Commands::Completion(_)
+            | Commands::Context(remora_context_application_transport_cli::Command::Migrate { .. })
+    ) {
+        remora_context_application_transport_cli::migrate_on_start(&services.context).await;
+    }
 
     // The update notice, after the command: not for updating itself, nor
     // under the station's console.

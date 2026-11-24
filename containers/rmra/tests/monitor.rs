@@ -87,19 +87,17 @@ async fn shows_what_a_device_reports_as_tables_charts_and_json() {
     let (gateway, resolved) = TestGateway::serve().await;
     report_a_day(&gateway);
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 

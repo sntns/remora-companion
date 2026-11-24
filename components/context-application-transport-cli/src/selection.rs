@@ -1,10 +1,10 @@
 use clap::{parser::ValueSource, FromArgMatches};
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use remora_completion::Candidate;
 use remora_context::{
     application::ContextService,
     model::{
-        is_role_urn, Context, ContextOverride, Credentials, DefinedContext, Endpoint, Secret,
+        is_role_urn, ContextKind, ContextOverride, Credentials, DefinedContext, Endpoint, Secret,
         Selection, Tls,
     },
 };
@@ -24,11 +24,10 @@ pub const CONTEXT_ENV: &str = "RMRA_CONTEXT";
 pub const ADDRESS_ENV: &str = "RMRA_ADDRESS";
 pub const TOKEN_ENV: &str = "RMRA_TOKEN";
 /// ...and, optionally, the role it acts as (a URN), plaintext for a local
-/// development stack, a PEM certificate authority file and the name to
-/// verify the gateway's certificate against -- `context create`'s options.
+/// development stack and the name to verify the gateway's certificate
+/// against -- `context create`'s options.
 pub const ASSUME_ROLE_ENV: &str = "RMRA_ASSUME_ROLE";
 pub const PLAINTEXT_ENV: &str = "RMRA_PLAINTEXT";
-pub const CA_FILE_ENV: &str = "RMRA_CA_FILE";
 pub const SERVER_NAME_ENV: &str = "RMRA_SERVER_NAME";
 
 /// The name a context defined by the environment goes by: shown only, it
@@ -89,13 +88,7 @@ fn choose(
 /// The context `vars` define, if they do. Empty variables count as unset.
 fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedContext>> {
     let Some(token) = vars(TOKEN_ENV) else {
-        let rest = [
-            ADDRESS_ENV,
-            ASSUME_ROLE_ENV,
-            PLAINTEXT_ENV,
-            CA_FILE_ENV,
-            SERVER_NAME_ENV,
-        ];
+        let rest = [ADDRESS_ENV, ASSUME_ROLE_ENV, PLAINTEXT_ENV, SERVER_NAME_ENV];
         return match rest.into_iter().find(|name| vars(name).is_some()) {
             Some(name) => Err(usage(format!(
                 "{name} is set without {TOKEN_ENV}, which defines the context"
@@ -104,12 +97,10 @@ fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedCon
         };
     };
     let address = vars(ADDRESS_ENV).unwrap_or_else(|| DEFAULT_ADDRESS.to_owned());
-    // Its role can only be a URN: an alias needs a stored context's roles.
-    let assumed_role = vars(ASSUME_ROLE_ENV);
-    if let Some(role) = assumed_role.as_deref().filter(|role| !is_role_urn(role)) {
+    let role = vars(ASSUME_ROLE_ENV);
+    if let Some(role) = role.as_deref().filter(|role| !is_role_urn(role)) {
         return Err(usage(format!(
-            "{ASSUME_ROLE_ENV} must be a role URN (urn:…:role:…), not {role:?}: \
-             a context defined by the environment has no role aliases"
+            "{ASSUME_ROLE_ENV} must be a role URN (urn:…:role:…), not {role:?}"
         )));
     }
     let disabled = match vars(PLAINTEXT_ENV).map(|value| value.to_ascii_lowercase()) {
@@ -122,30 +113,19 @@ fn defined_by(vars: impl Fn(&str) -> Option<String>) -> Result<Option<DefinedCon
             )))
         }
     };
-    // Stored contexts keep a CA's PEM itself, so does this one.
-    let mut authorities = Vec::new();
-    if let Some(path) = vars(CA_FILE_ENV).map(std::path::PathBuf::from) {
-        authorities.push(std::fs::read_to_string(&path).change_context(Error::ReadFile(path))?);
-    }
     Ok(Some(DefinedContext {
-        context: Context {
-            name: DEFINED_NAME.to_owned(),
-            description: None,
-            endpoint: Endpoint {
-                address,
-                tls: Tls {
-                    disabled,
-                    authorities,
-                    server_name: vars(SERVER_NAME_ENV),
-                },
+        name: DEFINED_NAME.to_owned(),
+        endpoint: Endpoint {
+            address,
+            tls: Tls {
+                disabled,
+                server_name: vars(SERVER_NAME_ENV),
             },
-            roles: Default::default(),
-            assumed_role,
-            login: None,
         },
         credentials: Credentials {
             secret: Secret::AccessKey { token },
         },
+        role,
     }))
 }
 
@@ -187,31 +167,18 @@ pub async fn complete_contexts(service: &ContextService) -> Vec<Candidate> {
         .unwrap_or_default()
         .into_iter()
         .map(|summary| {
-            let mut help = summary.context.endpoint.address.clone();
+            let mut help = match &summary.context.kind {
+                ContextKind::Login { endpoint } => endpoint.address.clone(),
+                ContextKind::Derived(derivation) => format!(
+                    "{} as {}",
+                    derivation.from,
+                    remora_context::model::short_role_name(&derivation.role)
+                ),
+            };
             if summary.current {
                 help.push_str(" (current)");
             }
             Candidate::new(summary.context.name).help(help)
-        })
-        .collect()
-}
-
-/// Completion values: the selected context's role aliases.
-pub async fn complete_roles(
-    service: &ContextService,
-    over: Option<&ContextOverride>,
-) -> Vec<Candidate> {
-    let Ok((_, roles, _)) = service.roles(over).await else {
-        return Vec::new();
-    };
-    roles
-        .into_iter()
-        .map(|role| {
-            let mut help = role.urn;
-            if role.assumed {
-                help.push_str(" (assumed)");
-            }
-            Candidate::new(role.alias).help(help)
         })
         .collect()
 }
@@ -283,16 +250,12 @@ mod tests {
 
     #[test]
     fn the_environment_defines_a_whole_context() {
-        let ca = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(ca.path(), "-----BEGIN CERTIFICATE-----\n").unwrap();
-        let path = ca.path().to_str().unwrap();
         let role = "urn:sntns:iam:eu2:acme:role:factory";
         let env = [
             (ADDRESS_ENV, "gateway:50051"),
             (TOKEN_ENV, "s3cret"),
             (ASSUME_ROLE_ENV, role),
             (PLAINTEXT_ENV, "True"),
-            (CA_FILE_ENV, path),
             (SERVER_NAME_ENV, "api.example"),
         ];
         let over = choose(None, vars(&env)).unwrap().unwrap();
@@ -301,18 +264,11 @@ mod tests {
             (DEFINED_NAME, Selection::Defined)
         );
         let defined = over.defined.unwrap();
-        let context = &defined.context;
-        assert_eq!(context.endpoint.address, "gateway:50051");
-        assert_eq!(context.assumed_role.as_deref(), Some(role));
-        assert!(context.endpoint.tls.disabled);
-        assert_eq!(
-            context.endpoint.tls.authorities,
-            ["-----BEGIN CERTIFICATE-----\n"]
-        );
-        assert_eq!(
-            context.endpoint.tls.server_name.as_deref(),
-            Some("api.example")
-        );
+        let endpoint = &defined.endpoint;
+        assert_eq!(endpoint.address, "gateway:50051");
+        assert_eq!(defined.role.as_deref(), Some(role));
+        assert!(endpoint.tls.disabled);
+        assert_eq!(endpoint.tls.server_name.as_deref(), Some("api.example"));
         assert!(
             matches!(&defined.credentials.secret, Secret::AccessKey { token } if token == "s3cret")
         );
@@ -324,7 +280,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            token_only.defined.unwrap().context.endpoint.address,
+            token_only.defined.unwrap().endpoint.address,
             DEFAULT_ADDRESS
         );
 
@@ -349,19 +305,7 @@ mod tests {
             env.push((name, value));
             usage_of(choose(None, vars(&env)))
         };
-        assert!(with(ASSUME_ROLE_ENV, "ops").contains("no role aliases"));
+        assert!(with(ASSUME_ROLE_ENV, "ops").contains("role URN"));
         assert!(with(PLAINTEXT_ENV, "maybe").contains("true or false"));
-        let missing = choose(
-            None,
-            vars(&[
-                (ADDRESS_ENV, "a:1"),
-                (TOKEN_ENV, "t"),
-                (CA_FILE_ENV, "/nonexistent/ca.pem"),
-            ]),
-        );
-        assert!(matches!(
-            missing.unwrap_err().current_context(),
-            Error::ReadFile(_)
-        ));
     }
 }

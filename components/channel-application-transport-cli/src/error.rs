@@ -8,6 +8,8 @@ pub enum Error {
     HangupGrace(u64),
     #[error("cannot tell where this program is, to use it as ssh's ProxyCommand")]
     SelfPath,
+    #[error("failed to listen on {0}")]
+    Listen(String),
     #[error("failed to read {}", .0.display())]
     Read(std::path::PathBuf),
     #[error("failed to write {}", .0.display())]

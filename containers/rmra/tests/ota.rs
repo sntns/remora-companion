@@ -54,7 +54,7 @@ impl Rmra {
 #[tokio::test]
 async fn publish_deploy_and_follow_an_update() {
     let (gateway, resolved) = TestGateway::serve().await;
-    let rmra = Rmra::new(&resolved.context.endpoint.address);
+    let rmra = Rmra::new(&resolved.endpoint.address);
 
     let bundle_dir = tempfile::tempdir().unwrap();
     let bundle = bundle_dir.path().join("update-rp5.raucb");
@@ -219,7 +219,7 @@ async fn an_interrupted_upload_resumes_with_the_printed_token() {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
     let (gateway, resolved) = TestGateway::serve().await;
-    let rmra = Rmra::new(&resolved.context.endpoint.address);
+    let rmra = Rmra::new(&resolved.endpoint.address);
     let bundle_dir = tempfile::tempdir().unwrap();
     let bundle = bundle_dir.path().join("update-rp5.raucb");
     let bytes: Vec<u8> = (0..12_000_000u32).map(|i| (i % 251) as u8).collect();
@@ -307,7 +307,7 @@ async fn an_interrupted_upload_resumes_with_the_printed_token() {
 #[tokio::test]
 async fn download_picks_an_artifact_by_board_and_type() {
     let (gateway, resolved) = TestGateway::serve().await;
-    let rmra = Rmra::new(&resolved.context.endpoint.address);
+    let rmra = Rmra::new(&resolved.endpoint.address);
     let dir = tempfile::tempdir().unwrap();
     let image: Vec<u8> = (0..2_500_000u32).map(|i| (i % 241) as u8).collect();
     let bundle: Vec<u8> = (0..100_000u32).map(|i| (i % 7) as u8).collect();

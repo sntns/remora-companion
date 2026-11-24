@@ -14,19 +14,17 @@ async fn lists_devices_with_their_labels() {
         .device_created_at
         .insert("DEV1".into(), "2026-11-02T08:15:00Z".into());
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 
@@ -86,19 +84,17 @@ async fn lists_devices_with_their_labels() {
 async fn removes_a_device() {
     let (gateway, resolved) = TestGateway::serve().await;
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 
@@ -154,19 +150,17 @@ async fn lists_factory_devices_with_and_without_their_device() {
             .insert("DEV3".into(), "2026-10-15T09:00:00Z".into());
     }
     let config = tempfile::tempdir().unwrap();
-    let dir = config.path().join("contexts/test");
-    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("meta.json"),
+        config.path().join("config.json"),
         format!(
-            r#"{{"name":"test","endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}"#,
-            resolved.context.endpoint.address
+            r#"{{"version":2,"contexts":{{"test":{{"endpoint":{{"address":"{}","tls":{{"disabled":true}}}}}}}}}}"#,
+            resolved.endpoint.address
         ),
     )
     .unwrap();
     std::fs::write(
-        dir.join("credentials.json"),
-        r#"{"kind":"access-key","token":"t"}"#,
+        config.path().join("credentials.json"),
+        r#"{"test":{"kind":"access-key","token":"t"}}"#,
     )
     .unwrap();
 
@@ -246,26 +240,37 @@ async fn lists_factory_devices_with_and_without_their_device() {
     assert!(json[0].get("enrolled").is_none());
 
     assert_eq!(
-        run(&["factory-device", "ls", "-q"]).await,
+        run(&["device", "factory", "ls", "-q"]).await,
         "NEW2\nDEV3\nNEW1\n"
     );
     assert_eq!(
-        run(&["factory-device", "ls", "-q", "--without-device"]).await,
+        run(&["device", "factory", "ls", "-q", "--without-device"]).await,
         "NEW2\nNEW1\n"
     );
-    let shown: serde_json::Value =
-        serde_json::from_str(&run(&["factory-device", "show", "NEW1", "--format", "json"]).await)
-            .unwrap();
+    let shown: serde_json::Value = serde_json::from_str(
+        &run(&["device", "factory", "show", "NEW1", "--format", "json"]).await,
+    )
+    .unwrap();
     assert_eq!(shown["owner"], "urn:sntns:iam:test:acme:account");
     assert_eq!(shown["certificate"], "urn:test:certificate-NEW1-1");
     assert_eq!(shown["createdAt"], "2026-11-20 14:30:00Z");
+    // A device shows with its factory record when the account made it,
+    // without one otherwise.
+    let made: serde_json::Value =
+        serde_json::from_str(&run(&["device", "show", "DEV3", "--format", "json"]).await).unwrap();
+    assert_eq!(made["name"], "DEV3");
+    assert!(made["factory"]["certificate"].is_string(), "{made}");
+    let bought: serde_json::Value =
+        serde_json::from_str(&run(&["device", "show", "DEV1", "--format", "json"]).await).unwrap();
+    assert_eq!(bought["factory"], serde_json::Value::Null);
+    run(&["device", "show", "DEV3"]).await;
     let listed: serde_json::Value =
-        serde_json::from_str(&run(&["factory-device", "ls", "--format", "json"]).await).unwrap();
+        serde_json::from_str(&run(&["device", "factory", "ls", "--format", "json"]).await).unwrap();
     assert_eq!(listed[0]["createdAt"], serde_json::Value::Null);
     assert_eq!(listed[1]["createdAt"], "2026-10-01 10:00:00Z");
 
     // Not a terminal: no confirmation asked.
-    run(&["factory-device", "rm", "NEW2"]).await;
+    run(&["device", "factory", "rm", "NEW2"]).await;
     assert!(!gateway
         .0
         .lock()
@@ -273,7 +278,7 @@ async fn lists_factory_devices_with_and_without_their_device() {
         .factory_devices
         .contains_key("NEW2"));
     assert_eq!(
-        run(&["factory-device", "ls", "-q", "--without-device"]).await,
+        run(&["device", "factory", "ls", "-q", "--without-device"]).await,
         "NEW1\n"
     );
 }

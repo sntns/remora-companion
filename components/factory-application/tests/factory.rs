@@ -109,7 +109,7 @@ fn logged_in_contexts() -> ContextService {
         adapter::{
             credentials::{CredentialStoreAdapter, CredentialStoreAdapterService},
             platform::{self, PlatformSessionAdapter, PlatformSessionAdapterService},
-            store::{ContextStoreAdapter, ContextStoreAdapterService},
+            store::ContextStoreAdapterService,
         },
         model::{Context, Credentials, Endpoint, Principal, Secret, Tls},
     };
@@ -120,12 +120,12 @@ fn logged_in_contexts() -> ContextService {
 
     #[async_trait::async_trait]
     impl PlatformSessionAdapter for NoPlatform {
-        async fn whoami(&self, _: &Context, _: &Credentials) -> platform::Result<Principal> {
+        async fn whoami(&self, _: &Endpoint, _: &Credentials) -> platform::Result<Principal> {
             unreachable!("resolving a context does not log in")
         }
         async fn acting_account(
             &self,
-            _: &Context,
+            _: &Endpoint,
             _: &Credentials,
             _: &str,
         ) -> platform::Result<Option<String>> {
@@ -136,17 +136,13 @@ fn logged_in_contexts() -> ContextService {
     let root = tempfile::tempdir().unwrap().keep();
     let store = FileContextStoreImpl::new(&root);
     store
-        .put(&Context {
-            name: "eu2".into(),
-            description: None,
-            endpoint: Endpoint {
+        .put(&Context::login(
+            "eu2",
+            Endpoint {
                 address: "api.example.invalid:50051".into(),
                 tls: Tls::default(),
             },
-            roles: Default::default(),
-            assumed_role: None,
-            login: None,
-        })
+        ))
         .unwrap();
     let credentials = FileCredentialStoreImpl::new(&root);
     credentials

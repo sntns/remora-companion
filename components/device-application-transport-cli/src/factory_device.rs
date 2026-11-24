@@ -34,7 +34,9 @@ pub enum FactoryDeviceCommand {
     /// Show a manufactured device: its owner, labels and factory
     /// certificate.
     Show {
+        /// The device's name (its serial).
         name: String,
+        /// `table` for humans, `json` for scripts.
         #[arg(long, default_value = "table")]
         format: Format,
     },
@@ -44,11 +46,13 @@ pub enum FactoryDeviceCommand {
     /// it can no longer enroll. A device already enrolled stays.
     #[command(visible_alias = "rm")]
     Remove {
+        /// The devices' names (their serials).
         #[arg(required = true)]
         names: Vec<String>,
         /// Don't ask for confirmation.
         #[arg(short, long)]
-        force: bool,
+        #[arg(short_alias = 'f', alias = "force")]
+        yes: bool,
     },
 }
 
@@ -162,9 +166,9 @@ pub async fn run_factory_device(
             }
             Ok(())
         }
-        FactoryDeviceCommand::Remove { names, force } => {
+        FactoryDeviceCommand::Remove { names, yes } => {
             for name in names {
-                if !force && tui::interactive() {
+                if !yes && tui::interactive() {
                     let question = format!(
                         "Delete factory device {} and revoke its factory certificate? It can \
                          no longer enroll.",

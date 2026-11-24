@@ -1,21 +1,32 @@
 use super::error::Result;
-use crate::model::Context;
+use crate::model::{Contexts, Migration};
 
-/// Where contexts and the current-context pointer live. Synchronous, like
-/// this workspace's other local-file adapters: it is a few small files.
+/// Where the contexts and the current-context pointer live: one document,
+/// read and written whole, so that a change touching several contexts is
+/// one write. Synchronous, like this workspace's other local-file
+/// adapters: it is a small file.
 ///
-/// Names arrive already validated by the application layer, so an adapter
-/// may use them as path components.
+/// Names arrive already validated by the application layer.
 pub trait ContextStoreAdapter: Send + Sync {
-    /// Every stored context, sorted by name.
-    fn list(&self) -> Result<Vec<Context>>;
-    fn get(&self, name: &str) -> Result<Option<Context>>;
-    /// Creates or replaces `context`, keyed by its name.
-    fn put(&self, context: &Context) -> Result<()>;
-    /// Removes a context. Removing one that doesn't exist is not an error.
-    fn delete(&self, name: &str) -> Result<()>;
-    fn current(&self) -> Result<Option<String>>;
-    fn set_current(&self, name: Option<&str>) -> Result<()>;
+    /// Holds the store -- and the credential store beside it -- for one
+    /// read-modify-write: until the guard drops, no other process changes
+    /// either. Reading needs no lock: every write replaces a file whole.
+    fn lock(&self) -> Result<StoreLock>;
+    fn load(&self) -> Result<Contexts>;
+    fn save(&self, contexts: &Contexts) -> Result<()>;
+    /// Brings contexts stored in a previous format to the current one, or,
+    /// with `dry_run`, only says what that would change. `None` when they
+    /// already are. `load` does it too, silently: this is to say so.
+    fn migrate(&self, dry_run: bool) -> Result<Option<Migration>>;
+}
+
+/// Held while a change is being made: see [`ContextStoreAdapter::lock`].
+pub struct StoreLock(#[allow(dead_code)] Box<dyn Send>);
+
+impl StoreLock {
+    pub fn new(guard: impl Send + 'static) -> Self {
+        Self(Box::new(guard))
+    }
 }
 
 #[derive(Clone)]

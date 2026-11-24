@@ -16,6 +16,9 @@ pub trait DeviceServiceInterface: Send + Sync {
         with_labels: bool,
     ) -> Result<Vec<Device>>;
 
+    /// One of the account's devices, with its labels and when it enrolled.
+    async fn get(&self, over: Option<&ContextOverride>, name: &str) -> Result<Device>;
+
     /// Deletes a device from the platform -- its operational record, not
     /// its factory one: it is no longer one of the account's devices, and
     /// can no longer reach the platform as one, until it enrolls again.

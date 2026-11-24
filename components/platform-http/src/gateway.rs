@@ -1,11 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
-use error_stack::{Report, ResultExt};
+use error_stack::ResultExt;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, SEC_WEBSOCKET_PROTOCOL},
     Method, RequestBuilder, Response,
 };
-use rustls::{pki_types::pem::PemObject, ClientConfig, RootCertStore};
+use rustls::{ClientConfig, RootCertStore};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -75,7 +75,7 @@ impl Gateway {
         }
 
         let tls = if base.scheme() == "https" {
-            Some(Arc::new(tls_config(&connection.tls.authorities)?))
+            Some(Arc::new(tls_config()?))
         } else {
             None
         };
@@ -627,26 +627,15 @@ impl Status {
     }
 }
 
-/// The system's and Mozilla's roots, plus the context's own authorities.
-fn tls_config(authorities: &[String]) -> Result<ClientConfig> {
+/// The system's and Mozilla's roots: the platforms are certified by public
+/// authorities.
+fn tls_config() -> Result<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     // Best effort: a system store that is missing or partly unreadable
     // leaves the webpki roots.
     for certificate in rustls_native_certs::load_native_certs().certs {
         let _ = roots.add(certificate);
-    }
-    for authority in authorities {
-        let mut added = 0;
-        for certificate in rustls::pki_types::CertificateDer::pem_slice_iter(authority.as_bytes()) {
-            roots
-                .add(certificate.change_context(Error::Tls)?)
-                .change_context(Error::Tls)?;
-            added += 1;
-        }
-        if added == 0 {
-            return Err(Report::new(Error::Tls).attach("an authority holds no PEM certificate"));
-        }
     }
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     Ok(ClientConfig::builder_with_provider(provider)

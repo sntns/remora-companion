@@ -6,10 +6,7 @@
 
 use std::{process::Stdio, time::Duration};
 
-use remora_context::{
-    adapter::{credentials::CredentialStoreAdapter, store::ContextStoreAdapter},
-    model::Context,
-};
+use remora_context::{adapter::credentials::CredentialStoreAdapter, model::Context};
 use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
 use remora_platform_http::test_gateway::TestGateway;
 use serde::Deserialize;
@@ -57,10 +54,7 @@ async fn a_simulated_hub_claims_is_labelled_and_writes_its_identity() {
     let (gateway, resolved) = TestGateway::serve().await;
     let config = tempfile::tempdir().unwrap();
     FileContextStoreImpl::new(config.path())
-        .put(&Context {
-            name: "factory".into(),
-            ..resolved.context.clone()
-        })
+        .put(&Context::login("factory", resolved.endpoint.clone()))
         .unwrap();
     FileCredentialStoreImpl::new(config.path())
         .put("factory", &resolved.credentials)

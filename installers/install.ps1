@@ -27,18 +27,27 @@ if ($Release.StartsWith("@")) {
 $Output = & ([scriptblock]::Create((Invoke-RestMethod "$Base/$Binary-installer.ps1"))) 6>&1
 $Output | ForEach-Object { Write-Host $_ }
 
-if ($env:NO_COMPLETION -and $env:NO_COMPLETION -ne "0") { exit 0 }
 $Dir = ($Output | ForEach-Object { "$_" } | Where-Object { $_ -like "installing to *" } |
     Select-Object -Last 1) -replace "^installing to ", ""
 $Executable = Join-Path $Dir "$Binary.exe"
 if (-not ($Dir -and (Test-Path $Executable))) {
     $Command = Get-Command $Binary -ErrorAction SilentlyContinue
     if (-not $Command) {
-        Write-Warning "installed, but $Binary wasn't found to enable its completion: run ``$Binary completion powershell --install --file `$PROFILE``"
+        Write-Warning "installed, but $Binary wasn't found to migrate its contexts and enable its completion: run ``$Binary context migrate`` and ``$Binary completion powershell --install --file `$PROFILE``"
         exit 0
     }
     $Executable = $Command.Source
 }
+# Contexts a previous version stored, moved to the current format now
+# rather than on first use. Never fails the install: the binary does it
+# itself on first use otherwise.
+try {
+    & $Executable context migrate
+} catch {
+    Write-Warning "couldn't migrate $Binary contexts: $_"
+}
+
+if ($env:NO_COMPLETION -and $env:NO_COMPLETION -ne "0") { exit 0 }
 # Never fails the install: completion is a nicety.
 try {
     & $Executable completion powershell --install --file $PROFILE

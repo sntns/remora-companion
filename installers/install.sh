@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs rmra or remora-etcher from a remora-companion release, then
+# Installs rmra or remora-etcher from a remora-companion release, moves
+# the contexts a previous version stored to the current format, then
 # enables its shell completion:
 #
 #   curl --proto '=https' --tlsv1.2 -LsSf \
@@ -44,16 +45,22 @@ if [ "$status" != "0" ]; then
     exit "$status"
 fi
 
-if [ "${NO_COMPLETION:-0}" != "0" ]; then
-    exit 0
-fi
 dir="$(sed -n 's/^installing to //p' "$work/log" | tail -n 1)"
 if [ -n "$dir" ] && [ -x "$dir/$binary" ]; then
     executable="$dir/$binary"
 elif command -v "$binary" >/dev/null 2>&1; then
     executable="$(command -v "$binary")"
 else
-    echo "install.sh: installed, but $binary wasn't found to enable its completion: run \`$binary completion --install\`" >&2
+    echo "install.sh: installed, but $binary wasn't found to migrate its contexts and enable its completion: run \`$binary context migrate\` and \`$binary completion --install\`" >&2
+    exit 0
+fi
+
+# Contexts a previous version stored, moved to the current format now
+# rather than on first use. Never fails the install: the binary does it
+# itself on first use otherwise.
+"$executable" context migrate || true
+
+if [ "${NO_COMPLETION:-0}" != "0" ]; then
     exit 0
 fi
 # Never fails the install: completion is a nicety.

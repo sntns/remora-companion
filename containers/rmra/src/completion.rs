@@ -11,9 +11,7 @@ use std::time::Duration;
 use clap::CommandFactory;
 use remora_completion::{Cache, Candidate, Kind};
 use remora_context::model::ContextOverride;
-use remora_context_application_transport_cli::{
-    complete_contexts, complete_roles, context_on_command_line,
-};
+use remora_context_application_transport_cli::{complete_contexts, context_on_command_line};
 
 use crate::{
     bootstrap::{self, Services},
@@ -35,7 +33,6 @@ pub fn provide(kind: Kind) -> Vec<Candidate> {
         let over = context_on_command_line(Options::command());
         match kind {
             Kind::Context => complete_contexts(&services.context).await,
-            Kind::Role => complete_roles(&services.context, over.as_ref()).await,
             // No rmra argument takes a local disk.
             Kind::Disk => Vec::new(),
             remote => remote_values(&services, over.as_ref(), remote).await,
@@ -53,8 +50,8 @@ async fn remote_values(
         return Vec::new();
     };
     let scope = match &resolved.role {
-        Some(role) => format!("{}.as-{}", resolved.context.name, role.urn),
-        None => resolved.context.name.clone(),
+        Some(role) => format!("{}.as-{}", resolved.name, role.urn),
+        None => resolved.name.clone(),
     };
     let cache = Cache::new(PROGRAM, &scope, kind);
     if let Some(cached) = cache.fresh(FRESH) {
@@ -75,7 +72,7 @@ async fn fetch(
     kind: Kind,
 ) -> Option<Vec<Candidate>> {
     Some(match kind {
-        Kind::Context | Kind::Disk | Kind::Role => return None,
+        Kind::Context | Kind::Disk => return None,
         Kind::Device => services
             .device
             .list(over, &Default::default(), false)

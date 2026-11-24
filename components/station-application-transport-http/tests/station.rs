@@ -22,10 +22,10 @@ use remora_context::{
     adapter::{
         credentials::{CredentialStoreAdapter, CredentialStoreAdapterService},
         platform::PlatformSessionAdapterService,
-        store::{ContextStoreAdapter, ContextStoreAdapterService},
+        store::ContextStoreAdapterService,
     },
     application::ContextService,
-    model::ResolvedContext,
+    model::{Context, ResolvedContext},
 };
 use remora_context_adapter_file::{FileContextStoreImpl, FileCredentialStoreImpl};
 use remora_context_adapter_http::PlatformSessionAdapterImpl;
@@ -80,10 +80,12 @@ impl OperatorAdapter for RecordingOperator {
 fn contexts(resolved: &ResolvedContext) -> ContextService {
     let root = tempfile::tempdir().unwrap().keep();
     let store = FileContextStoreImpl::new(&root);
-    store.put(&resolved.context).unwrap();
+    store
+        .put(&Context::login(&resolved.name, resolved.endpoint.clone()))
+        .unwrap();
     let credentials = FileCredentialStoreImpl::new(&root);
     credentials
-        .put(&resolved.context.name, &resolved.credentials)
+        .put(&resolved.name, &resolved.credentials)
         .unwrap();
     ContextService::new(ContextControllerImpl::new(
         ContextStoreAdapterService::new(store),
@@ -787,7 +789,7 @@ async fn refusals_map_to_the_contract_status_codes() {
             hello.protocol,
             hello.environment.as_str()
         ),
-        ("remora-station", 1, resolved.context.name.as_str())
+        ("remora-station", 1, resolved.name.as_str())
     );
 
     assert_eq!(

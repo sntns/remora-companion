@@ -5,7 +5,7 @@ pub use local::{LocalCertificateRequest, LocalSshCertificate, LocalSshDevice, Of
 
 pub use ssh::{
     shell_quote, ExecInput, ExecOutcome, ExecRequest, PreparedSsh, ProxyCommandBuilder,
-    ProxyTarget, ScpRequest, SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
+    ProxyTarget, ScpRequest, SftpRequest, SshCertificate, SshCommand, SshKeys, SshRequest, SshRole,
 };
 
 /// What a channel profile resolved to on the device's side.

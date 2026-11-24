@@ -182,10 +182,12 @@ it streams a whole bundle alongside an upload.
   a private key. A secret written to disk is written 0600 (`write_private`,
   factory's credential writer) and, when temporary, removed on every path.
 - **Contexts are shared.** Both binaries mount the same context commands
-  (`login`, `logout`, `whoami`, `context …` incl. `rename` and `role`) on
-  the same store, and take `-c/--context` (`ContextArgs`) before the
-  command, never after. The role a context acts as is the context's
-  setting only — no command takes a role of its own.
+  (`login`, `logout`, `whoami`, `context …` incl. `rename`, `update` and
+  `migrate`) on the same store, and take `-c/--context` (`ContextArgs`)
+  before the command, never after. A context is a login (acting as
+  itself, never a role) or derived from one (its login assuming a role,
+  nothing copied): the role is the derived context's only — no command
+  takes a role of its own.
 - **Domain errors don't name a binary.** A domain error says what is wrong
   ("not logged in to context \"eu2\""); the context transport's
   `with_hint` attaches what to run, with the program name the composition

@@ -197,6 +197,107 @@ fn operand(word: &str) -> Result<Operand, String> {
     })
 }
 
+/// sftp(1)'s options that take a value (`-l` is a bandwidth limit, as for
+/// scp).
+const SFTP_OPTIONS_WITH_VALUE: &str = "BbcDFiJlPRSsX";
+
+/// sftp's arguments: options, and its one destination.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct SftpArguments {
+    pub options: Vec<String>,
+    pub user: Option<String>,
+    pub host: String,
+    /// The remote directory or file to start at, as written after `:`.
+    pub path: Option<String>,
+}
+
+/// Reads arguments the way sftp reads its own: options, then the one
+/// destination, `[user@]host[:path]`.
+///
+/// Refuses what would bypass the device's channel or the pinning, as for
+/// scp (`-J`, `-F`, `-S`, `-o ProxyCommand`/`ProxyJump`), plus `-D`, which
+/// would talk to a local sftp server instead of the device's.
+pub(crate) fn split_sftp(arguments: &[String]) -> Result<SftpArguments, String> {
+    let mut options = Vec::new();
+    let mut index = 0;
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        if argument == "--" {
+            index += 1;
+            break;
+        }
+        if argument.len() < 2 || !argument.starts_with('-') {
+            break;
+        }
+        let letters: Vec<char> = argument[1..].chars().collect();
+        for (position, &letter) in letters.iter().enumerate() {
+            match letter {
+                'J' => return Err("-J would reach the device some other way than its channel".into()),
+                'F' => {
+                    return Err(
+                        "-F would replace the configuration that pins the device's host and certificate"
+                            .into(),
+                    )
+                }
+                'S' => return Err("-S would replace the ssh program that carries the channel".into()),
+                'D' => return Err("-D would talk to a local sftp server, not the device's".into()),
+                _ => {}
+            }
+            if !SFTP_OPTIONS_WITH_VALUE.contains(letter) {
+                options.push(format!("-{letter}"));
+                continue;
+            }
+            let attached: String = letters[position + 1..].iter().collect();
+            let value = if attached.is_empty() {
+                index += 1;
+                arguments
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| format!("-{letter} needs a value"))?
+            } else {
+                attached
+            };
+            if letter == 'o' {
+                check_option(&value)?;
+            }
+            options.extend([format!("-{letter}"), value]);
+            break;
+        }
+        index += 1;
+    }
+    let destination = match &arguments[index..] {
+        [destination] => destination,
+        [] => return Err("sftp needs the device: [user@]DEVICE[:path]".into()),
+        [_, extra, ..] => {
+            return Err(format!(
+                "{extra}: sftp takes one destination, [user@]DEVICE[:path]"
+            ))
+        }
+    };
+    if destination.starts_with("sftp://") {
+        return Err(format!(
+            "{destination}: sftp:// URIs are not supported, write [user@]DEVICE[:path]"
+        ));
+    }
+    let (address, path) = match destination.split_once(':') {
+        Some((address, path)) => (address, Some(path.to_owned())),
+        None => (destination.as_str(), None),
+    };
+    let (user, host) = match address.rsplit_once('@') {
+        Some((user, host)) => (Some(user.to_owned()), host.to_owned()),
+        None => (None, address.to_owned()),
+    };
+    if host.is_empty() {
+        return Err(format!("{destination}: no device in it"));
+    }
+    Ok(SftpArguments {
+        options,
+        user,
+        host,
+        path,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +356,36 @@ mod tests {
     #[test]
     fn a_missing_value_is_an_error() {
         assert!(split(&args(&["-L"])).is_err());
+    }
+
+    #[test]
+    fn sftp_options_then_its_destination() {
+        let split = split_sftp(&args(&["-r", "-b", "batch", "root@DEV:/data"])).unwrap();
+        assert_eq!(split.options, args(&["-r", "-b", "batch"]));
+        assert_eq!(
+            (
+                split.user.as_deref(),
+                split.host.as_str(),
+                split.path.as_deref()
+            ),
+            (Some("root"), "DEV", Some("/data"))
+        );
+        let plain = split_sftp(&args(&["DEV"])).unwrap();
+        assert_eq!(
+            (plain.user, plain.host.as_str(), plain.path),
+            (None, "DEV", None)
+        );
+        for refused in [
+            &["-D", "/usr/lib/sftp-server", "DEV"][..],
+            &["-S", "/bin/sh", "DEV"],
+            &["-J", "jump", "DEV"],
+            &["-o", "ProxyCommand=nc x 22", "DEV"],
+            &[],
+            &["DEV", "OTHER"],
+            &["sftp://DEV/data"],
+        ] {
+            assert!(split_sftp(&args(refused)).is_err(), "{refused:?}");
+        }
     }
 
     #[test]

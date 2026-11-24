@@ -116,7 +116,7 @@ pub async fn run(
             if let Ok(context) = contexts.resolve(over).await {
                 from.push_str(&format!(
                     ", {}",
-                    tui::dim(format!("context {}", context.context.name))
+                    tui::dim(format!("context {}", context.name))
                 ));
             }
             lines.push(from);

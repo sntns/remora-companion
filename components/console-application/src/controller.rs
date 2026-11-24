@@ -43,7 +43,7 @@ mod tests {
         application::{self as channel, ChannelServiceInterface},
         model::{
             ExecOutcome, ExecRequest, LocalCertificateRequest, LocalSshCertificate,
-            OfflineLoginCode, PreparedSsh, ScpRequest, SshRequest, SshRole,
+            OfflineLoginCode, PreparedSsh, ScpRequest, SftpRequest, SshRequest, SshRole,
         },
     };
     use remora_console::{
@@ -139,6 +139,9 @@ mod tests {
             unimplemented!()
         }
         async fn prepare_scp(&self, _: ScpRequest) -> channel::Result<PreparedSsh> {
+            unimplemented!()
+        }
+        async fn prepare_sftp(&self, _: SftpRequest) -> channel::Result<PreparedSsh> {
             unimplemented!()
         }
         async fn run_ssh(&self, _: PreparedSsh) -> channel::Result<i32> {
