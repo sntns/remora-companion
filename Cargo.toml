@@ -233,11 +233,10 @@ vt100 = "0.16"
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
 
-# am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
-# aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes
-# an i8 array against a c_char field, which is unsigned there. One-line fix
-# upstream: https://github.com/christhomas/rust-fs-ext4/pull/36. Until that
-# merges and releases, use our fork's branch (also drops a sibling-checkout
-# path dep that only resolves in the upstream repo's own dev environment).
+# rust-fs-ext4 (github.com/christhomas/rust-fs-ext4) from our fork's branch:
+# upstream main, which carries the multi-group allocation fixes
+# (INODE_UNINIT/BLOCK_UNINIT, live group descriptors) remora-etcher's
+# image-cp-dir needs, released on crates.io only as far as 0.8.0 -- before
+# them. The branch adds a reproduction test of its own.
 [patch.crates-io]
-am-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }
+rust-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }

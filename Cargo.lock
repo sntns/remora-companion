@@ -24,24 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "am-fs-core"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c00781b62009bed91093230d1cd103d6155b264a574c661876b33154a4fad58"
-
-[[package]]
-name = "am-fs-ext4"
-version = "0.4.0"
-source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#32215e80364dfb945017d564060d55f6e63f96ed"
-dependencies = [
- "am-fs-core",
- "bitflags 2.13.1",
- "caseless",
- "crc32c",
- "unicode-normalization",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3888,12 +3870,12 @@ dependencies = [
 name = "remora-image"
 version = "0.26.0"
 dependencies = [
- "am-fs-ext4",
  "async-trait",
  "busybody",
  "error-stack",
  "fatfs",
  "remora-progress",
+ "rust-fs-ext4",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3903,10 +3885,10 @@ dependencies = [
 name = "remora-image-adapter-ext4"
 version = "0.26.0"
 dependencies = [
- "am-fs-ext4",
  "error-stack",
  "remora-block-io",
  "remora-image",
+ "rust-fs-ext4",
 ]
 
 [[package]]
@@ -4684,6 +4666,30 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rust-fs-core"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5565c39c9e33464399bb7ad1c2061d52d113ffacce8a23af919e69347969552"
+dependencies = [
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "rust-fs-ext4"
+version = "0.8.0"
+source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#e516c915547477aa545b1a440de068d953e32ab9"
+dependencies = [
+ "bitflags 2.13.1",
+ "caseless",
+ "crc32c",
+ "js-sys",
+ "rust-fs-core",
+ "serde",
+ "unicode-normalization",
 ]
 
 [[package]]

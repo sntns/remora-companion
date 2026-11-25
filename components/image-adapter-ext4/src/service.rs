@@ -15,7 +15,7 @@ use remora_image::adapter::{
 };
 
 /// A `BlockDevice` that's really just `[offset, offset + size)` of a larger
-/// file — a wic image's `data` partition, typically — so `am-fs-ext4` can
+/// file — a wic image's `data` partition, typically — so `rust-fs-ext4` can
 /// mount that range directly without us copying the partition out to its
 /// own temporary file first.
 struct WindowedFileDevice {
@@ -85,7 +85,7 @@ const EXT4_MAGIC: u16 = 0xEF53;
 const EXT4_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
 
 /// Read just enough of the superblock to check `needs_recovery`, without
-/// going through `am-fs-ext4` at all — see `Error::NeedsJournalRecovery`.
+/// going through `rust-fs-ext4` at all — see `Error::NeedsJournalRecovery`.
 fn refuse_if_needs_journal_recovery(
     image: &Path,
     partition_offset: u64,
@@ -138,7 +138,7 @@ fn mount_window(image: &Path, offset: u64, size: u64) -> std::result::Result<Fil
     refuse_if_needs_journal_recovery(image, offset)?;
 
     let dev = Arc::new(WindowedFileDevice::open_rw(image, offset, size)?);
-    let fs = Filesystem::mount(dev)?;
+    let mut fs = Filesystem::mount(dev)?;
     fs.replay_journal_if_dirty()?;
     Ok(fs)
 }
@@ -245,7 +245,7 @@ fn chown(
 
 /// Format `image` (created/truncated to exactly `size_bytes`) as a fresh
 /// ext4 filesystem — the "mkfs" half of `mkfs.ext4 -d CONFIG_DIR`, decomposed
-/// since `am-fs-ext4`'s `format_filesystem` has no populate-at-format option
+/// since `rust-fs-ext4`'s `format_filesystem` has no populate-at-format option
 /// (the populate half is `create_dir`/`write_file` above).
 fn format(
     image: &Path,

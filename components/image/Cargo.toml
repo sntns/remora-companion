@@ -18,7 +18,7 @@ serde.workspace = true
 # remora-flash's BlockMap: these are inert data, not infrastructure
 # access, and duplicating them would just be busywork with no isolation
 # benefit (the actual DI seam is the *port trait*, not the value shape).
-am-fs-ext4 = "0.4"
+rust-fs-ext4 = "0.8"
 # Without the default `chrono` feature (chrono is unmaintained,
 # RUSTSEC-2026-0543): remora-image-adapter-vfat dates the files it writes
 # through its own jiff TimeProvider instead.

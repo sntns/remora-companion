@@ -24,7 +24,7 @@ pub enum Error {
     /// needs replay" and a wrecked partition.
     #[error(
         "{}: filesystem needs journal recovery (needs_recovery flag set) — \
-         refusing to mount rather than risk am-fs-ext4 corrupting the superblock \
+         refusing to mount rather than risk rust-fs-ext4 corrupting the superblock \
          on this journal feature combination; run a real `fsck.ext4 -y` on it \
          (or let the device boot once and shut down cleanly) first",
         path.display()
