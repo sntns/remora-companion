@@ -18,7 +18,7 @@ tokio = { workspace = true, features = ["net", "time", "io-util"] }
 serde.workspace = true
 serde_json.workspace = true
 base64.workspace = true
-humantime.workspace = true
+remora-time = { path = "../time" }
 thiserror.workspace = true
 error-stack.workspace = true
 axum = { workspace = true, optional = true, features = ["ws"] }

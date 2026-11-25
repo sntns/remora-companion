@@ -15,7 +15,7 @@ clap.workspace = true
 error-stack.workspace = true
 thiserror.workspace = true
 serde_json.workspace = true
-humantime.workspace = true
+remora-time = { path = "../time" }
 # The terminal's width, for the charts, and the charts themselves.
 console.workspace = true
 ratatui.workspace = true

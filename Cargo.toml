@@ -69,6 +69,7 @@ members = [
     "components/claim-adapter-http",
     "components/platform-http",
     "components/tui",
+    "components/time",
     "components/completion",
     "components/context",
     "components/context-application",
@@ -166,7 +167,6 @@ serde_json = "1"
 # its durations and journal timestamps.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 yaml_serde = "0.10"
-humantime = "2"
 
 # HTTP client of remora-update-adapter-github (release feed, installers).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -233,11 +233,3 @@ vt100 = "0.16"
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
 
-# am-fs-ext4 (github.com/christhomas/rust-fs-ext4) fails to build at all on
-# aarch64 in every published version (0.3.2/0.3.3/0.4.0): capi.rs hardcodes
-# an i8 array against a c_char field, which is unsigned there. One-line fix
-# upstream: https://github.com/christhomas/rust-fs-ext4/pull/36. Until that
-# merges and releases, use our fork's branch (also drops a sibling-checkout
-# path dep that only resolves in the upstream repo's own dev environment).
-[patch.crates-io]
-am-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }

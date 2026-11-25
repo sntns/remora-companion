@@ -84,7 +84,7 @@ impl Document {
             .get("captured-at")
             .and_then(Value::as_str)
             .filter(|_| synced)
-            .and_then(|text| humantime::parse_rfc3339_weak(text).ok())
+            .and_then(remora_time::parse_time)
             .unwrap_or(at);
         Self {
             name: name.to_owned(),

@@ -3,7 +3,7 @@ use std::path::Path;
 use super::error::Result;
 
 /// DI seam over the ext4 backend: implemented by
-/// `remora-image-adapter-ext4` for the real `am-fs-ext4` wrapper, and
+/// `remora-image-adapter-ext4` for the real `rust-fs-ext4` wrapper, and
 /// by that same adapter for the boot-mode-agnostic `PartitionFilesystem`
 /// composite port used by the image application service. The image use
 /// case also injects this directly (not through `PartitionFilesystem`) for

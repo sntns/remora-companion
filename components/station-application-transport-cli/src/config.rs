@@ -92,7 +92,7 @@ fn invalid(at: impl Into<String>) -> Error {
 fn duration(key: &str, text: Option<String>, default: Duration) -> Result<Duration> {
     match text {
         None => Ok(default),
-        Some(text) => humantime::parse_duration(&text)
+        Some(text) => remora_time::parse_duration(&text)
             .change_context_lazy(|| invalid(format!("{key} {text:?}"))),
     }
 }

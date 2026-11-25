@@ -1,0 +1,10 @@
+[package]
+name = "remora-time"
+description = "Dates and durations as the CLIs and the platform read and write them: RFC 3339 times, `24h`-style durations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jiff.workspace = true

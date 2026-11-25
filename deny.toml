@@ -81,10 +81,6 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-    # See the `[patch.crates-io]` comment in Cargo.toml: am-fs-ext4 fails to
-    # build on aarch64 upstream; pinned to our fork's branch until the fix
-    # (https://github.com/christhomas/rust-fs-ext4/pull/36) merges and releases.
-    "https://github.com/sntns/rust-fs-ext4",
     # fatfs has no crates.io release with the features/fixes this project
     # needs; pinned to a specific upstream commit.
     "https://github.com/rafalh/rust-fatfs",

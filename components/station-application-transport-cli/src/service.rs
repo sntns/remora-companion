@@ -48,10 +48,10 @@ pub struct ServeArgs {
     #[arg(long, value_enum)]
     pub(crate) confirm: Option<Confirm>,
     /// Requeue the active hub after this long without a poll [default: 10s].
-    #[arg(long, value_parser = humantime::parse_duration)]
+    #[arg(long, value_parser = remora_time::parse_duration)]
     pub(crate) presence_timeout: Option<Duration>,
     /// How long each hook script may run [default: 60s].
-    #[arg(long, value_parser = humantime::parse_duration)]
+    #[arg(long, value_parser = remora_time::parse_duration)]
     pub(crate) hook_timeout: Option<Duration>,
     /// Accept BOARD, its serials allocated from POLICY (repeatable).
     #[arg(long = "serial-policy", value_name = "BOARD=POLICY")]
@@ -93,7 +93,7 @@ pub struct SimulateArgs {
     #[arg(long)]
     pub(crate) image_version: Option<String>,
     /// How often the hub polls, like a real one [default: 1s].
-    #[arg(long, hide = true, value_parser = humantime::parse_duration, default_value = "1s")]
+    #[arg(long, hide = true, value_parser = remora_time::parse_duration, default_value = "1s")]
     pub(crate) poll_interval: Duration,
 }
 
