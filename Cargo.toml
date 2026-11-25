@@ -234,9 +234,8 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
 
 # rust-fs-ext4 (github.com/christhomas/rust-fs-ext4) from our fork's branch:
-# upstream main, which carries the multi-group allocation fixes
-# (INODE_UNINIT/BLOCK_UNINIT, live group descriptors) remora-etcher's
-# image-cp-dir needs, released on crates.io only as far as 0.8.0 -- before
-# them. The branch adds a reproduction test of its own.
+# upstream main plus a reproduction test of the multi-group allocation bugs
+# image-cp-dir once hit (INODE_UNINIT/BLOCK_UNINIT). crates.io's 0.8.0 passes
+# that test too; the branch follows upstream main, well past it.
 [patch.crates-io]
 rust-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }
