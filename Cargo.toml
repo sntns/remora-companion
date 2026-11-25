@@ -233,9 +233,3 @@ vt100 = "0.16"
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }
 
-# rust-fs-ext4 (github.com/christhomas/rust-fs-ext4) from our fork's branch:
-# upstream main plus a reproduction test of the multi-group allocation bugs
-# image-cp-dir once hit (INODE_UNINIT/BLOCK_UNINIT). crates.io's 0.8.0 passes
-# that test too; the branch follows upstream main, well past it.
-[patch.crates-io]
-rust-fs-ext4 = { git = "https://github.com/sntns/rust-fs-ext4", branch = "remora-etcher" }

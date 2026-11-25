@@ -4670,25 +4670,21 @@ dependencies = [
 
 [[package]]
 name = "rust-fs-core"
-version = "0.5.1"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5565c39c9e33464399bb7ad1c2061d52d113ffacce8a23af919e69347969552"
-dependencies = [
- "serde",
- "sha2 0.10.9",
-]
+checksum = "c73c72ed61d0d97993e46d1e4e5df6cd6c21a4dc05085e3eb5887766e0a8e7fa"
 
 [[package]]
 name = "rust-fs-ext4"
 version = "0.8.0"
-source = "git+https://github.com/sntns/rust-fs-ext4?branch=remora-etcher#e516c915547477aa545b1a440de068d953e32ab9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "935fd35ddcd26853677042ffff62084b65273cf978031e2905a081af094d97a0"
 dependencies = [
  "bitflags 2.13.1",
  "caseless",
  "crc32c",
  "js-sys",
  "rust-fs-core",
- "serde",
  "unicode-normalization",
 ]
 
